@@ -4,8 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '_staging/SEO-Skills-ready-to-push.zip'
-      - '.github/workflows/bootstrap-skills.yml'
+      - '_staging/READY'
 
 permissions:
   contents: write
@@ -15,11 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unpack repository payload
+      - name: Rebuild and unpack repository payload
         run: |
+          cat _staging/payload.part.* > /tmp/seo-skills.b64
+          base64 -d /tmp/seo-skills.b64 > /tmp/seo-skills.zip
           rm -rf /tmp/seo-skills-bootstrap
           mkdir -p /tmp/seo-skills-bootstrap
-          unzip -q _staging/SEO-Skills-ready-to-push.zip -d /tmp/seo-skills-bootstrap
+          unzip -q /tmp/seo-skills.zip -d /tmp/seo-skills-bootstrap
           cp -a /tmp/seo-skills-bootstrap/SEO-Skills/. .
           rm -rf _staging
           rm -f .github/workflows/bootstrap-skills.yml
