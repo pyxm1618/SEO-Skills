@@ -27,3 +27,5 @@ cd ../seo-keyword-selection && pytest -q
 ```
 
 The keyword-selection skill consumes root handoffs from `keyword-root-library`; it does not duplicate the root library asset.
+
+<!-- bootstrap-trigger -->
