@@ -3,6 +3,8 @@ name: Bootstrap SEO Skills
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
@@ -12,10 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Expand verified repository payload
         shell: bash
         run: |
           set -euo pipefail
+          test -f payload.zip
           rm -rf .bootstrap
           mkdir .bootstrap
           unzip -q payload.zip -d .bootstrap
