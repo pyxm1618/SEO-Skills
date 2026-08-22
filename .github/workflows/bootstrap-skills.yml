@@ -1,0 +1,35 @@
+name: Bootstrap SEO Skills
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '_staging/SEO-Skills-ready-to-push.zip'
+      - '.github/workflows/bootstrap-skills.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack repository payload
+        run: |
+          rm -rf /tmp/seo-skills-bootstrap
+          mkdir -p /tmp/seo-skills-bootstrap
+          unzip -q _staging/SEO-Skills-ready-to-push.zip -d /tmp/seo-skills-bootstrap
+          cp -a /tmp/seo-skills-bootstrap/SEO-Skills/. .
+          rm -rf _staging
+          rm -f .github/workflows/bootstrap-skills.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+      - name: Commit final repository contents
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: add keyword research skills'
+          git push
