@@ -1,0 +1,28 @@
+name: Bootstrap SEO Skills
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand verified repository payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .bootstrap
+          mkdir .bootstrap
+          unzip -q payload.zip -d .bootstrap
+          cp -a .bootstrap/SEO-Skills/. .
+          rm -rf .bootstrap payload.zip .github/workflows/bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add keyword research skills"
+          git push origin HEAD:main
