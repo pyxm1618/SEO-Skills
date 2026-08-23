@@ -30,6 +30,8 @@ Read before execution:
 
 Never add signals with different units or incomparable source contexts. Trends indexes, search volume, mentions, and other units remain separate series.
 
+If a real data source is unavailable, say so and leave the relevant field `unknown`. Do not replace a missing search-demand time series with supply-side page counts, product launches, article frequency, or general web mentions and then call the result confirmed search growth.
+
 ## Workflow
 
 Validate observations:
@@ -56,6 +58,36 @@ Route without making final SEO decisions:
 python scripts/route_candidates.py --input classified.json --format json
 ```
 
+When running interactively without normalized files, apply the same contracts conceptually. Do not loosen the state machine or routing rules just because evidence was gathered conversationally or from web research.
+
+## Canonical Runtime Contract
+
+Use canonical enums exactly in structured output. Do not invent aliases such as `candidate`, `strong candidate`, `reject`, `possible emerging`, or mixed labels such as `typo / modifier shift` in canonical fields.
+
+`signal_type` must be exactly one of `net_new`, `breakout`, `emerging_variant`, or `unknown`.
+
+`variant_subtype` must be exactly one of `new_expression`, `typo`, `modifier_shift`, or `unknown`.
+
+`status` must be exactly one of `new_signal`, `watch`, `emerging`, `breakout`, `mature`, `noise`, or `insufficient_evidence`.
+
+`route` must be exactly one of `selection_handoff`, `root_candidate_handoff`, `new_root_watchlist`, `monitor_only`, or `no_handoff`.
+
+Human-readable commentary may describe strength or hypotheses, but it must not replace or redefine these canonical fields.
+
+## Confirmed Classification vs Hypothesis
+
+A hypothesis is not a confirmed classification.
+
+If a query looks like it may be accelerating because product launches, new pages, community discussion, or category formation are increasing, but comparable temporal search-demand evidence is missing, record a hypothesis such as `possible_breakout` in commentary/evidence and keep `signal_type=unknown` unless another signal type is actually evidenced.
+
+If comparable historical baseline plus persistent recent growth is not available, the skill must not emit `signal_type=breakout`.
+
+If the evidence required by `classification-rules.md` is not established, the skill must not emit `status=emerging` or `status=breakout` merely because the term looks promising, commercially interesting, fresh, widely discussed, or under-supplied.
+
+Use `new_signal`, `watch`, or `insufficient_evidence` according to the evidence actually available. In particular, supply-side freshness alone cannot confirm temporal search-demand growth.
+
+`emerging_variant` requires both a semantic relationship to an existing expression and real temporal evidence for the new expression. A plausible wording shift without temporal evidence remains `signal_type=unknown` with a variant hypothesis in commentary.
+
 ## Types and States
 
 Signal types: `net_new`, `breakout`, `emerging_variant`. Variant subtypes: `new_expression`, `typo`, `modifier_shift`.
@@ -63,6 +95,28 @@ Signal types: `net_new`, `breakout`, `emerging_variant`. Variant subtypes: `new_
 States: `new_signal`, `watch`, `emerging`, `breakout`, `mature`, `noise`, `insufficient_evidence`.
 
 Every classification returns a reason, evidence used, remaining unknown fields, confidence, and explicit state-change metadata when a previous state is supplied. Anchor events may strengthen interpretation but are never mandatory.
+
+## Routing Discipline
+
+Only `status in {emerging, breakout}` may produce `selection_handoff`, and only when the candidate maps to an existing valid root as required by `routing-rules.md`.
+
+`new_signal` and `watch` must remain `monitor_only` when an existing root is known. They are not sent to `seo-keyword-selection` just because further keyword research would be useful.
+
+`root_candidate_handoff` requires both confirmed `status in {emerging, breakout}` and a reviewable `root_candidate_hypothesis`. Otherwise retain the item in `new_root_watchlist`.
+
+`mature`, `noise`, and `insufficient_evidence` produce `no_handoff` unless the routing rules explicitly preserve an unresolved root watch case.
+
+Do not recommend a downstream route in prose that contradicts the canonical `route` field.
+
+## Interactive Output
+
+For an interactive scan, prefer a compact table or structured records. For every candidate expose at least:
+
+`keyword | signal_type | variant_subtype | status | first_observed_at | growth_rate | persistence | source_count | volume | kd | cpc | intitle_results | metric_status | metric_compatibility_status | kgr_compatibility_status | kgr | root_relation | route`
+
+Use `unknown` when a field is not supported by real evidence. Do not omit an unknown field merely to make the candidate look more complete.
+
+After the records, separate candidates into confirmed `emerging`/`breakout`, `watch`, and `insufficient_evidence`. Do not create a separate informal bucket named `candidate`.
 
 ## Data Sources
 
