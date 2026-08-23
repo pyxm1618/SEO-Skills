@@ -27,6 +27,12 @@ SELECTION_FIELDS = (
     "cpc",
     "intitle_results",
     "metric_status",
+    "metric_provenance",
+    "metric_compatibility_status",
+    "volume_metric",
+    "kd_metric",
+    "cpc_metric",
+    "intitle_results_metric",
     "status",
     "confidence",
 )
@@ -56,6 +62,17 @@ def selection_handoff(candidate: dict[str, Any]) -> dict[str, Any]:
     return handoff
 
 
+def watchlist_handoff(candidate: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "keyword": str(candidate.get("keyword") or "").strip(),
+        "signal_type": candidate.get("signal_type"),
+        "status": candidate.get("status"),
+        "first_observed_at": candidate.get("first_observed_at"),
+        "source_evidence": candidate.get("source_evidence"),
+        "root_watch_reason": reason,
+    }
+
+
 def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     keyword = str(candidate.get("keyword") or "").strip()
     status = candidate.get("status")
@@ -80,31 +97,24 @@ def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 
     if relation == "unresolved":
         result["route"] = "new_root_watchlist"
-        result["handoff"] = {
-            "keyword": keyword,
-            "signal_type": candidate.get("signal_type"),
-            "status": status,
-            "first_observed_at": candidate.get("first_observed_at"),
-            "source_evidence": candidate.get("source_evidence"),
-            "root_watch_reason": candidate.get("root_watch_reason"),
-        }
+        result["handoff"] = watchlist_handoff(candidate, candidate.get("root_watch_reason"))
         result["route_reason"] = "No stable root relationship is established; retain the candidate for root watch."
         return result
 
     if relation == "root_candidate":
+        if status not in CONFIRMED_STATUSES:
+            result["route"] = "new_root_watchlist"
+            result["handoff"] = watchlist_handoff(candidate, "root_candidate requires confirmed emerging or breakout status")
+            result["route_reason"] = "Root-candidate handoff is deferred until temporal evidence reaches emerging or breakout."
+            return result
+
         hypothesis = candidate.get("root_candidate_hypothesis")
         if is_missing(hypothesis):
             result["route"] = "new_root_watchlist"
-            result["handoff"] = {
-                "keyword": keyword,
-                "signal_type": candidate.get("signal_type"),
-                "status": status,
-                "first_observed_at": candidate.get("first_observed_at"),
-                "source_evidence": candidate.get("source_evidence"),
-                "root_watch_reason": "root_candidate annotation lacks a reviewable hypothesis",
-            }
+            result["handoff"] = watchlist_handoff(candidate, "root_candidate annotation lacks a reviewable hypothesis")
             result["route_reason"] = "Root-candidate routing requires an explicit reviewable cluster hypothesis."
             return result
+
         result["route"] = "root_candidate_handoff"
         result["handoff"] = {
             "keyword": keyword,
@@ -115,7 +125,7 @@ def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
             "root_candidate_hypothesis": hypothesis,
             "related_keywords": candidate.get("related_keywords"),
         }
-        result["route_reason"] = "An explicit stable-demand-family hypothesis is ready for keyword-root-library review."
+        result["route_reason"] = "A confirmed temporal state and explicit stable-demand-family hypothesis are ready for keyword-root-library review."
         return result
 
     if relation == "existing_root":
@@ -131,14 +141,7 @@ def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         return result
 
     result["route"] = "new_root_watchlist"
-    result["handoff"] = {
-        "keyword": keyword,
-        "signal_type": candidate.get("signal_type"),
-        "status": status,
-        "first_observed_at": candidate.get("first_observed_at"),
-        "source_evidence": candidate.get("source_evidence"),
-        "root_watch_reason": f"unknown root_relation={relation}",
-    }
+    result["handoff"] = watchlist_handoff(candidate, f"unknown root_relation={relation}")
     result["route_reason"] = "Unknown root relationship is retained for review rather than guessed."
     return result
 

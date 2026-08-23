@@ -1,0 +1,30 @@
+name: Emerging Remediation Validation
+
+on:
+  push:
+    branches:
+      - fix/emerging-monitor-audit-remediation
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+      - name: keyword-root-library
+        run: python3 -m pytest skills/keyword-root-library/tests/test_root_library.py -q
+      - name: seo-keyword-selection
+        run: python3 -m pytest skills/seo-keyword-selection/tests/test_selection.py -q
+      - name: emerging-keyword-monitor
+        run: python3 -m pytest skills/emerging-keyword-monitor/tests -q
+      - name: repository-wide
+        run: python3 -m pytest -q
+      - name: compileall
+        run: python3 -m compileall -q skills

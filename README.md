@@ -63,5 +63,6 @@ skills/
 仅在修改 Skill 实现时需要：
 
 ```bash
+python3 -m pytest skills/seo-page-keyword-mapping/tests -q
 python3 -m pytest -q
 ```

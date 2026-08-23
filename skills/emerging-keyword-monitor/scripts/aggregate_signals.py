@@ -7,7 +7,7 @@ import argparse
 import csv
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +22,6 @@ CONTEXT_FIELDS = (
     "emd_status",
     "durable_search_intent",
     "repeatable_page_or_product_fit",
-    "trend_status",
 )
 
 
@@ -84,12 +83,110 @@ def persistence_stats(values: list[float]) -> tuple[float | None, int, int]:
 
 
 def window_values(points: list[tuple[datetime, float]], as_of: datetime, min_days_ago: int, max_days_ago: int) -> list[float]:
-    values: list[float] = []
-    for observed, value in points:
-        days_ago = (as_of.date() - observed.date()).days
-        if min_days_ago <= days_ago <= max_days_ago:
-            values.append(value)
-    return values
+    return [
+        value
+        for observed, value in points
+        if min_days_ago <= (as_of.date() - observed.date()).days <= max_days_ago
+    ]
+
+
+def growth_stats(recent: float | None, baseline: float | None) -> tuple[float | None, str]:
+    if recent is None or baseline is None:
+        return None, "unknown"
+    if baseline > 0:
+        return (recent - baseline) / baseline, "calculated"
+    if baseline == 0 and recent > 0:
+        return None, "from_observed_zero_baseline"
+    if baseline == 0 and recent == 0:
+        return 0.0, "calculated"
+    return None, "unknown"
+
+
+def latest_non_missing(rows: list[dict[str, Any]], field: str) -> Any:
+    ordered = sorted(rows, key=lambda row: row_dt(row) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    for row in ordered:
+        value = row.get(field)
+        if not is_missing(value):
+            return value
+    return None
+
+
+def latest_metric_record(rows: list[dict[str, Any]], field: str) -> dict[str, Any] | None:
+    ordered = sorted(rows, key=lambda row: row_dt(row) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    for row in ordered:
+        value = row.get(field)
+        if is_missing(value):
+            continue
+        return {
+            "value": value,
+            "source": row.get("source"),
+            "metric_source": row.get("metric_source") or row.get("source"),
+            "metric_database": row.get("metric_database"),
+            "country": row.get("country"),
+            "observed_at": row.get("observed_at"),
+            "source_type": row.get("source_type"),
+            "source_url": row.get("source_url"),
+        }
+    return None
+
+
+def metric_provider_context(record: dict[str, Any] | None) -> tuple[Any, Any, Any] | None:
+    if not record:
+        return None
+    return (
+        record.get("metric_source") or record.get("source"),
+        record.get("metric_database"),
+        record.get("country"),
+    )
+
+
+def metric_market_compatibility(records: dict[str, dict[str, Any] | None]) -> str:
+    present = [record for record in records.values() if record is not None]
+    if len(present) < 2:
+        return "incomplete"
+    countries = {record.get("country") for record in present if not is_missing(record.get("country"))}
+    if len(countries) != 1 or any(is_missing(record.get("country")) for record in present):
+        return "incompatible" if len(countries) > 1 else "incomplete"
+    by_provider: dict[str, set[str]] = defaultdict(set)
+    for record in present:
+        provider = str(record.get("metric_source") or record.get("source") or "")
+        database = record.get("metric_database")
+        if provider and not is_missing(database):
+            by_provider[provider].add(str(database))
+    if any(len(databases) > 1 for databases in by_provider.values()):
+        return "incompatible"
+    return "compatible"
+
+
+def core_metric_status(records: dict[str, dict[str, Any] | None]) -> str:
+    core = [records.get(field) for field in ("volume", "kd", "cpc")]
+    if any(record is None for record in core):
+        return "incomplete"
+    contexts = [metric_provider_context(record) for record in core]
+    return "complete" if len(set(contexts)) == 1 and contexts[0] is not None else "incompatible"
+
+
+def series_freshness(points: list[tuple[datetime, float]], as_of: datetime) -> tuple[int | None, int, float | None, int | None]:
+    if not points:
+        return None, 0, None, None
+    dates = sorted({observed.date() for observed, _ in points})
+    latest_age = (as_of.date() - dates[-1]).days
+    span_days = (dates[-1] - dates[0]).days + 1
+    coverage_ratio = len(dates) / span_days if span_days > 0 else None
+    gaps = [(right - left).days for left, right in zip(dates, dates[1:])]
+    max_gap = max(gaps) if gaps else 0
+    return latest_age, len(dates), coverage_ratio, max_gap
+
+
+def positive_windows(points: list[tuple[datetime, float]], as_of: datetime, recent_days: int) -> list[str]:
+    buckets = [(30, 89, "days_30_89"), (90, 364, "days_90_364")]
+    if recent_days == 7:
+        buckets.insert(0, (7, 29, "days_7_29"))
+    labels: list[str] = []
+    for start, end, label in buckets:
+        if any(value > 0 for value in window_values(points, as_of, start, end)):
+            labels.append(label)
+    return labels
 
 
 def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
@@ -99,35 +196,35 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
         if row_dt(row) is not None and row.get("signal_value") is not None
     )
     points = [(dt, value) for dt, value in points if dt is not None]
+
     recent_7 = window_values(points, as_of, 0, 6)
     previous_7 = window_values(points, as_of, 7, 13)
     prior_7 = window_values(points, as_of, 14, 20)
     recent_30 = window_values(points, as_of, 0, 29)
     previous_30 = window_values(points, as_of, 30, 59)
-    baseline_90 = window_values(points, as_of, 7, 89)
+    baseline_7_values = window_values(points, as_of, 7, 89)
+    baseline_30_values = window_values(points, as_of, 30, 89)
     baseline_12m = window_values(points, as_of, 7, 364)
-
-    # Novelty history must end before the evidence window used to confirm persistence.
-    # Otherwise the newly positive observations contaminate their own historical baseline.
-    novelty_baseline_7d_values = window_values(points, as_of, 7, 89)
-    novelty_baseline_30d_values = window_values(points, as_of, 30, 89)
 
     recent_7_mean = mean(recent_7)
     previous_7_mean = mean(previous_7)
     prior_7_mean = mean(prior_7)
-    baseline = mean(baseline_90)
-    recent = recent_7_mean if recent_7_mean is not None else mean(recent_30)
-    growth = None
-    growth_status = "unknown"
-    if recent is not None and baseline is not None:
-        if baseline > 0:
-            growth = (recent - baseline) / baseline
-            growth_status = "calculated"
-        elif baseline == 0 and recent > 0:
-            growth_status = "from_observed_zero_baseline"
-        elif baseline == 0 and recent == 0:
-            growth = 0.0
-            growth_status = "calculated"
+    recent_30_mean = mean(recent_30)
+    baseline_7 = mean(baseline_7_values)
+    baseline_30 = mean(baseline_30_values)
+    growth_7, growth_status_7 = growth_stats(recent_7_mean, baseline_7)
+    growth_30, growth_status_30 = growth_stats(recent_30_mean, baseline_30)
+
+    if recent_7_mean is not None:
+        recent = recent_7_mean
+        baseline = baseline_7
+        growth = growth_7
+        growth_status = growth_status_7
+    else:
+        recent = recent_30_mean
+        baseline = baseline_30
+        growth = growth_30
+        growth_status = growth_status_30
 
     acceleration = None
     if recent_7_mean is not None and previous_7_mean is not None and prior_7_mean is not None:
@@ -135,17 +232,22 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
 
     persistence_7d, recent_7d_observations, positive_7d_observations = persistence_stats(recent_7)
     persistence_30d, recent_30d_observations, positive_30d_observations = persistence_stats(recent_30)
-
-    # Preserve the historical short-window default in aggregation. Classification may
-    # select the 30-day evidence when the 7-day window is too sparse for its threshold.
     persistence_values = recent_7 if recent_7 else recent_30
     persistence_window = "recent_7d" if recent_7 else ("recent_30d" if recent_30 else None)
     persistence = persistence_7d if recent_7 else persistence_30d
     positive_count = positive_7d_observations if recent_7 else positive_30d_observations
 
+    history_7 = window_values(points, as_of, 7, 364)
+    history_30 = window_values(points, as_of, 30, 364)
+    historical_positive_7 = sum(value > 0 for value in history_7)
+    historical_positive_30 = sum(value > 0 for value in history_30)
+
     provenance_status = "verified" if rows and all(r.get("provenance_status") == "verified" for r in rows) else "incomplete"
     first_dt = min((dt for dt, _ in points), default=None)
     last_dt = max((dt for dt, _ in points), default=None)
+    latest_age, distinct_days, coverage_ratio, max_gap = series_freshness(points, as_of)
+    trend_status = latest_non_missing(rows, "trend_status")
+
     return {
         "source": key[0],
         "source_type": key[1],
@@ -156,24 +258,43 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
         "observation_count": len(points),
         "first_observed_at": first_dt.date().isoformat() if first_dt else None,
         "last_observed_at": last_dt.date().isoformat() if last_dt else None,
+        "latest_observation_age_days": latest_age,
+        "distinct_observation_days": distinct_days,
+        "coverage_ratio": coverage_ratio,
+        "max_observation_gap_days": max_gap,
+        "trend_status": trend_status,
         "recent_7d": recent_7_mean,
         "previous_7d": previous_7_mean,
-        "recent_30d": mean(recent_30),
+        "recent_30d": recent_30_mean,
         "previous_30d": mean(previous_30),
-        "baseline_90d": baseline,
+        "baseline_90d": baseline_7,
         "baseline_12m": mean(baseline_12m),
+        "baseline_7d": baseline_7,
+        "baseline_7d_observations": len(baseline_7_values),
+        "baseline_30d": baseline_30,
+        "baseline_30d_observations": len(baseline_30_values),
         "baseline_signal": baseline,
-        "baseline_observations": len(baseline_90),
-        "novelty_baseline_7d": mean(novelty_baseline_7d_values),
-        "novelty_baseline_7d_observations": len(novelty_baseline_7d_values),
-        "novelty_baseline_30d": mean(novelty_baseline_30d_values),
-        "novelty_baseline_30d_observations": len(novelty_baseline_30d_values),
+        "baseline_observations": len(baseline_7_values) if recent_7_mean is not None else len(baseline_30_values),
+        "novelty_baseline_7d": baseline_7,
+        "novelty_baseline_7d_observations": len(baseline_7_values),
+        "novelty_baseline_30d": baseline_30,
+        "novelty_baseline_30d_observations": len(baseline_30_values),
+        "historical_positive_seen_7d": historical_positive_7 > 0,
+        "historical_positive_observations_7d": historical_positive_7,
+        "historical_positive_windows_7d": positive_windows(points, as_of, 7),
+        "historical_positive_seen_30d": historical_positive_30 > 0,
+        "historical_positive_observations_30d": historical_positive_30,
+        "historical_positive_windows_30d": positive_windows(points, as_of, 30),
         "recent_signal": recent,
         "recent_observations": len(recent_7) if recent_7 else len(recent_30),
         "recent_7d_observations": recent_7d_observations,
         "recent_30d_observations": recent_30d_observations,
         "growth_rate": growth,
         "growth_status": growth_status,
+        "growth_rate_7d": growth_7,
+        "growth_status_7d": growth_status_7,
+        "growth_rate_30d": growth_30,
+        "growth_status_30d": growth_status_30,
         "acceleration": acceleration,
         "persistence": persistence,
         "persistence_window": persistence_window,
@@ -189,15 +310,6 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
     }
 
 
-def latest_non_missing(rows: list[dict[str, Any]], field: str) -> Any:
-    ordered = sorted(rows, key=lambda row: row_dt(row) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    for row in ordered:
-        value = row.get(field)
-        if not is_missing(value):
-            return value
-    return None
-
-
 def choose_primary(series: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not series:
         return None
@@ -211,13 +323,20 @@ def choose_primary(series: list[dict[str, Any]]) -> dict[str, Any] | None:
     return sorted(series, key=sort_key)[0]
 
 
+def supplied_first_observed(rows: list[dict[str, Any]]) -> list[datetime]:
+    values: list[datetime] = []
+    for row in rows:
+        parsed, error = parse_iso(row.get("first_observed_at"))
+        if not error and parsed is not None:
+            values.append(parsed)
+    return values
+
+
 def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
     validated = validate_rows(rows, as_of)
     invalid_rows = [row for row in validated if row["validation_status"] == "invalid"]
     valid_rows = [row for row in validated if row["validation_status"] == "valid" and canonical_keyword(row.get("keyword"))]
 
-    # Preserve audit rows but count one logical source snapshot only once. Presentation
-    # URL variants (for example Google Trends language parameters) are not new evidence.
     seen: set[str] = set()
     unique_rows: list[dict[str, Any]] = []
     duplicate_observation_count = 0
@@ -248,14 +367,17 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
         primary = choose_primary(evidence)
 
         observed_dates = [row_dt(row) for row in keyword_rows if row_dt(row) is not None]
-        first_dt = min(observed_dates, default=None)
-        last_dt = max(observed_dates, default=None)
+        first_candidates = [dt for dt in observed_dates if dt is not None] + supplied_first_observed(keyword_rows)
+        first_dt = min(first_candidates, default=None)
+        last_dt = max((dt for dt in observed_dates if dt is not None), default=None)
         root_ids = sorted({str(row.get("root_id")).strip() for row in keyword_rows if not is_missing(row.get("root_id"))})
         sources = {str(row.get("source")).strip() for row in keyword_rows if not is_missing(row.get("source"))}
 
-        metrics = {field: latest_non_missing(keyword_all_valid, field) for field in METRIC_FIELDS}
+        metric_provenance = {field: latest_metric_record(keyword_all_valid, field) for field in METRIC_FIELDS}
+        metrics = {field: metric_provenance[field]["value"] if metric_provenance[field] else None for field in METRIC_FIELDS}
+        metric_compatibility_status = metric_market_compatibility(metric_provenance)
+        metric_status = core_metric_status(metric_provenance)
         context = {field: latest_non_missing(keyword_all_valid, field) for field in CONTEXT_FIELDS}
-        metric_status = "complete" if all(metrics[field] is not None for field in ("volume", "kd", "cpc")) else "incomplete"
 
         anchor_event = latest_non_missing(keyword_all_valid, "anchor_event")
         anchor_event_date = latest_non_missing(keyword_all_valid, "anchor_event_date")
@@ -276,12 +398,22 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "persistence": primary.get("persistence") if primary else None,
             "persistence_window": primary.get("persistence_window") if primary else None,
             "persistence_observations": primary.get("persistence_observations", 0) if primary else 0,
+            "latest_observation_age_days": primary.get("latest_observation_age_days") if primary else None,
+            "distinct_observation_days": primary.get("distinct_observation_days", 0) if primary else 0,
+            "coverage_ratio": primary.get("coverage_ratio") if primary else None,
+            "max_observation_gap_days": primary.get("max_observation_gap_days") if primary else None,
             "source_count": len(sources),
             "source_evidence": evidence,
             "primary_series": primary,
             "anchor_event": anchor_event,
             "anchor_event_date": anchor_event_date,
             "anchor_event_source": anchor_event_source,
+            "metric_provenance": metric_provenance,
+            "metric_compatibility_status": metric_compatibility_status,
+            "volume_metric": metric_provenance["volume"],
+            "kd_metric": metric_provenance["kd"],
+            "cpc_metric": metric_provenance["cpc"],
+            "intitle_results_metric": metric_provenance["intitle_results"],
             "volume": metrics["volume"],
             "kd": metrics["kd"],
             "cpc": metrics["cpc"],
@@ -292,7 +424,7 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "emd_status": context["emd_status"],
             "durable_search_intent": context["durable_search_intent"],
             "repeatable_page_or_product_fit": context["repeatable_page_or_product_fit"],
-            "trend_status": context["trend_status"],
+            "trend_status": primary.get("trend_status") if primary else None,
             "metric_status": metric_status,
             "observed_at": last_dt.date().isoformat() if last_dt else None,
             "unique_observation_count": len(keyword_rows),

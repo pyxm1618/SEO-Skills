@@ -18,7 +18,8 @@ def obs(**kw):
     r.update(kw); return r
 
 def cand(**kw):
-    r={'keyword':'candidate query','root_id':'candidate','first_observed_at':'2026-07-01','estimated_birth_window':None,'age_days':53,'baseline_signal':0.0,'recent_signal':30.0,'growth_rate':None,'growth_status':'from_observed_zero_baseline','acceleration':None,'persistence':1.0,'persistence_observations':4,'source_count':2,'source_evidence':[{'source':'google_trends','provenance_status':'verified'},{'source':'semrush_export','provenance_status':'verified'}],'primary_series':{'source':'google_trends','provenance_status':'verified','baseline_observations':3,'recent_observations':4,'observation_count':7,'peak_signal':30.0,'latest_signal':30.0},'anchor_event':None,'anchor_event_date':None,'anchor_event_source':None,'volume':None,'kd':None,'cpc':None,'intitle_results':None,'metric_status':'incomplete','observed_at':'2026-08-23'}
+    primary={'source':'google_trends','provenance_status':'verified','baseline_observations':3,'recent_observations':4,'observation_count':7,'peak_signal':30.0,'latest_signal':30.0,'latest_observation_age_days':1,'distinct_observation_days':7,'coverage_ratio':1.0,'max_observation_gap_days':1,'persistence_window':'recent_7d','persistence_7d':1.0,'recent_7d_observations':4,'recent_7d':30.0,'baseline_7d':0.0,'baseline_7d_observations':3,'growth_rate_7d':None,'growth_status_7d':'from_observed_zero_baseline','novelty_baseline_7d':0.0,'novelty_baseline_7d_observations':3,'historical_positive_seen_7d':False,'historical_positive_observations_7d':0,'historical_positive_windows_7d':[]}
+    r={'keyword':'candidate query','root_id':'candidate','first_observed_at':'2026-07-01','estimated_birth_window':None,'age_days':53,'baseline_signal':0.0,'recent_signal':30.0,'growth_rate':None,'growth_status':'from_observed_zero_baseline','acceleration':None,'persistence':1.0,'persistence_observations':4,'latest_observation_age_days':1,'distinct_observation_days':7,'coverage_ratio':1.0,'max_observation_gap_days':1,'source_count':2,'source_evidence':[{'source':'google_trends','provenance_status':'verified'},{'source':'semrush_export','provenance_status':'verified'}],'primary_series':primary,'anchor_event':None,'anchor_event_date':None,'anchor_event_source':None,'volume':None,'kd':None,'cpc':None,'intitle_results':None,'metric_status':'incomplete','metric_provenance':{},'metric_compatibility_status':'incomplete','observed_at':'2026-08-23'}
     r.update(kw); return r
 
 def classify(tmp,row): return run(CLASSIFY,tmp,{'candidates':[row]},'--as-of','2026-08-23')['candidates'][0]
@@ -50,7 +51,7 @@ def test_missing_signal_unit_makes_provenance_incomplete(tmp_path):
     assert 'signal_unit' in x['missing_provenance']
 
 def test_zero_only_series_is_not_a_new_signal(tmp_path):
-    x=classify(tmp_path,cand(baseline_signal=None,recent_signal=0,persistence=0,persistence_observations=1,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':0,'recent_observations':1,'observation_count':1,'positive_observations':0,'peak_signal':0,'latest_signal':0}))
+    x=classify(tmp_path,cand(baseline_signal=None,recent_signal=0,persistence=0,persistence_observations=1,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':0,'recent_observations':1,'observation_count':1,'positive_observations':0,'peak_signal':0,'latest_signal':0,'latest_observation_age_days':1}))
     assert x['status']=='insufficient_evidence'
     assert x['signal_type'] is None
 
@@ -97,23 +98,23 @@ def test_emerging_variant_subtypes(tmp_path,subtype):
 def test_net_new_is_newly_observed_not_absolute_birth(tmp_path):
     x=classify(tmp_path,cand())
     assert x['signal_type']=='net_new' and x['status']=='emerging' and x['confidence']=='high'
-    assert x['estimated_birth_window'] is None and 'newly observed' in x['status_reason'].lower()
+    assert x['estimated_birth_window'] is None and 'available 12-month history' in x['status_reason'].lower()
 
 def test_breakout_requires_positive_baseline(tmp_path):
-    x=classify(tmp_path,cand(baseline_signal=10,recent_signal=30,growth_rate=2,growth_status='calculated',age_days=180,primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':5,'recent_observations':4,'observation_count':9,'peak_signal':30,'latest_signal':30}))
+    x=classify(tmp_path,cand(baseline_signal=10,recent_signal=30,growth_rate=2,growth_status='calculated',age_days=180,primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':5,'recent_observations':4,'observation_count':9,'peak_signal':30,'latest_signal':30,'latest_observation_age_days':1}))
     assert x['signal_type']=='breakout' and x['status']=='breakout'
 
 def test_one_day_spike_is_new_signal_not_noise(tmp_path):
-    x=classify(tmp_path,cand(baseline_signal=None,recent_signal=100,persistence=1,persistence_observations=1,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':0,'recent_observations':1,'observation_count':1,'peak_signal':100,'latest_signal':100}))
+    x=classify(tmp_path,cand(baseline_signal=None,recent_signal=100,persistence=1,persistence_observations=1,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':0,'recent_observations':1,'observation_count':1,'peak_signal':100,'latest_signal':100,'latest_observation_age_days':1}))
     assert x['status']=='new_signal' and x['signal_type'] is None
 
 def test_spike_decay_can_be_noise_but_durable_event_is_not_forced_noise(tmp_path):
-    base=cand(baseline_signal=0,recent_signal=0,persistence=.25,persistence_observations=4,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':2,'recent_observations':4,'observation_count':6,'peak_signal':100,'latest_signal':0},repeatable_page_or_product_fit=False)
+    base=cand(baseline_signal=0,recent_signal=0,persistence=.25,persistence_observations=4,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':2,'recent_observations':4,'observation_count':6,'peak_signal':100,'latest_signal':0,'latest_observation_age_days':1},repeatable_page_or_product_fit=False)
     assert classify(tmp_path,dict(base,durable_search_intent=False))['status']=='noise'
     assert classify(tmp_path,dict(base,durable_search_intent=True))['status']!='noise'
 
 def test_unknown_durability_does_not_become_noise(tmp_path):
-    x=classify(tmp_path,cand(baseline_signal=0,recent_signal=0,persistence=.25,persistence_observations=4,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':2,'recent_observations':4,'observation_count':6,'peak_signal':100,'latest_signal':0},durable_search_intent=None,repeatable_page_or_product_fit=None))
+    x=classify(tmp_path,cand(baseline_signal=0,recent_signal=0,persistence=.25,persistence_observations=4,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':2,'recent_observations':4,'observation_count':6,'peak_signal':100,'latest_signal':0,'latest_observation_age_days':1},durable_search_intent=None,repeatable_page_or_product_fit=None))
     assert x['status']!='noise'
 
 def test_supply_context_and_emd_are_preserved(tmp_path):
@@ -136,11 +137,14 @@ def test_unknown_metrics_and_kgr_boundary(tmp_path):
     assert x['volume'] is None and x['kd'] is None and x['metric_status']=='incomplete'
     assert x['kgr'] is None and x['supply_signal']=='low_supply_signal'
     y=classify(tmp_path,cand(volume=1000,kd=20,cpc=.3,intitle_results=100))
-    assert y['kgr']==.1 and 'kgr_signal' not in y
+    assert y['kgr'] is None
+    compatible={field:{'value':value,'source':'semrush','metric_source':'semrush','metric_database':'US','country':'US','observed_at':'2026-08-22'} for field,value in [('volume',1000),('kd',20),('cpc',.3),('intitle_results',100)]}
+    z=classify(tmp_path,cand(volume=1000,kd=20,cpc=.3,intitle_results=100,metric_provenance=compatible))
+    assert z['kgr']==.1 and z['kgr_compatibility_status']=='compatible' and 'kgr_signal' not in z
 
 def test_mature_and_incomplete_provenance_states(tmp_path):
-    mature=classify(tmp_path,cand(age_days=365,baseline_signal=50,recent_signal=55,growth_rate=.1,growth_status='calculated',primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':8,'recent_observations':4,'observation_count':12,'peak_signal':60,'latest_signal':55}))
-    weak=classify(tmp_path,cand(source_count=1,source_evidence=[{'source':'manual','provenance_status':'incomplete'}],primary_series={'source':'manual','provenance_status':'incomplete','baseline_observations':3,'recent_observations':4,'observation_count':7,'peak_signal':30,'latest_signal':30}))
+    mature=classify(tmp_path,cand(age_days=365,baseline_signal=50,recent_signal=55,growth_rate=.1,growth_status='calculated',primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':8,'recent_observations':4,'observation_count':12,'peak_signal':60,'latest_signal':55,'latest_observation_age_days':1}))
+    weak=classify(tmp_path,cand(source_count=1,source_evidence=[{'source':'manual','provenance_status':'incomplete'}],primary_series={'source':'manual','provenance_status':'incomplete','baseline_observations':3,'recent_observations':4,'observation_count':7,'peak_signal':30,'latest_signal':30,'latest_observation_age_days':1}))
     assert mature['status']=='mature' and mature['signal_type'] is None
     assert weak['status']=='insufficient_evidence'
 
@@ -176,6 +180,7 @@ def test_structure_trigger_fixture_and_threshold_boundaries():
     neg=' '.join(trig['should_not_trigger']).lower(); assert 'kd<40' in neg and 'genealogy' in neg
     th=json.loads((BASE/'references/thresholds.json').read_text())
     assert th['evidence']['min_recent_observations_confirmed']==3
+    assert th['freshness']['max_latest_observation_age_days_confirmed']==7
     assert 'main_volume_min' not in json.dumps(th) and 'do_kd_max_exclusive' not in json.dumps(th)
 
 def test_raw_observations_flow_to_net_new_without_birth_invention(tmp_path):
