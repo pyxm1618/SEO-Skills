@@ -144,18 +144,10 @@ def metric_market_compatibility(records: dict[str, dict[str, Any] | None]) -> st
     present = [record for record in records.values() if record is not None]
     if len(present) < 2:
         return "incomplete"
-    countries = {record.get("country") for record in present if not is_missing(record.get("country"))}
-    if len(countries) != 1 or any(is_missing(record.get("country")) for record in present):
-        return "incompatible" if len(countries) > 1 else "incomplete"
-    by_provider: dict[str, set[str]] = defaultdict(set)
-    for record in present:
-        provider = str(record.get("metric_source") or record.get("source") or "")
-        database = record.get("metric_database")
-        if provider and not is_missing(database):
-            by_provider[provider].add(str(database))
-    if any(len(databases) > 1 for databases in by_provider.values()):
-        return "incompatible"
-    return "compatible"
+    contexts = [metric_provider_context(record) for record in present]
+    if any(context is None or any(is_missing(value) for value in context) for context in contexts):
+        return "incomplete"
+    return "compatible" if len(set(contexts)) == 1 else "incompatible"
 
 
 def core_metric_status(records: dict[str, dict[str, Any] | None]) -> str:
