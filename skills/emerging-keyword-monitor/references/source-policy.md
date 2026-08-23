@@ -19,13 +19,17 @@ Never commit cookies, API tokens, passwords, Google/Semrush credentials, relay c
 
 ## Provenance
 
-Every observation should answer: where did it come from, when was it observed, which market/country does it represent, what window does it cover, and what unit is the signal measured in?
+Every signal observation should answer: where did it come from, when was it observed, which market/country does it represent, what window does it cover, and what unit is the signal measured in?
+
+Every observed `volume`, `kd`, `cpc`, or `intitle_results` value retains its own metric provenance record, including source/provider, metric database, country, and observation timestamp. Metrics from different contexts are not silently treated as one complete metric set.
 
 Missing provenance is recorded as incomplete. It does not become verified through inference.
 
 ## Source independence
 
 `source_count` counts unique source identities, not rows and not multiple series from the same source. Cross-source evidence may raise confidence, but the monitor does not use a fixed `N-of-M signals = build` rule.
+
+Source-specific metadata remains source-specific. In particular, `trend_status=lasted` on one series is not a keyword-wide fact and cannot veto an independent verified fresh series by itself.
 
 ## Google Trends caution
 
