@@ -88,7 +88,7 @@ def cluster_summary(rows, primary):
     scope_mismatch = 0
     unknown = 0
     conflicts = 0
-    if primary is None:
+    if primary is None or scope is None:
         return {
             "cluster_observed_demand": None,
             "cluster_keyword_count": len({r.get("keyword", "").casefold() for r in included}),
