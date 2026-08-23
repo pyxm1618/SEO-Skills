@@ -384,7 +384,8 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             field: metric_provenance[field]["value"] if isinstance(metric_provenance[field], dict) else None
             for field in METRIC_FIELDS
         }
-        compatibility = metric_compatibility_status(metric_provenance)
+        core_metric_provenance = {field: metric_provenance[field] for field in ("volume", "kd", "cpc")}
+        compatibility = metric_compatibility_status(core_metric_provenance)
         required_complete = all(metrics[field] is not None for field in ("volume", "kd", "cpc"))
         if required_complete and compatibility == "compatible":
             metric_status = "complete"
