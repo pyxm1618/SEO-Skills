@@ -20,7 +20,7 @@ If any are missing, `provenance_status=incomplete`. The row may still be structu
 
 Aggregation/classification may preserve:
 
-`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | recent_signal | growth_rate | acceleration | persistence | source_count | source_evidence | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
+`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
 
 Fields are optional unless a rule explicitly requires them. Unknown fields stay unknown.
 
@@ -36,7 +36,7 @@ Source-reported aggregation windows are part of comparability. For example, a Go
 
 A deterministic primary series is selected only to expose top-level baseline/recent fields. All series remain in `source_evidence`.
 
-## Time windows
+## Time windows and persistence evidence
 
 When observations exist, the aggregator may compute:
 
@@ -46,6 +46,17 @@ When observations exist, the aggregator may compute:
 - `previous_30d`
 - `baseline_90d`
 - `baseline_12m`
+
+For persistence, comparable series may also expose:
+
+- `persistence_7d`
+- `persistence_30d`
+- `recent_7d_observations`
+- `recent_30d_observations`
+- `positive_7d_observations`
+- `positive_30d_observations`
+
+The classifier prefers the shortest recent window that satisfies the configured minimum observation depth. It uses 7-day evidence when sufficient and may fall back to 30-day evidence when the 7-day sample is too sparse. Missing observations are never synthesized to satisfy a threshold.
 
 A missing window remains unknown. Missing days are not filled with zero.
 
