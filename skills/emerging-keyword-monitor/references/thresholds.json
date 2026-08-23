@@ -4,6 +4,9 @@
     "min_recent_observations_confirmed": 3,
     "min_persistence_confirmed": 0.66
   },
+  "temporal": {
+    "max_latest_observation_age_days_confirmed": 7
+  },
   "breakout": {
     "growth_rate_min": 1.0
   },

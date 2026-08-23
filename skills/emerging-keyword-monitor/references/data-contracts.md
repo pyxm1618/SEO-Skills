@@ -12,7 +12,7 @@ Preserve when available:
 
 Required provenance dimensions for a complete observation are:
 
-`source | source_type | source_url | observed_at | country | time_window`
+`source | source_type | source_url | observed_at | country | time_window | signal_unit`
 
 If any are missing, `provenance_status=incomplete`. The row may still be structurally valid; incomplete provenance must never be silently upgraded to verified evidence.
 
@@ -20,7 +20,7 @@ If any are missing, `provenance_status=incomplete`. The row may still be structu
 
 Aggregation/classification may preserve:
 
-`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
+`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
 
 Fields are optional unless a rule explicitly requires them. Unknown fields stay unknown.
 
@@ -32,20 +32,19 @@ Signals are comparable only inside the same:
 
 The aggregator computes each series independently. It never adds Google Trends indexes to Semrush Volume, social/community mentions, sitemap counts, or any other incompatible unit.
 
-Source-reported aggregation windows are part of comparability. For example, a Google Trends `Past 24h` search-count observation and a `Past 48h` search-count observation are different measurement windows, not two persistence observations, even if they were captured at the same time for the same query.
+Source-reported aggregation windows are part of comparability. For example, a Google Trends `Past 24h` search-count observation and a `Past 48h` search-count observation are different measurement windows, not two persistence observations, even if captured at the same time for the same query.
 
-A deterministic primary series is selected only to expose top-level baseline/recent fields. All series remain in `source_evidence`.
+A deterministic primary series is selected only to expose compatibility fields. All series remain in `source_evidence`. Classification may select a different verified fresh series when the deterministic primary is explicitly ended or stale; that choice is exposed as `classification_primary_series`.
 
 ## Time windows and persistence evidence
 
-When observations exist, the aggregator may compute:
+When observations exist, the aggregator computes per-series windows including:
 
-- `recent_7d`
-- `previous_7d`
-- `recent_30d`
-- `previous_30d`
-- `baseline_90d`
-- `baseline_12m`
+- `recent_7d` = days `0..6`
+- `recent_30d` = days `0..29`
+- `baseline_90d_7d` = days `7..89`
+- `baseline_90d_30d` = days `30..89`
+- matching 12-month historical windows beginning after the selected recent window
 
 For persistence, comparable series may also expose:
 
@@ -56,36 +55,61 @@ For persistence, comparable series may also expose:
 - `positive_7d_observations`
 - `positive_30d_observations`
 
-The classifier prefers the shortest recent window that satisfies the configured minimum observation depth. It uses 7-day evidence when sufficient and may fall back to 30-day evidence when the 7-day sample is too sparse. Missing observations are never synthesized to satisfy a threshold.
+The classifier prefers the shortest recent window that satisfies the configured minimum observation depth. It uses 7-day evidence when sufficient and may fall back to 30-day evidence when the 7-day sample is too sparse. The matching baseline changes with that selection, so recent and baseline observations are mutually exclusive. Missing observations are never synthesized to satisfy a threshold.
 
 A missing window remains unknown. Missing days are not filled with zero.
 
-## Growth baseline versus novelty baseline
+## Freshness and coverage
 
-`baseline_signal` remains the temporal baseline used for growth, breakout, and mature-state calculations.
+Each comparable series exposes, when calculable:
 
-`net_new` uses a separate novelty baseline so the recent observations that establish persistence cannot contaminate the historical novelty check. The novelty history ends before the selected persistence window:
+- `latest_observation_age_days`
+- `distinct_observation_days`
+- `coverage_ratio`
+- `max_observation_gap_days`
 
-- when `persistence_window=recent_7d`, use observed relative signal from days `7..89`;
-- when `persistence_window=recent_30d`, use observed relative signal from days `30..89`.
+`coverage_ratio` is descriptive coverage of distinct observed days within the last 30 calendar days; missing days are not imputed as zero. These fields allow stale-but-persistent history to be distinguished from genuinely current signal.
 
-The classifier exposes this as `novelty_baseline_signal`, `novelty_baseline_observations`, and `novelty_baseline_window`. These remain relative source evidence. A zero novelty baseline does **not** prove absolute historical search Volume was zero and does not establish an absolute keyword birth date.
+## Growth baseline versus novelty/history evidence
 
-## First observation and birth window
+`baseline_signal` is selected together with the active recent window and remains the baseline used for growth, breakout, and mature-state calculations.
 
-`first_observed_at` is the earliest timestamp present in the current evidence set. It does not establish the first search ever made for the keyword.
+`net_new` uses history ending before the selected persistence window:
+
+- with `recent_7d`, the near-term novelty baseline starts at day `7`;
+- with `recent_30d`, it starts at day `30`.
+
+The series also retains 12-month positive-history evidence through `historical_positive_seen`, `historical_positive_observations`, and `historical_positive_windows` (plus per-window variants). A positive observation in that available earlier history prevents a `net_new` label even if the nearer 90-day baseline is quiet.
+
+These remain relative source observations. A zero novelty baseline does **not** prove absolute historical search Volume was zero and does not establish an absolute keyword birth date.
+
+## First observation and incremental replay
+
+`first_observed_at` is the earliest known timestamp carried by the available evidence, not the first search ever made for the keyword.
+
+For incremental runs, if an input observation/candidate carries a prior `first_observed_at`, aggregation takes the minimum of that carried timestamp and current observation timestamps. A daily incremental input therefore must not reset the first-seen date or `age_days`.
 
 `estimated_birth_window` is optional and must be evidence-backed. It must not be synthesized from the first non-zero Google Trends point alone.
 
-## Metrics and KGR
+## Metric provenance and compatibility
 
-`volume`, `kd`, `cpc`, and `intitle_results` are observed metrics only. Their absence makes `metric_status=incomplete`, not zero/easy/new.
+`volume`, `kd`, `cpc`, and `intitle_results` are observed metrics only. Their absence is unknown, not zero/easy/new.
 
-KGR is calculated only when both real `volume > 0` and real non-negative integer `intitle_results` are present:
+Each non-missing metric is accompanied by its own `metric_provenance` record containing at least:
+
+`value | source | metric_source | metric_database | country | observed_at`
+
+Top-level metric fields are retained for downstream compatibility, but they are derived from those traceable metric records. Metrics from different markets/databases may coexist as observations, but `metric_compatibility_status=mixed_context` prevents them from being presented as one unconditional complete metric set.
+
+`metric_status=complete` requires the configured complete set to be present with compatible provenance. A numerically complete but cross-market set is not complete.
+
+## KGR
+
+KGR is calculated only when both real `volume > 0` and real non-negative integer `intitle_results` have traceable provenance and compatible market/database context:
 
 `kgr = intitle_results / volume`
 
-If `intitle_results` exists but Volume is unknown, KGR remains unknown. The monitor may label this `low_supply_signal`, but never `KGR pass`.
+If Volume is unknown, provenance is absent, or the two metric records are market-incompatible, KGR remains unknown. The presence of `intitle_results` alone may be retained as supply-side evidence but never as a KGR pass.
 
 ## Validation
 

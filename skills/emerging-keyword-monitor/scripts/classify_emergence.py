@@ -56,18 +56,162 @@ def finite_number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def valid_nonnegative(value: Any) -> bool:
-    number = finite_number(value)
-    return number is not None and number >= 0
-
-
 def verified_source_count(candidate: dict[str, Any]) -> int:
     names = {
         str(item.get("source") or "").strip()
         for item in candidate.get("source_evidence") or []
-        if item.get("provenance_status") == "verified" and str(item.get("source") or "").strip()
+        if isinstance(item, dict)
+        and item.get("provenance_status") == "verified"
+        and str(item.get("source") or "").strip()
     }
     return len(names)
+
+
+def normalize_context(value: Any) -> str | None:
+    if is_missing(value):
+        return None
+    return str(value).strip().lower()
+
+
+def metric_record(row: dict[str, Any], field: str) -> dict[str, Any] | None:
+    provenance = row.get("metric_provenance")
+    if not isinstance(provenance, dict):
+        return None
+    record = provenance.get(field)
+    return record if isinstance(record, dict) else None
+
+
+def metric_record_matches_value(record: dict[str, Any] | None, value: float | None) -> bool:
+    if record is None or value is None:
+        return False
+    record_value = finite_number(record.get("value"))
+    return record_value is not None and record_value == value
+
+
+def compatible_metric_records(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    if left is None or right is None:
+        return False
+    for field in ("country", "metric_database"):
+        left_value = normalize_context(left.get(field))
+        right_value = normalize_context(right.get(field))
+        if left_value is None or right_value is None or left_value != right_value:
+            return False
+    return True
+
+
+def derive_metrics(row: dict[str, Any]) -> tuple[str, float | None, str | None, list[str]]:
+    errors: list[str] = []
+    volume = finite_number(row.get("volume"))
+    kd = finite_number(row.get("kd"))
+    cpc = finite_number(row.get("cpc"))
+    intitle = finite_number(row.get("intitle_results"))
+
+    if not is_missing(row.get("volume")) and (volume is None or volume < 0):
+        errors.append("volume")
+    if not is_missing(row.get("kd")) and (kd is None or kd < 0 or kd > 100):
+        errors.append("kd")
+    if not is_missing(row.get("cpc")) and (cpc is None or cpc < 0):
+        errors.append("cpc")
+    if not is_missing(row.get("intitle_results")) and (intitle is None or intitle < 0 or not intitle.is_integer()):
+        errors.append("intitle_results")
+
+    if errors:
+        return "invalid", None, None, errors
+
+    volume_record = metric_record(row, "volume")
+    kd_record = metric_record(row, "kd")
+    cpc_record = metric_record(row, "cpc")
+    intitle_record = metric_record(row, "intitle_results")
+
+    required_values = {"volume": volume, "kd": kd, "cpc": cpc}
+    required_records = {"volume": volume_record, "kd": kd_record, "cpc": cpc_record}
+    all_required_values = all(value is not None for value in required_values.values())
+    all_required_traced = all(
+        metric_record_matches_value(required_records[field], value)
+        for field, value in required_values.items()
+        if value is not None
+    )
+    compatibility = str(row.get("metric_compatibility_status") or "unknown")
+
+    if all_required_values and all_required_traced and compatibility == "compatible":
+        metric_status = "complete"
+    elif all_required_values and compatibility == "mixed_context":
+        metric_status = "incompatible"
+    else:
+        metric_status = "incomplete"
+
+    kgr = None
+    if (
+        volume is not None
+        and volume > 0
+        and intitle is not None
+        and metric_record_matches_value(volume_record, volume)
+        and metric_record_matches_value(intitle_record, intitle)
+        and compatible_metric_records(volume_record, intitle_record)
+    ):
+        kgr = intitle / volume
+
+    if intitle is not None and volume is None:
+        supply_signal = "low_supply_signal"
+    elif intitle is not None:
+        supply_signal = "observed_supply"
+    else:
+        supply_signal = None
+    return metric_status, kgr, supply_signal, []
+
+
+def trend_status_of(series: dict[str, Any]) -> str | None:
+    value = series.get("trend_status")
+    return None if is_missing(value) else str(value).strip().lower()
+
+
+def freshness_of(series: dict[str, Any], max_age_days: int) -> str:
+    age = finite_number(series.get("latest_observation_age_days"))
+    if age is None:
+        return "unknown"
+    return "fresh" if age <= max_age_days else "stale"
+
+
+def choose_classification_series(
+    candidate: dict[str, Any],
+    max_age_days: int,
+) -> dict[str, Any]:
+    primary = candidate.get("primary_series") if isinstance(candidate.get("primary_series"), dict) else {}
+    if not primary:
+        return {}
+
+    primary_is_ended = trend_status_of(primary) == "lasted"
+    primary_is_stale = freshness_of(primary, max_age_days) == "stale"
+    if not primary_is_ended and not primary_is_stale:
+        return primary
+
+    alternatives: list[dict[str, Any]] = []
+    for series in candidate.get("source_evidence") or []:
+        if not isinstance(series, dict) or series is primary:
+            continue
+        if series.get("provenance_status") != "verified":
+            continue
+        if trend_status_of(series) == "lasted":
+            continue
+        if freshness_of(series, max_age_days) == "stale":
+            continue
+        recent = finite_number(series.get("recent_7d"))
+        if recent is None:
+            recent = finite_number(series.get("recent_30d"))
+        if recent is None or recent <= 0:
+            continue
+        alternatives.append(series)
+
+    if not alternatives:
+        return primary
+
+    def sort_key(series: dict[str, Any]) -> tuple[float, int, str]:
+        age = finite_number(series.get("latest_observation_age_days"))
+        age_rank = age if age is not None else 10_000.0
+        observations = int(finite_number(series.get("observation_count")) or 0)
+        return (age_rank, -observations, str(series.get("source") or ""))
+
+    return sorted(alternatives, key=sort_key)[0]
 
 
 def select_persistence_evidence(
@@ -102,6 +246,48 @@ def select_persistence_evidence(
     return fallback_window, fallback_persistence, fallback_count
 
 
+def select_temporal_metrics(
+    primary: dict[str, Any],
+    persistence_window: str | None,
+    fallback_baseline: float | None,
+    fallback_recent: float | None,
+    fallback_growth: float | None,
+    fallback_growth_status: str,
+) -> tuple[float | None, float | None, float | None, str, int]:
+    if persistence_window == "recent_30d":
+        baseline = finite_number(primary.get("baseline_90d_30d"))
+        recent = finite_number(primary.get("recent_30d"))
+        growth = finite_number(primary.get("growth_rate_30d"))
+        growth_status = primary.get("growth_status_30d")
+        baseline_obs = int(finite_number(primary.get("baseline_30d_observations")) or 0)
+    elif persistence_window == "recent_7d":
+        baseline = finite_number(primary.get("baseline_90d_7d"))
+        recent = finite_number(primary.get("recent_7d"))
+        growth = finite_number(primary.get("growth_rate_7d"))
+        growth_status = primary.get("growth_status_7d")
+        baseline_obs = int(finite_number(primary.get("baseline_7d_observations")) or 0)
+    else:
+        return (
+            fallback_baseline,
+            fallback_recent,
+            fallback_growth,
+            fallback_growth_status,
+            int(finite_number(primary.get("baseline_observations")) or 0),
+        )
+
+    if baseline is None and "baseline_90d_30d" not in primary and "baseline_90d_7d" not in primary:
+        baseline = fallback_baseline
+    if recent is None and "recent_30d" not in primary and "recent_7d" not in primary:
+        recent = fallback_recent
+    if growth is None and not str(growth_status or "").strip():
+        growth = fallback_growth
+        growth_status = fallback_growth_status
+    if baseline_obs == 0 and "baseline_30d_observations" not in primary and "baseline_7d_observations" not in primary:
+        baseline_obs = int(finite_number(primary.get("baseline_observations")) or 0)
+
+    return baseline, recent, growth, str(growth_status or "unknown"), baseline_obs
+
+
 def select_novelty_baseline(
     primary: dict[str, Any],
     persistence_window: str | None,
@@ -124,36 +310,28 @@ def select_novelty_baseline(
     return None, fallback_baseline, fallback_count
 
 
-def derive_metrics(row: dict[str, Any]) -> tuple[str, float | None, str | None, list[str]]:
-    errors: list[str] = []
-    volume = finite_number(row.get("volume"))
-    kd = finite_number(row.get("kd"))
-    cpc = finite_number(row.get("cpc"))
-    intitle = finite_number(row.get("intitle_results"))
+def select_historical_positive(primary: dict[str, Any], persistence_window: str | None) -> tuple[bool | None, int, list[str]]:
+    suffix = "30d" if persistence_window == "recent_30d" else "7d" if persistence_window == "recent_7d" else None
+    if suffix:
+        seen_key = f"historical_positive_{suffix}_seen"
+        count_key = f"historical_positive_{suffix}_observations"
+        windows_key = f"historical_positive_{suffix}_windows"
+        if seen_key in primary:
+            seen = primary.get(seen_key)
+            return (
+                bool(seen) if isinstance(seen, bool) else None,
+                int(finite_number(primary.get(count_key)) or 0),
+                list(primary.get(windows_key) or []),
+            )
 
-    if not is_missing(row.get("volume")) and (volume is None or volume < 0):
-        errors.append("volume")
-    if not is_missing(row.get("kd")) and (kd is None or kd < 0 or kd > 100):
-        errors.append("kd")
-    if not is_missing(row.get("cpc")) and (cpc is None or cpc < 0):
-        errors.append("cpc")
-    if not is_missing(row.get("intitle_results")) and (intitle is None or intitle < 0 or not intitle.is_integer()):
-        errors.append("intitle_results")
-
-    if errors:
-        return "invalid", None, None, errors
-
-    metric_status = "complete" if volume is not None and kd is not None and cpc is not None else "incomplete"
-    kgr = None
-    if volume is not None and volume > 0 and intitle is not None:
-        kgr = intitle / volume
-    if intitle is not None and volume is None:
-        supply_signal = "low_supply_signal"
-    elif intitle is not None:
-        supply_signal = "observed_supply"
-    else:
-        supply_signal = None
-    return metric_status, kgr, supply_signal, []
+    if "historical_positive_seen" not in primary:
+        return None, 0, []
+    seen = primary.get("historical_positive_seen")
+    return (
+        bool(seen) if isinstance(seen, bool) else None,
+        int(finite_number(primary.get("historical_positive_observations")) or 0),
+        list(primary.get("historical_positive_windows") or []),
+    )
 
 
 def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) -> dict[str, Any]:
@@ -171,19 +349,23 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     row["kgr"] = kgr
     row["supply_signal"] = supply_signal
 
-    primary = row.get("primary_series") if isinstance(row.get("primary_series"), dict) else {}
-    baseline = finite_number(row.get("baseline_signal"))
-    recent = finite_number(row.get("recent_signal"))
-    growth = finite_number(row.get("growth_rate"))
+    temporal_cfg = thresholds.get("temporal") or {}
+    max_age_days = int(temporal_cfg.get("max_latest_observation_age_days_confirmed", 7))
+    primary = choose_classification_series(row, max_age_days)
+    row["classification_primary_series"] = primary or None
+
+    fallback_baseline = finite_number(row.get("baseline_signal"))
+    fallback_recent = finite_number(row.get("recent_signal"))
+    fallback_growth = finite_number(row.get("growth_rate"))
+    fallback_growth_status = str(row.get("growth_status") or "unknown")
     fallback_persistence = finite_number(row.get("persistence"))
     age_days = finite_number(row.get("age_days"))
-    baseline_obs = int(finite_number(primary.get("baseline_observations")) or 0)
     fallback_recent_obs = int(finite_number(primary.get("recent_observations")) or row.get("persistence_observations") or 0)
     peak = finite_number(primary.get("peak_signal"))
     latest = finite_number(primary.get("latest_signal"))
     verified_sources = verified_source_count(row)
     source_count = int(finite_number(row.get("source_count")) or 0)
-    trend_status = None if is_missing(row.get("trend_status")) else str(row.get("trend_status")).strip().lower()
+    selected_trend_status = trend_status_of(primary)
 
     variant_subtype = row.get("variant_subtype")
     if not is_missing(variant_subtype):
@@ -207,6 +389,19 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     row["persistence_window"] = persistence_window
     row["persistence_observations"] = recent_obs
 
+    baseline, recent, growth, growth_status, baseline_obs = select_temporal_metrics(
+        primary,
+        persistence_window,
+        fallback_baseline,
+        fallback_recent,
+        fallback_growth,
+        fallback_growth_status,
+    )
+    row["baseline_signal"] = baseline
+    row["recent_signal"] = recent
+    row["growth_rate"] = growth
+    row["growth_status"] = growth_status
+
     novelty_window, novelty_baseline, novelty_baseline_obs = select_novelty_baseline(
         primary,
         persistence_window,
@@ -217,12 +412,27 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     row["novelty_baseline_observations"] = novelty_baseline_obs
     row["novelty_baseline_window"] = novelty_window
 
+    historical_positive_seen, historical_positive_observations, historical_positive_windows = select_historical_positive(
+        primary,
+        persistence_window,
+    )
+    row["historical_positive_seen"] = historical_positive_seen
+    row["historical_positive_observations"] = historical_positive_observations
+    row["historical_positive_windows"] = historical_positive_windows
+
+    freshness_status = freshness_of(primary, max_age_days) if primary else "unknown"
+    row["freshness_status"] = freshness_status
+    row["freshness_threshold_days"] = max_age_days
+    row["latest_observation_age_days"] = primary.get("latest_observation_age_days") if primary else None
+    row["trend_status"] = selected_trend_status
+
     confirmed_temporal = (
         recent is not None
         and recent > 0
         and recent_obs >= evidence_cfg["min_recent_observations_confirmed"]
         and persistence is not None
         and persistence >= evidence_cfg["min_persistence_confirmed"]
+        and freshness_status != "stale"
     )
     has_verified_series = verified_sources >= 1 and primary.get("provenance_status") == "verified"
 
@@ -238,7 +448,7 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
         reason = "No comparable recent signal series is available."
     elif not has_verified_series:
         status = "insufficient_evidence"
-        reason = "Comparable signal data exists, but no primary series has complete provenance."
+        reason = "Comparable signal data exists, but no classification series has complete provenance."
     else:
         evidence_used.append(f"verified_sources={verified_sources}")
         evidence_used.append(f"recent_observations={recent_obs}")
@@ -254,6 +464,12 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             evidence_used.append(f"novelty_baseline_window={novelty_window}")
         if recent is not None:
             evidence_used.append(f"recent_signal={recent:.4g}")
+        if historical_positive_seen is not None:
+            evidence_used.append(f"historical_positive_seen={str(historical_positive_seen).lower()}")
+        if freshness_status != "unknown":
+            evidence_used.append(f"freshness_status={freshness_status}")
+        if row.get("latest_observation_age_days") is not None:
+            evidence_used.append(f"latest_observation_age_days={row['latest_observation_age_days']}")
 
         noise_cfg = thresholds["noise"]
         decay_ratio = None
@@ -275,10 +491,13 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             status = "noise"
             reason = "Observed spike decayed sharply across follow-up observations and lacks confirmed durable/repeatable search-task evidence."
             evidence_used.append(f"latest_to_peak_ratio={decay_ratio:.4g}")
-        elif trend_status == "lasted":
+        elif selected_trend_status == "lasted":
             status = "watch"
-            reason = "The source reports that the trend has ended or returned toward its usual level, so it is not treated as a fresh emerging signal without new follow-up evidence."
+            reason = "The selected source series reports that the trend ended or returned toward its usual level, and no independent fresh verified series superseded it."
             evidence_used.append("trend_status=lasted")
+        elif freshness_status == "stale":
+            status = "watch"
+            reason = "The latest observation is older than the v1 freshness threshold, so prior persistence is retained as watch evidence rather than confirmed as currently emerging."
         elif recent <= 0 and (peak is None or peak <= 0):
             status = "insufficient_evidence"
             reason = "No positive relative signal has been observed; a zero source index is not evidence of newly forming demand."
@@ -287,20 +506,21 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             reason = "A real recent signal is observed, but there is only one recent observation so persistence is not established."
         elif not confirmed_temporal:
             status = "watch"
-            reason = "Repeated signal exists, but persistence or recent observation depth is below the confirmation threshold."
+            reason = "Repeated signal exists, but persistence, freshness, or recent observation depth is below the confirmation threshold."
         elif variant_subtype is not None:
             signal_type = "emerging_variant"
             status = "emerging"
             reason = f"Persistent recent demand is paired with an explicit {variant_subtype} relationship to an existing search expression."
             evidence_used.append(f"variant_subtype={variant_subtype}")
         elif (
-            novelty_baseline is not None
+            historical_positive_seen is not True
+            and novelty_baseline is not None
             and novelty_baseline == 0
             and novelty_baseline_obs >= evidence_cfg["min_baseline_observations"]
         ):
             signal_type = "net_new"
             status = "emerging"
-            reason = "Comparable observations before the current persistence window show no sustained relative signal, while recent observations are persistent; this is newly observed demand within the evidence window."
+            reason = "Comparable history before the current persistence window contains no reliable positive-demand evidence, while recent observations are persistent; this is newly observed demand within the available evidence window."
             evidence_used.append(f"novelty_baseline_observations={novelty_baseline_obs}")
         elif (
             baseline is not None

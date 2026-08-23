@@ -63,5 +63,10 @@ skills/
 仅在修改 Skill 实现时需要：
 
 ```bash
+python3 -m pytest skills/keyword-root-library/tests/test_root_library.py -q
+python3 -m pytest skills/seo-keyword-selection/tests/test_selection.py -q
+python3 -m pytest skills/emerging-keyword-monitor/tests -q
+python3 -m pytest skills/seo-page-keyword-mapping/tests -q
 python3 -m pytest -q
+python3 -m compileall -q skills
 ```

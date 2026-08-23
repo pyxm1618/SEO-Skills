@@ -135,7 +135,13 @@ def test_unknown_metrics_and_kgr_boundary(tmp_path):
     x=classify(tmp_path,cand(volume=None,kd=None,cpc=.3,intitle_results=80))
     assert x['volume'] is None and x['kd'] is None and x['metric_status']=='incomplete'
     assert x['kgr'] is None and x['supply_signal']=='low_supply_signal'
-    y=classify(tmp_path,cand(volume=1000,kd=20,cpc=.3,intitle_results=100))
+    provenance={
+        'volume':{'value':1000,'source':'semrush','metric_source':'semrush','metric_database':'US','country':'US','observed_at':'2026-08-23'},
+        'kd':{'value':20,'source':'semrush','metric_source':'semrush','metric_database':'US','country':'US','observed_at':'2026-08-23'},
+        'cpc':{'value':.3,'source':'semrush','metric_source':'semrush','metric_database':'US','country':'US','observed_at':'2026-08-23'},
+        'intitle_results':{'value':100,'source':'google_search','metric_source':'google_search','metric_database':'US','country':'US','observed_at':'2026-08-23'},
+    }
+    y=classify(tmp_path,cand(volume=1000,kd=20,cpc=.3,intitle_results=100,metric_provenance=provenance,metric_compatibility_status='compatible'))
     assert y['kgr']==.1 and 'kgr_signal' not in y
 
 def test_mature_and_incomplete_provenance_states(tmp_path):
