@@ -128,6 +128,7 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     latest = finite_number(primary.get("latest_signal"))
     verified_sources = verified_source_count(row)
     source_count = int(finite_number(row.get("source_count")) or 0)
+    trend_status = None if is_missing(row.get("trend_status")) else str(row.get("trend_status")).strip().lower()
 
     variant_subtype = row.get("variant_subtype")
     if not is_missing(variant_subtype):
@@ -193,6 +194,10 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             status = "noise"
             reason = "Observed spike decayed sharply across follow-up observations and lacks confirmed durable/repeatable search-task evidence."
             evidence_used.append(f"latest_to_peak_ratio={decay_ratio:.4g}")
+        elif trend_status == "lasted":
+            status = "watch"
+            reason = "The source reports that the trend has ended or returned toward its usual level, so it is not treated as a fresh emerging signal without new follow-up evidence."
+            evidence_used.append("trend_status=lasted")
         elif recent <= 0 and (peak is None or peak <= 0):
             status = "insufficient_evidence"
             reason = "No positive relative signal has been observed; a zero source index is not evidence of newly forming demand."
