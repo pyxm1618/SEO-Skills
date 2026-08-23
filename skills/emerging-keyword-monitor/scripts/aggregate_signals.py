@@ -107,6 +107,11 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
     baseline_90 = window_values(points, as_of, 7, 89)
     baseline_12m = window_values(points, as_of, 7, 364)
 
+    # Novelty history must end before the evidence window used to confirm persistence.
+    # Otherwise the newly positive observations contaminate their own historical baseline.
+    novelty_baseline_7d_values = window_values(points, as_of, 7, 89)
+    novelty_baseline_30d_values = window_values(points, as_of, 30, 89)
+
     recent_7_mean = mean(recent_7)
     previous_7_mean = mean(previous_7)
     prior_7_mean = mean(prior_7)
@@ -159,6 +164,10 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
         "baseline_12m": mean(baseline_12m),
         "baseline_signal": baseline,
         "baseline_observations": len(baseline_90),
+        "novelty_baseline_7d": mean(novelty_baseline_7d_values),
+        "novelty_baseline_7d_observations": len(novelty_baseline_7d_values),
+        "novelty_baseline_30d": mean(novelty_baseline_30d_values),
+        "novelty_baseline_30d_observations": len(novelty_baseline_30d_values),
         "recent_signal": recent,
         "recent_observations": len(recent_7) if recent_7 else len(recent_30),
         "recent_7d_observations": recent_7d_observations,
