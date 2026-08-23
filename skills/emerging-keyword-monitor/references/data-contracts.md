@@ -20,7 +20,7 @@ If any are missing, `provenance_status=incomplete`. The row may still be structu
 
 Aggregation/classification may preserve:
 
-`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
+`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
 
 Fields are optional unless a rule explicitly requires them. Unknown fields stay unknown.
 
@@ -59,6 +59,17 @@ For persistence, comparable series may also expose:
 The classifier prefers the shortest recent window that satisfies the configured minimum observation depth. It uses 7-day evidence when sufficient and may fall back to 30-day evidence when the 7-day sample is too sparse. Missing observations are never synthesized to satisfy a threshold.
 
 A missing window remains unknown. Missing days are not filled with zero.
+
+## Growth baseline versus novelty baseline
+
+`baseline_signal` remains the temporal baseline used for growth, breakout, and mature-state calculations.
+
+`net_new` uses a separate novelty baseline so the recent observations that establish persistence cannot contaminate the historical novelty check. The novelty history ends before the selected persistence window:
+
+- when `persistence_window=recent_7d`, use observed relative signal from days `7..89`;
+- when `persistence_window=recent_30d`, use observed relative signal from days `30..89`.
+
+The classifier exposes this as `novelty_baseline_signal`, `novelty_baseline_observations`, and `novelty_baseline_window`. These remain relative source evidence. A zero novelty baseline does **not** prove absolute historical search Volume was zero and does not establish an absolute keyword birth date.
 
 ## First observation and birth window
 
