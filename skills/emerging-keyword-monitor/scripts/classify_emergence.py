@@ -185,8 +185,8 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             and persistence <= noise_cfg["max_persistence"]
             and decay_ratio is not None
             and decay_ratio <= noise_cfg["max_latest_to_peak_ratio"]
-            and durable is not True
-            and repeatable_fit is not True
+            and durable is False
+            and repeatable_fit is False
         )
 
         if is_noise:
