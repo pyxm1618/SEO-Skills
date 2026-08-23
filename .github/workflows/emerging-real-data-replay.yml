@@ -1,0 +1,25 @@
+name: Emerging Real Data Replay
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Real replay regressions
+        run: python3 -m pytest skills/emerging-keyword-monitor/tests/test_real_data_replay.py -q
+      - name: Emerging keyword monitor full suite
+        run: python3 -m pytest skills/emerging-keyword-monitor/tests -q
+      - name: Repository-wide
+        run: python3 -m pytest -q
