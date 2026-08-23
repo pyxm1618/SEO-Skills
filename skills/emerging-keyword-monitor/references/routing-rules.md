@@ -8,9 +8,9 @@ When `root_relation=existing_root`, a valid `root_id` links the candidate to `ke
 
 Confirmed `emerging`/`breakout` candidates produce a `selection_handoff` containing at least:
 
-`keyword | root_id | signal_type | first_observed_at | age_days | growth | persistence | source_count | source_evidence | volume | kd | cpc | intitle_results | metric_status | metric_provenance | metric_compatibility_status`
+`keyword | root_id | signal_type | first_observed_at | age_days | growth | persistence | source_count | source_evidence | volume | kd | cpc | intitle_results | metric_status | metric_provenance | metric_compatibility_status | kgr_compatibility_status`
 
-Metric values are not stripped from their provenance at handoff. `seo-keyword-selection` receives both compatibility fields and the traceable metric records needed to interpret them.
+Metric values are not stripped from their provenance at handoff. `metric_compatibility_status` describes the core `volume + kd + cpc` context, while `kgr_compatibility_status` separately describes the `volume + intitle_results` pairing used for KGR.
 
 `new_signal`/`watch` remain monitor-only. The downstream `seo-keyword-selection` skill owns final `do_candidate`, `observe`, and `principle_eliminate` decisions.
 
