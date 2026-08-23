@@ -177,9 +177,10 @@ def metric_compatibility_status(records: dict[str, dict[str, Any] | None]) -> st
         ):
             return "insufficient_context"
 
+    sources = {normalized_context_value(record.get("metric_source")) for record in present}
     countries = {normalized_context_value(record.get("country")) for record in present}
     databases = {normalized_context_value(record.get("metric_database")) for record in present}
-    if len(countries) > 1 or len(databases) > 1:
+    if len(sources) > 1 or len(countries) > 1 or len(databases) > 1:
         return "mixed_context"
     return "compatible"
 
