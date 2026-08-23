@@ -19,6 +19,7 @@ PROVENANCE_FIELDS = (
     "observed_at",
     "country",
     "time_window",
+    "signal_unit",
 )
 NUMERIC_FIELDS = {
     "signal_value": (0.0, None, False),
@@ -165,7 +166,6 @@ def normalize_row(raw: dict[str, Any], as_of: datetime) -> dict[str, Any]:
     if anchor_error:
         errors.append("anchor_event_date")
     elif anchor_dt is not None and anchor_dt > as_of:
-        # Future anchors may be planned events, so preserve them as data rather than invalidating.
         pass
 
     missing_provenance = [field for field in PROVENANCE_FIELDS if is_missing(row.get(field))]
