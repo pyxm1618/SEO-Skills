@@ -1,0 +1,20 @@
+{
+  "should_trigger": [
+    "最近有什么刚出现的新搜索词？",
+    "帮我监控这批词里哪些最近突然增长。",
+    "这个行业最近出现了什么新的搜索表达？",
+    "帮我判断这些词是新出生还是旧词 breakout。",
+    "我想每天发现刚开始起量的新词。",
+    "Track whether these queries are net-new demand, breakout demand, or emerging variants.",
+    "Which search phrases have started accelerating during the last few weeks?"
+  ],
+  "should_not_trigger": [
+    "帮我从这批词里筛 KD<40 的机会词。",
+    "帮我检查 genealogy 的词根覆盖够不够。",
+    "给这些关键词算 KGR 并选出最终 do candidates。",
+    "把 keyword root library 里的重复词根清理一下。",
+    "Write a product launch email for our users.",
+    "What is the weather tomorrow?",
+    "Summarize this PDF for me."
+  ]
+}

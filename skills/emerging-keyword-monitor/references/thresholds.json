@@ -1,0 +1,21 @@
+{
+  "evidence": {
+    "min_baseline_observations": 2,
+    "min_recent_observations_confirmed": 3,
+    "min_persistence_confirmed": 0.66
+  },
+  "breakout": {
+    "growth_rate_min": 1.0
+  },
+  "mature": {
+    "age_days_min": 90,
+    "max_abs_growth_rate": 0.5
+  },
+  "noise": {
+    "max_persistence": 0.4,
+    "max_latest_to_peak_ratio": 0.2
+  },
+  "confidence": {
+    "cross_source_min": 2
+  }
+}
