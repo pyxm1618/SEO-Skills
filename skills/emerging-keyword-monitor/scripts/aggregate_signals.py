@@ -11,15 +11,49 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from validate_observations import duplicate_key, is_missing, load_rows, parse_iso, validate_rows
+from validate_observations import is_missing, load_rows, parse_iso, validate_rows
 
 SERIES_FIELDS = ("source", "source_type", "country", "signal_unit", "metric_database")
 METRIC_FIELDS = ("volume", "kd", "cpc", "intitle_results")
-CONTEXT_FIELDS = ("serp_dedicated_pages", "serp_ugc_pages", "serp_intent_mismatch", "emd_status", "durable_search_intent", "repeatable_page_or_product_fit")
+CONTEXT_FIELDS = (
+    "serp_dedicated_pages",
+    "serp_ugc_pages",
+    "serp_intent_mismatch",
+    "emd_status",
+    "durable_search_intent",
+    "repeatable_page_or_product_fit",
+    "trend_status",
+)
 
 
 def canonical_keyword(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def aggregation_observation_key(row: dict[str, Any]) -> str:
+    """Identify one logical source snapshot without treating presentation URLs as new evidence."""
+    fields = (
+        "keyword",
+        "observed_at",
+        "source",
+        "source_type",
+        "root_id",
+        "signal_value",
+        "signal_unit",
+        "country",
+        "time_window",
+        "metric_source",
+        "metric_database",
+    )
+    values: list[Any] = []
+    for field in fields:
+        value = row.get(field)
+        if field == "keyword":
+            value = canonical_keyword(value)
+        elif isinstance(value, str):
+            value = value.strip().lower()
+        values.append(value)
+    return json.dumps(values, sort_keys=False, ensure_ascii=False, default=str)
 
 
 def end_of_day(value: str | None) -> datetime:
@@ -157,12 +191,13 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
     invalid_rows = [row for row in validated if row["validation_status"] == "invalid"]
     valid_rows = [row for row in validated if row["validation_status"] == "valid" and canonical_keyword(row.get("keyword"))]
 
-    # Preserve audit rows but use one exact observation per duplicate key for aggregation.
+    # Preserve audit rows but count one logical source snapshot only once. Presentation
+    # URL variants (for example Google Trends language parameters) are not new evidence.
     seen: set[str] = set()
     unique_rows: list[dict[str, Any]] = []
     duplicate_observation_count = 0
     for row in valid_rows:
-        key = duplicate_key(row)
+        key = aggregation_observation_key(row)
         if key in seen:
             duplicate_observation_count += 1
             continue
@@ -231,14 +266,13 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "emd_status": context["emd_status"],
             "durable_search_intent": context["durable_search_intent"],
             "repeatable_page_or_product_fit": context["repeatable_page_or_product_fit"],
+            "trend_status": context["trend_status"],
             "metric_status": metric_status,
             "observed_at": last_dt.date().isoformat() if last_dt else None,
             "unique_observation_count": len(keyword_rows),
-            "duplicate_observation_count": sum(max((row.get("duplicate_count") or 1) - 1, 0) for row in keyword_rows) // max(1, max((row.get("duplicate_count") or 1) for row in keyword_rows)),
+            "duplicate_observation_count": len(keyword_all_valid) - len(keyword_rows),
             "aggregation_policy": "no_cross_series_addition",
         }
-        # Duplicate count above is conservative per keyword; exact batch count is recomputed below.
-        candidate["duplicate_observation_count"] = len(keyword_all_valid) - len(keyword_rows)
         candidates.append(candidate)
 
     return {"candidates": candidates, "invalid_rows": invalid_rows, "invalid_observation_count": len(invalid_rows), "duplicate_observation_count": duplicate_observation_count}
