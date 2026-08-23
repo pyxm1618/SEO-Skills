@@ -64,6 +64,7 @@ def test_semrush_core_metrics_and_google_intitle_are_compatible_end_to_end(tmp_p
 
     assert aggregated["metric_status"] == "complete"
     assert aggregated["metric_compatibility_status"] == "compatible"
+    assert aggregated["kgr_compatibility_status"] == "compatible"
 
     classified = run(
         CLASSIFY,
@@ -74,4 +75,5 @@ def test_semrush_core_metrics_and_google_intitle_are_compatible_end_to_end(tmp_p
     )["candidates"][0]
 
     assert classified["metric_status"] == "complete"
+    assert classified["kgr_compatibility_status"] == "compatible"
     assert classified["kgr"] == 0.1
