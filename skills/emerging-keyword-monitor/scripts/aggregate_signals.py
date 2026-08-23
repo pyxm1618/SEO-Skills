@@ -15,6 +15,7 @@ from validate_observations import duplicate_key, is_missing, load_rows, parse_is
 
 SERIES_FIELDS = ("source", "source_type", "country", "signal_unit", "metric_database")
 METRIC_FIELDS = ("volume", "kd", "cpc", "intitle_results")
+CONTEXT_FIELDS = ("serp_dedicated_pages", "serp_ugc_pages", "serp_intent_mismatch", "emd_status", "durable_search_intent", "repeatable_page_or_product_fit")
 
 
 def canonical_keyword(value: Any) -> str:
@@ -174,6 +175,7 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
 
     candidates: list[dict[str, Any]] = []
     for normalized_keyword, keyword_rows in sorted(by_keyword.items()):
+        keyword_all_valid = [row for row in valid_rows if canonical_keyword(row.get("keyword")) == normalized_keyword]
         series_rows: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
         for row in keyword_rows:
             dt = row_dt(row)
@@ -191,12 +193,13 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
         root_ids = sorted({str(row.get("root_id")).strip() for row in keyword_rows if not is_missing(row.get("root_id"))})
         sources = {str(row.get("source")).strip() for row in keyword_rows if not is_missing(row.get("source"))}
 
-        metrics = {field: latest_non_missing(keyword_rows, field) for field in METRIC_FIELDS}
+        metrics = {field: latest_non_missing(keyword_all_valid, field) for field in METRIC_FIELDS}
+        context = {field: latest_non_missing(keyword_all_valid, field) for field in CONTEXT_FIELDS}
         metric_status = "complete" if all(metrics[field] is not None for field in ("volume", "kd", "cpc")) else "incomplete"
 
-        anchor_event = latest_non_missing(keyword_rows, "anchor_event")
-        anchor_event_date = latest_non_missing(keyword_rows, "anchor_event_date")
-        anchor_event_source = latest_non_missing(keyword_rows, "anchor_event_source")
+        anchor_event = latest_non_missing(keyword_all_valid, "anchor_event")
+        anchor_event_date = latest_non_missing(keyword_all_valid, "anchor_event_date")
+        anchor_event_source = latest_non_missing(keyword_all_valid, "anchor_event_source")
 
         candidate = {
             "keyword": str(keyword_rows[0]["keyword"]).strip(),
@@ -222,6 +225,12 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "kd": metrics["kd"],
             "cpc": metrics["cpc"],
             "intitle_results": metrics["intitle_results"],
+            "serp_dedicated_pages": context["serp_dedicated_pages"],
+            "serp_ugc_pages": context["serp_ugc_pages"],
+            "serp_intent_mismatch": context["serp_intent_mismatch"],
+            "emd_status": context["emd_status"],
+            "durable_search_intent": context["durable_search_intent"],
+            "repeatable_page_or_product_fit": context["repeatable_page_or_product_fit"],
             "metric_status": metric_status,
             "observed_at": last_dt.date().isoformat() if last_dt else None,
             "unique_observation_count": len(keyword_rows),
@@ -229,7 +238,6 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "aggregation_policy": "no_cross_series_addition",
         }
         # Duplicate count above is conservative per keyword; exact batch count is recomputed below.
-        keyword_all_valid = [row for row in valid_rows if canonical_keyword(row.get("keyword")) == normalized_keyword]
         candidate["duplicate_observation_count"] = len(keyword_all_valid) - len(keyword_rows)
         candidates.append(candidate)
 
