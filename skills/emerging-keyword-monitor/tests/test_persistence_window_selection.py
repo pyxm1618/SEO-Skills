@@ -63,3 +63,16 @@ def test_weekly_persistent_rise_can_be_breakout(tmp_path):
     assert row["signal_type"] == "breakout"
     assert row["persistence_observations"] >= 3
     assert row["persistence_window"] == "recent_30d"
+
+
+def test_weekly_new_demand_uses_pre_recent_baseline_for_net_new(tmp_path):
+    # Five recent weekly points contain four positives (0.80 persistence), so this
+    # fixture satisfies the production confirmation threshold instead of relying on
+    # a below-threshold 3/5 sample.
+    row = classify_rows(tmp_path, [0] * 9 + [0, 1, 2, 4, 8])
+    assert row["persistence_window"] == "recent_30d"
+    assert row["persistence_observations"] >= 3
+    assert row["persistence"] >= 0.66
+    assert row["novelty_baseline_signal"] == 0
+    assert row["status"] == "emerging"
+    assert row["signal_type"] == "net_new"

@@ -20,6 +20,7 @@ UNKNOWN_FIELDS = (
     "estimated_birth_window",
     "age_days",
     "baseline_signal",
+    "novelty_baseline_signal",
     "recent_signal",
     "growth_rate",
     "acceleration",
@@ -99,6 +100,28 @@ def select_persistence_evidence(
     else:
         fallback_window = str(fallback_window)
     return fallback_window, fallback_persistence, fallback_count
+
+
+def select_novelty_baseline(
+    primary: dict[str, Any],
+    persistence_window: str | None,
+    fallback_baseline: float | None,
+    fallback_count: int,
+) -> tuple[str | None, float | None, int]:
+    """Use history strictly before the selected recent persistence evidence window."""
+    if persistence_window == "recent_30d":
+        return (
+            "days_30_89",
+            finite_number(primary.get("novelty_baseline_30d")),
+            int(finite_number(primary.get("novelty_baseline_30d_observations")) or 0),
+        )
+    if persistence_window == "recent_7d":
+        return (
+            "days_7_89",
+            finite_number(primary.get("novelty_baseline_7d")),
+            int(finite_number(primary.get("novelty_baseline_7d_observations")) or 0),
+        )
+    return None, fallback_baseline, fallback_count
 
 
 def derive_metrics(row: dict[str, Any]) -> tuple[str, float | None, str | None, list[str]]:
@@ -184,6 +207,16 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     row["persistence_window"] = persistence_window
     row["persistence_observations"] = recent_obs
 
+    novelty_window, novelty_baseline, novelty_baseline_obs = select_novelty_baseline(
+        primary,
+        persistence_window,
+        baseline,
+        baseline_obs,
+    )
+    row["novelty_baseline_signal"] = novelty_baseline
+    row["novelty_baseline_observations"] = novelty_baseline_obs
+    row["novelty_baseline_window"] = novelty_window
+
     confirmed_temporal = (
         recent is not None
         and recent > 0
@@ -215,6 +248,10 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             evidence_used.append(f"persistence={persistence:.4g}")
         if baseline is not None:
             evidence_used.append(f"baseline_signal={baseline:.4g}")
+        if novelty_baseline is not None:
+            evidence_used.append(f"novelty_baseline_signal={novelty_baseline:.4g}")
+        if novelty_window is not None:
+            evidence_used.append(f"novelty_baseline_window={novelty_window}")
         if recent is not None:
             evidence_used.append(f"recent_signal={recent:.4g}")
 
@@ -257,14 +294,14 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             reason = f"Persistent recent demand is paired with an explicit {variant_subtype} relationship to an existing search expression."
             evidence_used.append(f"variant_subtype={variant_subtype}")
         elif (
-            baseline is not None
-            and baseline == 0
-            and baseline_obs >= evidence_cfg["min_baseline_observations"]
+            novelty_baseline is not None
+            and novelty_baseline == 0
+            and novelty_baseline_obs >= evidence_cfg["min_baseline_observations"]
         ):
             signal_type = "net_new"
             status = "emerging"
-            reason = "Historical comparable observations show no sustained relative signal, while recent observations are persistent; this is newly observed demand within the evidence window."
-            evidence_used.append(f"baseline_observations={baseline_obs}")
+            reason = "Comparable observations before the current persistence window show no sustained relative signal, while recent observations are persistent; this is newly observed demand within the evidence window."
+            evidence_used.append(f"novelty_baseline_observations={novelty_baseline_obs}")
         elif (
             baseline is not None
             and baseline > 0
