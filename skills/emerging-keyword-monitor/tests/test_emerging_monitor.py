@@ -101,6 +101,16 @@ def test_spike_decay_can_be_noise_but_durable_event_is_not_forced_noise(tmp_path
     assert classify(tmp_path,dict(base,durable_search_intent=False))['status']=='noise'
     assert classify(tmp_path,dict(base,durable_search_intent=True))['status']!='noise'
 
+def test_unknown_durability_does_not_become_noise(tmp_path):
+    x=classify(tmp_path,cand(baseline_signal=0,recent_signal=0,persistence=.25,persistence_observations=4,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':2,'recent_observations':4,'observation_count':6,'peak_signal':100,'latest_signal':0},durable_search_intent=None,repeatable_page_or_product_fit=None))
+    assert x['status']!='noise'
+
+def test_supply_context_and_emd_are_preserved(tmp_path):
+    rows=[obs(keyword='supply',observed_at='2026-08-20',signal_value=10,serp_dedicated_pages=2,serp_ugc_pages=3,serp_intent_mismatch=True,emd_status='available')]
+    x=run(AGGREGATE,tmp_path,rows,'--as-of','2026-08-23')['candidates'][0]
+    assert x['serp_dedicated_pages']==2 and x['serp_ugc_pages']==3
+    assert x['serp_intent_mismatch'] is True and x['emd_status']=='available'
+
 def test_persistence_and_cross_source_raise_confidence(tmp_path):
     one=classify(tmp_path,cand(source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}]))
     two=classify(tmp_path,cand())
