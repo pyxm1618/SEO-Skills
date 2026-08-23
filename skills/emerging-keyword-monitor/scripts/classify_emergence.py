@@ -193,6 +193,9 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             status = "noise"
             reason = "Observed spike decayed sharply across follow-up observations and lacks confirmed durable/repeatable search-task evidence."
             evidence_used.append(f"latest_to_peak_ratio={decay_ratio:.4g}")
+        elif recent <= 0 and (peak is None or peak <= 0):
+            status = "insufficient_evidence"
+            reason = "No positive relative signal has been observed; a zero source index is not evidence of newly forming demand."
         elif recent_obs <= 1:
             status = "new_signal"
             reason = "A real recent signal is observed, but there is only one recent observation so persistence is not established."
