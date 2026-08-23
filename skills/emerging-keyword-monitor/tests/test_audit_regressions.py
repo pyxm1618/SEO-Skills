@@ -133,8 +133,11 @@ def test_incompatible_kgr_inputs_remain_unknown(tmp_path):
     candidate = aggregate(tmp_path, rows)
     classified = classify(tmp_path, candidate)
 
-    assert candidate["metric_compatibility_status"] == "mixed_context"
+    assert candidate["metric_status"] == "incomplete"
+    assert candidate["metric_compatibility_status"] == "compatible"
+    assert candidate["kgr_compatibility_status"] == "mixed_context"
     assert classified["kgr"] is None
+    assert classified["kgr_compatibility_status"] == "mixed_context"
 
     compatible = dict(candidate)
     compatible["volume"] = 1000
@@ -160,7 +163,10 @@ def test_incompatible_kgr_inputs_remain_unknown(tmp_path):
         },
     }
     compatible["metric_compatibility_status"] = "compatible"
-    assert classify(tmp_path, compatible)["kgr"] == 0.1
+    compatible["kgr_compatibility_status"] = "compatible"
+    compatible_result = classify(tmp_path, compatible)
+    assert compatible_result["kgr"] == 0.1
+    assert compatible_result["kgr_compatibility_status"] == "compatible"
 
 
 def test_recent_30d_fallback_uses_non_overlapping_baseline(tmp_path):
@@ -374,6 +380,7 @@ def test_selection_handoff_preserves_metric_provenance(tmp_path):
             "signal_type": "net_new",
             "metric_status": "incomplete",
             "metric_compatibility_status": "compatible",
+            "kgr_compatibility_status": "incomplete",
             "metric_provenance": provenance,
             "volume": 1000,
             "kd": None,
@@ -384,3 +391,4 @@ def test_selection_handoff_preserves_metric_provenance(tmp_path):
     assert routed["route"] == "selection_handoff"
     assert routed["handoff"]["metric_provenance"] == provenance
     assert routed["handoff"]["metric_compatibility_status"] == "compatible"
+    assert routed["handoff"]["kgr_compatibility_status"] == "incomplete"
