@@ -69,6 +69,38 @@ def verified_source_count(candidate: dict[str, Any]) -> int:
     return len(names)
 
 
+def select_persistence_evidence(
+    primary: dict[str, Any],
+    fallback_persistence: float | None,
+    fallback_count: int,
+    minimum_observations: int,
+) -> tuple[str | None, float | None, int]:
+    """Prefer the shortest evidence window that has enough observations for confirmation."""
+    options: list[tuple[str, float, int]] = []
+    for window, persistence_field, count_field in (
+        ("recent_7d", "persistence_7d", "recent_7d_observations"),
+        ("recent_30d", "persistence_30d", "recent_30d_observations"),
+    ):
+        persistence = finite_number(primary.get(persistence_field))
+        count = int(finite_number(primary.get(count_field)) or 0)
+        if persistence is not None and count > 0:
+            options.append((window, persistence, count))
+
+    for option in options:
+        if option[2] >= minimum_observations:
+            return option
+
+    if options:
+        return options[0]
+
+    fallback_window = primary.get("persistence_window")
+    if is_missing(fallback_window):
+        fallback_window = None
+    else:
+        fallback_window = str(fallback_window)
+    return fallback_window, fallback_persistence, fallback_count
+
+
 def derive_metrics(row: dict[str, Any]) -> tuple[str, float | None, str | None, list[str]]:
     errors: list[str] = []
     volume = finite_number(row.get("volume"))
@@ -120,10 +152,10 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     baseline = finite_number(row.get("baseline_signal"))
     recent = finite_number(row.get("recent_signal"))
     growth = finite_number(row.get("growth_rate"))
-    persistence = finite_number(row.get("persistence"))
+    fallback_persistence = finite_number(row.get("persistence"))
     age_days = finite_number(row.get("age_days"))
     baseline_obs = int(finite_number(primary.get("baseline_observations")) or 0)
-    recent_obs = int(finite_number(primary.get("recent_observations")) or row.get("persistence_observations") or 0)
+    fallback_recent_obs = int(finite_number(primary.get("recent_observations")) or row.get("persistence_observations") or 0)
     peak = finite_number(primary.get("peak_signal"))
     latest = finite_number(primary.get("latest_signal"))
     verified_sources = verified_source_count(row)
@@ -142,6 +174,16 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     row["variant_subtype"] = variant_subtype
 
     evidence_cfg = thresholds["evidence"]
+    persistence_window, persistence, recent_obs = select_persistence_evidence(
+        primary,
+        fallback_persistence,
+        fallback_recent_obs,
+        evidence_cfg["min_recent_observations_confirmed"],
+    )
+    row["persistence"] = persistence
+    row["persistence_window"] = persistence_window
+    row["persistence_observations"] = recent_obs
+
     confirmed_temporal = (
         recent is not None
         and recent > 0
@@ -167,6 +209,8 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     else:
         evidence_used.append(f"verified_sources={verified_sources}")
         evidence_used.append(f"recent_observations={recent_obs}")
+        if persistence_window is not None:
+            evidence_used.append(f"persistence_window={persistence_window}")
         if persistence is not None:
             evidence_used.append(f"persistence={persistence:.4g}")
         if baseline is not None:

@@ -24,6 +24,10 @@ The semantic relationship may be analyst/model interpretation, but the temporal 
 
 Temporal thresholds in `thresholds.json` are v1 shape rules for consistent classification. They are not product-launch or SEO-selection gates and should be recalibrated only after real replay samples.
 
+Persistence is evaluated from the shortest supported recent evidence window that satisfies `min_recent_observations_confirmed`. The classifier prefers `recent_7d`; when that window is too sparse, it may fall back to `recent_30d`. If neither window has enough observations, the candidate remains unconfirmed. This is sampling-density logic, not a special case for any named source or weekly cadence.
+
+The aggregator preserves per-window persistence and observation counts so the classifier can make that choice without fabricating missing observations. A sparse 7-day window must not erase valid 30-day persistence evidence.
+
 Growth is calculated only inside one comparable series. A positive recent signal with an observed zero baseline does not produce infinite growth; `growth_rate` stays unknown and the zero-baseline condition is represented explicitly.
 
 ## Noise
