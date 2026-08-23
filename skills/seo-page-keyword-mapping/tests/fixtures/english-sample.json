@@ -1,0 +1,7 @@
+{
+  "rows": [
+    {"page_id":"hex-1","keyword":"hexagram 1","role_candidate":"core","ownership_status":"confirmed","ownership_page_id":"hex-1","serp_fast_status":"confirmed","target_scope_demand":1470,"target_market_volume":320,"kd":7,"metric_scope_id":"en-global-exact-v1","cluster_include":true},
+    {"page_id":"hex-1","keyword":"i ching hexagram 1","role_candidate":"core","ownership_status":"confirmed","ownership_page_id":"hex-1","serp_fast_status":"confirmed","target_scope_demand":250,"target_market_volume":20,"metric_scope_id":"en-global-exact-v1","cluster_include":true},
+    {"page_id":"hex-1","keyword":"hexagram 1 love","role_candidate":"intent","ownership_status":"confirmed","ownership_page_id":"hex-1","serp_fast_status":"confirmed","target_scope_demand":290,"target_market_volume":20,"metric_scope_id":"en-global-exact-v1","cluster_include":true}
+  ]
+}

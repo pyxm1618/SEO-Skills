@@ -1,0 +1,18 @@
+{
+  "should_trigger": [
+    "我已经确定要做 64 个卦页，帮我给每页分 Primary、Secondary 和内容模块。",
+    "这 78 张塔罗牌页面已经定了，帮我判断每张牌应该对应哪些关键词，避免互相抢词。",
+    "给这批城市页做 keyword-to-URL mapping，并判断哪些 modifier 该做 H2、哪些可能拆子页。",
+    "我有一组产品型号页和 Semrush 关键词，帮我做 page ownership、Primary/Secondary 和 cannibalization 检查。",
+    "继续上次实体页 Mapping：Core Candidate 已筛完，现在补 SERP fast check 和最终 Primary。",
+    "这些多语言 glossary 页面已经确定，帮我按市场/语言证据分配关键词和 cluster demand。"
+  ],
+  "should_not_trigger": [
+    "Pet 领域还有哪些需求词根？先维护 root library。",
+    "我还没决定做什么站，帮我从大量关键词里选最值得做的机会。",
+    "解释一下 KGR 怎么算。",
+    "给 quickiching.com 写一篇 Hexagram 1 的正文。",
+    "帮我找竞争对手外链。",
+    "把这批关键词按 Volume/KD/CPC 筛掉不值得做的词，但还没有页面结构。"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "rows": [
+    {"page_id":"hex-6-zh","keyword":"讼卦","role_candidate":"core","ownership_status":"confirmed","ownership_page_id":"hex-6-zh","serp_fast_status":"confirmed","target_scope_demand":680,"target_market_volume":20,"metric_scope_id":"zh-adjusted-v1","cluster_include":true,"metric_notes":"simplified+traditional evidence; JP excluded based on observed contamination"},
+    {"page_id":"hex-6-zh","keyword":"天水讼","role_candidate":"core","ownership_status":"confirmed","ownership_page_id":"hex-6-zh","serp_fast_status":"confirmed","target_scope_demand":130,"target_market_volume":20,"metric_scope_id":"zh-adjusted-v1","cluster_include":true}
+  ]
+}
