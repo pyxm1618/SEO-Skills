@@ -166,6 +166,7 @@ def normalized_context_value(value: Any) -> str | None:
 
 
 def metric_compatibility_status(records: dict[str, dict[str, Any] | None]) -> str:
+    """Check whether core keyword metrics share provider, database, and market context."""
     present = [record for record in records.values() if isinstance(record, dict)]
     if not present:
         return "unknown"
@@ -181,6 +182,36 @@ def metric_compatibility_status(records: dict[str, dict[str, Any] | None]) -> st
     countries = {normalized_context_value(record.get("country")) for record in present}
     databases = {normalized_context_value(record.get("metric_database")) for record in present}
     if len(sources) > 1 or len(countries) > 1 or len(databases) > 1:
+        return "mixed_context"
+    return "compatible"
+
+
+def kgr_compatibility_status(
+    volume_record: dict[str, Any] | None,
+    intitle_record: dict[str, Any] | None,
+) -> str:
+    """Check Volume↔intitle market compatibility without requiring the same provider."""
+    if volume_record is None and intitle_record is None:
+        return "unknown"
+    if volume_record is None or intitle_record is None:
+        return "incomplete"
+
+    for record in (volume_record, intitle_record):
+        if any(
+            normalized_context_value(record.get(field)) is None
+            for field in ("metric_database", "country")
+        ):
+            return "insufficient_context"
+
+    countries = {
+        normalized_context_value(volume_record.get("country")),
+        normalized_context_value(intitle_record.get("country")),
+    }
+    databases = {
+        normalized_context_value(volume_record.get("metric_database")),
+        normalized_context_value(intitle_record.get("metric_database")),
+    }
+    if len(countries) > 1 or len(databases) > 1:
         return "mixed_context"
     return "compatible"
 
@@ -384,7 +415,12 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             field: metric_provenance[field]["value"] if isinstance(metric_provenance[field], dict) else None
             for field in METRIC_FIELDS
         }
-        compatibility = metric_compatibility_status(metric_provenance)
+        core_metric_provenance = {field: metric_provenance[field] for field in ("volume", "kd", "cpc")}
+        compatibility = metric_compatibility_status(core_metric_provenance)
+        kgr_compatibility = kgr_compatibility_status(
+            metric_provenance["volume"],
+            metric_provenance["intitle_results"],
+        )
         required_complete = all(metrics[field] is not None for field in ("volume", "kd", "cpc"))
         if required_complete and compatibility == "compatible":
             metric_status = "complete"
@@ -425,6 +461,7 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "intitle_results": metrics["intitle_results"],
             "metric_provenance": metric_provenance,
             "metric_compatibility_status": compatibility,
+            "kgr_compatibility_status": kgr_compatibility,
             "serp_dedicated_pages": context["serp_dedicated_pages"],
             "serp_ugc_pages": context["serp_ugc_pages"],
             "serp_intent_mismatch": context["serp_intent_mismatch"],

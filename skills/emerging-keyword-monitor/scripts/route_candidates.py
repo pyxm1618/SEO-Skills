@@ -29,6 +29,7 @@ SELECTION_FIELDS = (
     "metric_status",
     "metric_provenance",
     "metric_compatibility_status",
+    "kgr_compatibility_status",
     "kgr",
     "supply_signal",
     "status",

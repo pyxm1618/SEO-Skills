@@ -20,7 +20,7 @@ If any are missing, `provenance_status=incomplete`. The row may still be structu
 
 Aggregation/classification may preserve:
 
-`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
+`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | kgr_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
 
 Fields are optional unless a rule explicitly requires them. Unknown fields stay unknown.
 
@@ -99,17 +99,25 @@ Each non-missing metric is accompanied by its own `metric_provenance` record con
 
 `value | source | metric_source | metric_database | country | observed_at`
 
-Top-level metric fields are retained for downstream compatibility, but they are derived from those traceable metric records. Metrics from different markets/databases may coexist as observations, but `metric_compatibility_status=mixed_context` prevents them from being presented as one unconditional complete metric set.
+Top-level metric fields are retained for downstream compatibility, but they are derived from those traceable metric records.
 
-`metric_status=complete` requires the configured complete set to be present with compatible provenance. A numerically complete but cross-market set is not complete.
+`metric_compatibility_status` applies to the **core keyword metric set** `volume + kd + cpc`. Those three values may be treated as one complete set only when their `metric_source`, `metric_database`, and `country` are compatible. For example, Semrush US Volume/KD/CPC may form one compatible set; Semrush Volume/KD combined with Google Ads CPC must not be silently promoted to `complete`.
+
+`metric_status=complete` requires `volume`, `kd`, and `cpc` to be present with compatible core-metric provenance. A numerically complete but cross-provider, cross-database, or cross-market set is not complete.
 
 ## KGR
 
-KGR is calculated only when both real `volume > 0` and real non-negative integer `intitle_results` have traceable provenance and compatible market/database context:
+KGR has a separate compatibility contract because its numerator and denominator normally come from different providers.
+
+`kgr_compatibility_status` applies only to `volume + intitle_results`. It requires traceable provenance plus compatible `metric_database` and `country`; it deliberately does **not** require the same `metric_source`.
+
+Therefore a normal pairing such as Semrush US Volume + Google US `intitle` is compatible, while US Volume + UK `intitle` is not.
+
+KGR is calculated only when both real `volume > 0` and real non-negative integer `intitle_results` have traceable, compatible provenance:
 
 `kgr = intitle_results / volume`
 
-If Volume is unknown, provenance is absent, or the two metric records are market-incompatible, KGR remains unknown. The presence of `intitle_results` alone may be retained as supply-side evidence but never as a KGR pass.
+If Volume is unknown, provenance is absent, or the two metric records are market/database-incompatible, KGR remains unknown. The presence of `intitle_results` alone may be retained as supply-side evidence but never as a KGR pass.
 
 ## Validation
 
