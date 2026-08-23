@@ -28,9 +28,11 @@ Fields are optional unless a rule explicitly requires them. Unknown fields stay 
 
 Signals are comparable only inside the same:
 
-`source × source_type × country × signal_unit × metric_database`
+`source × source_type × country × signal_unit × metric_database × time_window`
 
 The aggregator computes each series independently. It never adds Google Trends indexes to Semrush Volume, social/community mentions, sitemap counts, or any other incompatible unit.
+
+Source-reported aggregation windows are part of comparability. For example, a Google Trends `Past 24h` search-count observation and a `Past 48h` search-count observation are different measurement windows, not two persistence observations, even if they were captured at the same time for the same query.
 
 A deterministic primary series is selected only to expose top-level baseline/recent fields. All series remain in `source_evidence`.
 

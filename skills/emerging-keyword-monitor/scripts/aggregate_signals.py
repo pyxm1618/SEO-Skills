@@ -13,7 +13,7 @@ from typing import Any
 
 from validate_observations import is_missing, load_rows, parse_iso, validate_rows
 
-SERIES_FIELDS = ("source", "source_type", "country", "signal_unit", "metric_database")
+SERIES_FIELDS = ("source", "source_type", "country", "signal_unit", "metric_database", "time_window")
 METRIC_FIELDS = ("volume", "kd", "cpc", "intitle_results")
 CONTEXT_FIELDS = (
     "serp_dedicated_pages",
@@ -138,6 +138,7 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
         "country": key[2],
         "signal_unit": key[3],
         "metric_database": key[4],
+        "time_window": key[5],
         "observation_count": len(points),
         "first_observed_at": first_dt.date().isoformat() if first_dt else None,
         "last_observed_at": last_dt.date().isoformat() if last_dt else None,
