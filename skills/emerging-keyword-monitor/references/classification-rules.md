@@ -4,11 +4,13 @@
 
 ### `net_new`
 
-Use only when comparable historical observations exist, the historical relative signal shows no sustained positive baseline, and recent signal becomes persistent. The label means **newly observed within the evidence window**, not an absolute search-demand birth date.
+Use only when comparable historical observations **before the currently selected persistence window** show no sustained positive relative signal and recent signal becomes persistent. The novelty check must not include the same recent observations that are being used to establish persistence.
+
+The label means **newly observed within the evidence window**, not an absolute search-demand birth date. A zero relative-source novelty baseline does not prove absolute historical search Volume was zero.
 
 ### `breakout`
 
-Requires a positive historical baseline plus persistent recent signal materially above that baseline. A keyword with an established baseline must not be relabeled `net_new` merely because growth is large.
+Requires a positive historical growth baseline plus persistent recent signal materially above that baseline. A keyword with an established baseline must not be relabeled `net_new` merely because growth is large.
 
 ### `emerging_variant`
 
@@ -28,7 +30,7 @@ Persistence is evaluated from the shortest supported recent evidence window that
 
 The aggregator preserves per-window persistence and observation counts so the classifier can make that choice without fabricating missing observations. A sparse 7-day window must not erase valid 30-day persistence evidence.
 
-Growth is calculated only inside one comparable series. A positive recent signal with an observed zero baseline does not produce infinite growth; `growth_rate` stays unknown and the zero-baseline condition is represented explicitly.
+Growth is calculated only inside one comparable series. `baseline_signal` is the growth baseline used for breakout/mature calculations. `net_new` uses the separate `novelty_baseline_signal`, selected so its history ends before the chosen persistence window. A positive recent signal with an observed zero growth baseline does not produce infinite growth; `growth_rate` stays unknown and the zero-baseline condition is represented explicitly.
 
 ## Noise
 
