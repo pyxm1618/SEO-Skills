@@ -76,6 +76,13 @@ def mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def persistence_stats(values: list[float]) -> tuple[float | None, int, int]:
+    if not values:
+        return None, 0, 0
+    positive_count = sum(value > 0 for value in values)
+    return positive_count / len(values), len(values), positive_count
+
+
 def window_values(points: list[tuple[datetime, float]], as_of: datetime, min_days_ago: int, max_days_ago: int) -> list[float]:
     values: list[float] = []
     for observed, value in points:
@@ -121,13 +128,15 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
     if recent_7_mean is not None and previous_7_mean is not None and prior_7_mean is not None:
         acceleration = (recent_7_mean - previous_7_mean) - (previous_7_mean - prior_7_mean)
 
+    persistence_7d, recent_7d_observations, positive_7d_observations = persistence_stats(recent_7)
+    persistence_30d, recent_30d_observations, positive_30d_observations = persistence_stats(recent_30)
+
+    # Preserve the historical short-window default in aggregation. Classification may
+    # select the 30-day evidence when the 7-day window is too sparse for its threshold.
     persistence_values = recent_7 if recent_7 else recent_30
     persistence_window = "recent_7d" if recent_7 else ("recent_30d" if recent_30 else None)
-    persistence = None
-    positive_count = 0
-    if persistence_values:
-        positive_count = sum(value > 0 for value in persistence_values)
-        persistence = positive_count / len(persistence_values)
+    persistence = persistence_7d if recent_7 else persistence_30d
+    positive_count = positive_7d_observations if recent_7 else positive_30d_observations
 
     provenance_status = "verified" if rows and all(r.get("provenance_status") == "verified" for r in rows) else "incomplete"
     first_dt = min((dt for dt, _ in points), default=None)
@@ -152,13 +161,19 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
         "baseline_observations": len(baseline_90),
         "recent_signal": recent,
         "recent_observations": len(recent_7) if recent_7 else len(recent_30),
+        "recent_7d_observations": recent_7d_observations,
+        "recent_30d_observations": recent_30d_observations,
         "growth_rate": growth,
         "growth_status": growth_status,
         "acceleration": acceleration,
         "persistence": persistence,
         "persistence_window": persistence_window,
         "persistence_observations": len(persistence_values),
+        "persistence_7d": persistence_7d,
+        "persistence_30d": persistence_30d,
         "positive_observations": positive_count,
+        "positive_7d_observations": positive_7d_observations,
+        "positive_30d_observations": positive_30d_observations,
         "peak_signal": max((value for _, value in points), default=None),
         "latest_signal": points[-1][1] if points else None,
         "provenance_status": provenance_status,
@@ -250,6 +265,7 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "growth_status": primary.get("growth_status") if primary else "unknown",
             "acceleration": primary.get("acceleration") if primary else None,
             "persistence": primary.get("persistence") if primary else None,
+            "persistence_window": primary.get("persistence_window") if primary else None,
             "persistence_observations": primary.get("persistence_observations", 0) if primary else 0,
             "source_count": len(sources),
             "source_evidence": evidence,
