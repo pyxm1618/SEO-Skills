@@ -1,0 +1,18 @@
+{
+  "should_trigger": [
+    "帮我从领域开始跑完整 SEO 选词流程，最后给机会词和需求簇。",
+    "把这些 Semrush 关键词按我们的 Volume/KD/CPC/KGR/SERP SOP 筛选。",
+    "我有一批 seed，帮我扩词、双池筛选、算 KGR 和 KDRoi。",
+    "继续上次选词流程：现在 CPC 已经补齐，下一步筛到需要手查 intitle 的词。",
+    "用真实 Volume、KD、CPC 和 SERP 帮我做关键词终选裁决表。",
+    "从 roots 到 seed 再到机会词，按我们固定的方法完整执行。"
+  ],
+  "should_not_trigger": [
+    "帮我维护 keyword-root-library，把 Wedding 新词根入库。",
+    "Pet 领域还有哪些需求词根？先不要找关键词。",
+    "给 quickiching.com 写 SEO title 和 description。",
+    "解释一下什么是 KGR。",
+    "查一下这个网站有多少外链。",
+    "把这篇文章翻译成英文。"
+  ]
+}

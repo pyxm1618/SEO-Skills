@@ -1,0 +1,18 @@
+{
+  "should_trigger": [
+    "帮我整理 Pet 领域有哪些需求词根，并优先复用现有词根库。",
+    "维护我的 SEO 词根库，把新发现的 roots 去重并标记证据等级。",
+    "从这个竞争站的 organic keywords 里提取可复用的需求词根。",
+    "审核 keyword-root-library 里的 candidate/active/verified 状态是否合理。",
+    "我准备研究 Travel，先从词根库查可复用的通用词根和领域词根。",
+    "把哥飞的工具词根和我们自己的非工具词根合并进长期 root library。"
+  ],
+  "should_not_trigger": [
+    "把这 20 个关键词按 KD 从低到高排序。",
+    "puppy weight calculator 值不值得做？帮我看 KGR 和 SERP。",
+    "根据 Volume、KD、CPC 给我选最终机会词。",
+    "给 quickiching.com 设计首页 SEO title 和 meta description。",
+    "分析 travel itinerary template 的 Google 前十竞争盘面。",
+    "帮我决定最终应该做 Pet 还是 Travel 网站。"
+  ]
+}

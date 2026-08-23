@@ -1,0 +1,18 @@
+{
+  "ideas": {
+    "main_volume_min": 5000,
+    "main_kd_max_inclusive": 55,
+    "blue_volume_min": 300,
+    "blue_kd_max_exclusive": 45
+  },
+  "exact": {
+    "main_volume_min": 9000,
+    "blue_volume_min": 500,
+    "do_kd_max_exclusive": 40,
+    "observe_kd_max_inclusive": 50
+  },
+  "cpc_positive_min": 0.10,
+  "kgr_pass_max_exclusive": 0.25,
+  "serp_upgrade_weak_points_min": 2,
+  "calibration_batches": 2
+}
