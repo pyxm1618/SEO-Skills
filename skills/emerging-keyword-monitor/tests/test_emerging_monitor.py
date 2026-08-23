@@ -43,6 +43,17 @@ def test_unknown_zero_and_provenance_semantics(tmp_path):
     assert p['validation_status']=='valid' and p['provenance_status']=='incomplete'
     assert sorted(p['missing_provenance'])==['country','source_url']
 
+def test_missing_signal_unit_makes_provenance_incomplete(tmp_path):
+    x=run(VALIDATE,tmp_path,[obs(signal_unit=None)],'--as-of','2026-08-23')['rows'][0]
+    assert x['validation_status']=='valid'
+    assert x['provenance_status']=='incomplete'
+    assert 'signal_unit' in x['missing_provenance']
+
+def test_zero_only_series_is_not_a_new_signal(tmp_path):
+    x=classify(tmp_path,cand(baseline_signal=None,recent_signal=0,persistence=0,persistence_observations=1,source_count=1,source_evidence=[{'source':'google_trends','provenance_status':'verified'}],primary_series={'source':'google_trends','provenance_status':'verified','baseline_observations':0,'recent_observations':1,'observation_count':1,'positive_observations':0,'peak_signal':0,'latest_signal':0}))
+    assert x['status']=='insufficient_evidence'
+    assert x['signal_type'] is None
+
 def test_complete_provenance_and_duplicate_audit(tmp_path):
     r=obs(); out=run(VALIDATE,tmp_path,[r,dict(r)],'--as-of','2026-08-23')['rows']
     assert out[0]['provenance_status']=='verified'
