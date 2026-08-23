@@ -49,7 +49,10 @@ def select_real_shapes(source):
 
             recent_30 = [(d, v) for d, v in history if 0 <= (as_of - d).days <= 29]
             baseline_90 = [v for d, v in history if 7 <= (as_of - d).days <= 89]
-            if len(recent_30) < 4 or sum(v > 0 for _, v in recent_30) < 3 or not baseline_90:
+            if len(recent_30) < 3 or not baseline_90:
+                continue
+            persistence = sum(v > 0 for _, v in recent_30) / len(recent_30)
+            if persistence < 0.66:
                 continue
 
             baseline = sum(baseline_90) / len(baseline_90)
@@ -64,6 +67,7 @@ def select_real_shapes(source):
                 "baseline": baseline,
                 "latest": latest,
                 "growth": growth,
+                "persistence": persistence,
             }
 
             if abs(growth) < 0.5:
@@ -128,8 +132,9 @@ def test_real_weekly_history_can_reach_mature_and_breakout_states(tmp_path):
                 "as_of": as_of,
                 "expected": expected,
                 "actual": classified["status"],
-                "recent_observations": classified["primary_series"]["recent_observations"],
+                "persistence_window": classified.get("persistence_window"),
                 "persistence_observations": classified["persistence_observations"],
+                "persistence": classified["persistence"],
                 "baseline": item["baseline"],
                 "latest": item["latest"],
                 "growth": item["growth"],
