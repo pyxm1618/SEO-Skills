@@ -105,3 +105,16 @@ def test_cluster_demand_is_unresolved_without_primary_scope(tmp_path):
     assert p['cluster_observed_demand'] is None
     assert p['cluster_demand_complete'] is False
     assert p['cluster_scope_mismatch_count']==2
+
+
+def test_cluster_demand_is_unresolved_when_primary_has_no_metric_scope(tmp_path):
+    rows=[
+        {'page_id':'p','keyword':'core','role_candidate':'core','ownership_status':'confirmed','ownership_page_id':'p','serp_fast_status':'confirmed','target_scope_demand':100,'metric_scope_id':None,'cluster_include':True},
+        {'page_id':'p','keyword':'intent','role_candidate':'intent','ownership_status':'confirmed','ownership_page_id':'p','serp_fast_status':'confirmed','target_scope_demand':200,'metric_scope_id':'scope-b','cluster_include':True},
+    ]
+    p=pg(run(EVAL,tmp_path,{'rows':rows}),'p')
+    assert p['primary_keyword']=='core'
+    assert p['cluster_metric_scope_id'] is None
+    assert p['cluster_observed_demand'] is None
+    assert p['cluster_demand_complete'] is False
+    assert p['cluster_scope_mismatch_count']==2
