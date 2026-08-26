@@ -1,32 +1,21 @@
 # Source Acquisition
 
-Use real sources; do not fabricate metrics or SERPs.
+Use real sources; do not fabricate metrics or SERPs. Mapping operates on a known page universe and selection-confirmed opportunity; it is not a second generic keyword-discovery owner.
 
-## Preferred sources
+## Existing evidence first
 
-1. connected/official keyword platform API or connector;
-2. source export supplied by the user;
-3. authenticated browser relay/session when the user already has lawful access and the source UI exposes the data;
-4. live search/SERP observation for intent evidence;
-5. GSC after launch for query/page ownership calibration.
+Reuse compatible observed evidence from selection when its source, market/language scope, date, and method remain appropriate for the mapping decision. Acquire only evidence that is actually missing or stale for page ownership/metric work.
 
-If a field cannot be observed, leave it `unknown`.
+## Semrush policy
 
-## Discovery vs exact/core verification
+If mapping requires any new/current Semrush acquisition, the only allowed transport is the current authenticated same-origin session at `https://sem.3ue.com/` through the project relay collector.
 
-Discovery is intentionally wide and may use multiple seeds/markets. Preserve raw provenance. After ownership classification and Core compression, spend expensive metric calls on the small candidate set rather than every discovered row.
+Historical methods such as `ideas.GetKeywords` or `keywords.GetInfo` may help identify current UI traffic but are not production endpoints until current same-origin traffic re-verifies HTTP/RPC success and response schema.
 
-## Semrush pattern used by this repository
-
-When an authenticated browser session exposes the same Semrush backend route used by the UI, a caller may use it as an acquisition adapter. Known methods from prior validated work include:
-
-- `ideas.GetKeywords` for discovery;
-- `keywords.GetInfo` for keyword/country evidence.
-
-Do not store cookies, relay tokens, `__gmitm` values, credentials, or account identifiers in this repository. Use `credentials: "include"` only inside the user's existing authenticated browser context. Add retry, throttling, checkpoint/resume, and raw JSON preservation.
-
-Endpoint/method behavior is not a permanent contract. If the UI changes, re-discover the active request shape instead of guessing or silently substituting fabricated values.
+There is no fallback to official Semrush API, API keys/units, official connectors, Ahrefs, alternative providers, or AI estimates. Do not store cookies, relay tokens, credentials, session IDs, or account identifiers in the repository.
 
 ## SERP evidence
 
-SERP Fast Check may use a normal search query and the top result titles/types. SERP Deep Review should record the actual top URLs, page types, entity intent, and any overlap calculation used for architecture or cannibalization decisions.
+SERP Fast Check uses actual current Google result evidence to confirm entity intent. SERP Deep Review records real current URLs/page types and the observed facts used for architecture or cannibalization decisions. If an external fact such as DR is required, actually acquire it or leave it unknown.
+
+If a required observation cannot be obtained, keep it unknown/unresolved rather than inventing a replacement.
