@@ -1,0 +1,29 @@
+{
+  "description": "SEO production-stage integrity gates. Project hooks must be reviewed and trusted before live acceptance.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 runtime/codex_stage_hook.py pre",
+            "timeout": 10,
+            "statusMessage": "Checking SEO stage contract"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 runtime/codex_stage_hook.py stop",
+            "timeout": 10,
+            "statusMessage": "Checking SEO run completeness"
+          }
+        ]
+      }
+    ]
+  }
+}
