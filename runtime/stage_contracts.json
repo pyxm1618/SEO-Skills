@@ -1,0 +1,68 @@
+{
+  "discovery_autocomplete": {
+    "required": ["seed", "suggestions", "country", "language", "observed_at", "source", "evidence_ref"],
+    "equals": {"source": "google_autocomplete"},
+    "list_min": {"suggestions": 1}
+  },
+  "discovery_semrush_ideas": {
+    "required": ["seed", "rows", "observed_at", "metric_source", "relay_origin", "provenance_ref"],
+    "equals": {"metric_source": "Semrush"},
+    "host_equals": {"relay_origin": "sem.3ue.com"},
+    "list_min": {"rows": 1}
+  },
+  "discovery_handoff": {
+    "required": ["batch_id", "required_seed_count", "autocomplete_pass_count", "status"],
+    "equals": {"status": "PASS"},
+    "equal_fields": [["required_seed_count", "autocomplete_pass_count"]]
+  },
+  "stage6_exact": {
+    "required": [
+      "keyword",
+      "volume",
+      "kd",
+      "cpc",
+      "intent",
+      "competition_level",
+      "trend",
+      "metric_source",
+      "metric_database",
+      "metric_stage",
+      "observed_at",
+      "relay_origin",
+      "provenance_ref"
+    ],
+    "equals": {
+      "metric_source": "Semrush",
+      "metric_database": "us",
+      "metric_stage": "exact"
+    },
+    "host_equals": {"relay_origin": "sem.3ue.com"},
+    "list_length": {"trend": 12}
+  },
+  "kgr_intitle": {
+    "required": ["keyword", "volume", "intitle_results", "source", "market", "observed_at", "evidence_ref"],
+    "equals": {"source": "Google"}
+  },
+  "serp_review": {
+    "required": ["keyword", "source", "market", "observed_at", "evidence_ref", "results"],
+    "equals": {"source": "Google"},
+    "list_min": {"results": 10},
+    "items_required": {"results": ["rank", "url"]}
+  },
+  "finalist_trend": {
+    "required": ["keyword", "is_finalist"],
+    "conditional_required": [
+      {
+        "when": {"field": "is_finalist", "equals": true},
+        "fields": ["google_trends_source", "google_trends_observed_at", "google_trends_evidence_ref"]
+      }
+    ],
+    "conditional_equals": [
+      {
+        "when": {"field": "is_finalist", "equals": true},
+        "field": "google_trends_source",
+        "equals": "Google Trends"
+      }
+    ]
+  }
+}
