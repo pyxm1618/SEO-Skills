@@ -10,9 +10,13 @@ Confirmed `emerging`/`breakout` candidates produce a `selection_handoff` contain
 
 `keyword | root_id | signal_type | first_observed_at | age_days | growth | persistence | source_count | source_evidence | volume | kd | cpc | intitle_results | metric_status | metric_provenance | metric_compatibility_status | kgr_compatibility_status`
 
-Metric values are not stripped from their provenance at handoff. `metric_compatibility_status` describes the core `volume + kd + cpc` context, while `kgr_compatibility_status` separately describes the `volume + intitle_results` pairing used for KGR.
+That handoff enters `seo-keyword-selection` **directly**. It must never route through `seo-keyword-discovery` or rerun Seed generation, Google Autocomplete, or Semrush Ideas discovery for the confirmed keyword.
 
-`new_signal`/`watch` remain monitor-only. The downstream `seo-keyword-selection` skill owns final `do_candidate`, `observe`, and `principle_eliminate` decisions.
+Selection reuses compatible fresh handoff evidence. Any missing/incompatible evidence is acquired beginning at the earliest missing **selection** contract (for example Stage 6 Exact, `intitle`, SERP, or finalist Trends), not by restarting discovery.
+
+Metric values are not stripped from provenance. `metric_compatibility_status` describes the core `volume + kd + cpc` context, while `kgr_compatibility_status` separately describes the `volume + intitle_results` pairing used for KGR.
+
+`new_signal`/`watch` remain monitor-only. The downstream selection skill owns final `do_candidate`, `observe`, and `principle_eliminate` decisions.
 
 ## Root candidate
 
@@ -23,7 +27,7 @@ When several related queries expose a plausible new stable demand family, an ana
 - `status in {emerging, breakout}`;
 - a non-empty `root_candidate_hypothesis`.
 
-If the status is only `new_signal` or `watch`, the hypothesis is retained in `new_root_watchlist` and is not promoted into the formal root-candidate review flow yet.
+If the status is only `new_signal` or `watch`, retain the hypothesis in `new_root_watchlist` rather than promoting it.
 
 The monitor never writes `root-library.csv`.
 
