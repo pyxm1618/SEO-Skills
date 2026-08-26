@@ -1,45 +1,40 @@
 # Real-Data Acquisition Protocol
 
-The workflow is source-agnostic, but metric fields must come from real observations. Prefer the shortest available path that preserves provenance.
+Production evidence for this workflow comes from project collectors. Hosted WebSearch may support ordinary research but cannot become formal Google/Semrush evidence.
 
-## Source order
+## Reuse before reacquisition
 
-1. Reuse a current user-provided/exported dataset when it already contains the required observed fields.
-2. Use a connected/current keyword-research source when available.
-3. Use an already-configured authenticated user-side workflow or relay when the user has one; never request cookies, session tokens, passwords, or API secrets in chat.
-4. Otherwise ask for/export only the missing fields rather than restarting the research.
+Reuse fresh compatible evidence that already satisfies the relevant selection contract. This is especially important for confirmed emerging/breakout handoffs: acquire only the earliest missing contract and never rerun discovery merely to normalize the route.
 
-## Semrush roles
+## Semrush Exact source policy
 
-- **Ideas/related-keyword output** is a discovery + wide-recall input.
-- **Exact keyword lookup** is the authoritative stage for current Volume/KD/CPC/intent/trend used downstream.
-- Null/missing CPC or other metrics mean `unknown`, not zero.
-- Preserve database/market (normally `us` for this workflow), generation time, and source batch where available.
+Every new/current Semrush acquisition must use only the current authenticated same-origin session at `https://sem.3ue.com/` via `runtime/collectors/semrush_relay_collector.py`.
 
-The specific Semrush interface may change. Use the currently working official connector/API, user-provided export, or an already-authorized user-side workflow. Do not hard-code credentials into the Skill.
+There is no production path for:
 
-## Google observations
+- official Semrush API or API keys/units;
+- official connector fallback;
+- Ahrefs or another provider standing in for Semrush;
+- AI estimates.
 
-- `intitle:"keyword"` numerator must be manually/reliably observed from Google; no substitute count is accepted.
-- Real SERP review must inspect the actual current top results. If live SERP evidence cannot be obtained, store `unknown`/`pending` rather than pretending the review happened.
-- Google Trends and Keyword Planner are late-stage cross-checks; they do not replace the main metric source or KGR/SERP evidence.
+The relay collector does not hard-code a historical endpoint. A current same-origin network capture supplies the request descriptor, and live HTTP/RPC success plus expected response shape must be verified before the result can be production evidence. Historical `/kwogw/v2/webapi`, `ideas.GetKeywords`, or `keywords.GetInfo` captures are locator hints only until re-observed live.
+
+Stage 6 Exact requires current US Volume, KD, CPC, intent, competition level, and 12-month trend plus complete provenance. Missing required Exact evidence blocks that candidate from Stage 7+ production evaluation but does not alter the evaluator's mechanical `pending_metrics` behavior.
+
+## Google project collectors
+
+Use `runtime/collectors/google_live_collector.py` for formal Google evidence:
+
+- `intitle` mode for real visible `intitle:"keyword"` counts;
+- `serp` mode for current real top-10 rank/url evidence;
+- `trends` mode for finalist Google Trends cross-check.
+
+If a collector fails, keep the evidence missing and mark the affected execution scope blocked. Do not substitute Bing, generic result counts, APIs, WebSearch output, or AI estimates.
 
 ## Resume rule
 
-If a batch already has exact Volume/KD/CPC but lacks `intitle`, resume at KGR collection. If CPC is missing, retrieve CPC only. Never force the user to rerun completed stages without a concrete data-quality reason.
+If compatible Exact evidence already exists but `intitle` is missing, resume at KGR collection. If only a required Exact field is missing, reacquire/repair the Exact evidence rather than restarting discovery. Never force completed stages to rerun without a concrete freshness or compatibility reason.
 
-## Provenance metadata for saved batches
+## Provenance
 
-When saving/exporting a metric batch, include batch-level metadata whenever possible so rows do not lose traceability:
-
-```json
-{
-  "metric_source": "Semrush",
-  "metric_stage": "exact",
-  "database": "us",
-  "generated_at": "2026-08-22T07:59:51Z",
-  "rows": []
-}
-```
-
-Do not infer `metric_source` or `metric_stage` merely from the evaluator CLI stage. The CLI stage says how to evaluate the input; it does not prove where the metrics came from. Older files missing provenance may still be mechanically evaluated, but must remain `provenance_status=incomplete` until their source is documented.
+Preserve enough information to answer where the fact came from, which market it represents, when it was observed, and which project collector/evidence artifact produced it. Evaluator CLI stage names never prove acquisition provenance by themselves.
