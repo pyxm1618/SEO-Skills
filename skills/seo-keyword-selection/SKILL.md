@@ -1,63 +1,48 @@
 ---
 name: seo-keyword-selection
-description: Use when the user needs to choose SEO keyword opportunities, continue a keyword-research batch, evaluate a keyword dataset with real metrics, or decide which demand clusters deserve SERP validation or product consideration.
+description: Use when concrete keyword candidates must be screened from the former Step 5 onward with real metrics, KGR, SERP evidence, trend validation, opportunity clustering, and human decision support.
 ---
 
 # SEO Keyword Selection
 
-Run a reproducible SEO opportunity-selection workflow from demand roots to evidence-backed opportunity clusters. Resume from the earliest unfinished stage; do not redo verified work merely because the workflow starts midstream.
+Run the existing SEO opportunity-selection method from concrete keyword candidates onward. Resume from the earliest unfinished selection contract and do not redo compatible fresh evidence.
 
 ## Boundaries
 
-This skill owns Seed generation, keyword expansion, metric screening, KGR/SERP validation, opportunity clustering, and decision support. It does **not** maintain the root library.
+This skill starts at the former Step 5 / Ideas-stage wide recall. Seed generation, Google Autocomplete discovery, Semrush Ideas/Related discovery, and low-risk discovery cleaning belong to `seo-keyword-discovery`.
 
-When roots are needed, use the installed `keyword-root-library` skill or accept a root handoff from the caller. Never copy or bundle `root-library.csv` here.
+Inputs may come from:
+
+- a valid `seo-keyword-discovery` handoff; or
+- confirmed `emerging`/`breakout` `selection_handoff` directly from `emerging-keyword-monitor`.
+
+Confirmed emerging keywords never route back through Seed/Autocomplete/Ideas discovery. Reuse compatible fresh evidence and acquire only the earliest missing selection contract.
 
 Read before execution:
 
-- `references/selection-sop.md` — canonical end-to-end workflow.
-- `references/data-contracts.md` — fields, provenance, unknown handling, and handoffs.
-- `references/decision-rules.md` — current formulas and SERP upgrade rules.
-- `references/thresholds.json` — machine-readable threshold source of truth.
-- `references/source-acquisition.md` — how to obtain real keyword data without inventing or exposing secrets.
+- `references/selection-sop.md`
+- `references/data-contracts.md`
+- `references/decision-rules.md`
+- `references/thresholds.json` — unchanged source of truth.
+- `references/source-acquisition.md`
 
-## Evidence Discipline
+## Execution integrity
 
-Every field is one of four kinds:
+The existing evaluator remains the calculator/classifier. Do not change its treatment of `pending_metrics`, KGR, SERP weak evidence, or KDRoi merely to enforce production completeness.
 
-1. **observed** — returned by a real source or manually observed;
-2. **calculated** — deterministic formula from observed inputs;
-3. **analysis** — model/human interpretation, explicitly labeled;
-4. **unknown** — missing and left missing.
+Production decisions are separately gated:
 
-Never invent or estimate Volume, KD, CPC, `intitle` counts, rankings, DR, or SERP facts. `unknown` is not zero.
+- Stage 6 Exact must pass the machine-readable `stage6_exact` contract before Stage 7+ production evaluation for that candidate.
+- KGR requires project-collected real Google `intitle:"keyword"` evidence; KGR itself remains calculated by the evaluator.
+- Real SERP review must pass `serp_review` before SERP-dependent final evaluation. KD 40–50 upgrade still requires the existing KGR + at least two structured weak-position rule.
+- Serious finalists require real Google Trends cross-check. Keyword Planner remains optional.
 
-AI intent/SERP pre-analysis is a hypothesis layer only. It may remove obvious brand/navigation or semantic-drift terms when evidence is clear, but predicted competition must never substitute for real SERP review.
+New/current Semrush acquisition is only through the authenticated same-origin `sem.3ue.com` collector. No official API or alternative-provider fallback is permitted.
 
-## Deterministic Evaluation
+## Evidence discipline
 
-Use the evaluator instead of manually recomputing thresholds or formulas:
-
-```bash
-python scripts/evaluate_candidates.py --input ideas.json --stage ideas --format csv
-python scripts/evaluate_candidates.py --input exact.json --stage exact --format csv
-python scripts/evaluate_candidates.py --input final.csv --stage final --format csv
-```
-
-It supports CSV, a JSON array, or JSON objects containing `rows` or `keywords`. It computes only mechanical fields; it does not inspect Google or decide product-market fit.
-
-## Human / Real-World Gates
-
-- Google `intitle:"keyword"` result count must be actually observed. If unavailable, leave KGR unknown.
-- KD 40–50 requires real SERP review and at least two documented weak positions before it may become a `do_candidate`.
-- The final question — whether the team can build a materially better page/product than current results — remains a human decision.
+Keep the existing `observed`, `calculated`, `analysis`, `unknown` meanings. Missing, invalid, numeric zero, and `not_applicable` remain distinct. Never manufacture Volume, KD, CPC, `intitle`, rank/url, DR, or trend observations.
 
 ## Completion
 
-A finished batch must preserve the final decision table and cluster surviving opportunity keywords back to `domain × root × parent_seed`. Feed genuinely new recurring demand patterns back to `keyword-root-library`; do not silently mutate that library from this skill.
-
-After changing this skill, run:
-
-```bash
-pytest -q
-```
+Blocked candidates remain reported with their reason while evidence-complete candidates may continue. A finished selection batch exposes complete/blocked counts and preserves the human final decision; `do_candidate` is not an automatic final choice.
