@@ -10,7 +10,7 @@ Confirmed `emerging`/`breakout` candidates produce a `selection_handoff` contain
 
 `keyword | root_id | signal_type | first_observed_at | age_days | growth | persistence | source_count | source_evidence | volume | kd | cpc | intitle_results | metric_status | metric_provenance | metric_compatibility_status | kgr_compatibility_status`
 
-That handoff enters `seo-keyword-selection` **directly**. It must never route through `seo-keyword-discovery` or rerun Seed generation, Google Autocomplete, or Semrush Ideas discovery for the confirmed keyword.
+That handoff enters `seo-keyword-selection` **directly**. It must never route through `seo-keyword-discovery`; never rerun Seed generation, Google Autocomplete, or Semrush Ideas for the confirmed keyword.
 
 Selection reuses compatible fresh handoff evidence. Any missing/incompatible evidence is acquired beginning at the earliest missing **selection** contract (for example Stage 6 Exact, `intitle`, SERP, or finalist Trends), not by restarting discovery.
 
