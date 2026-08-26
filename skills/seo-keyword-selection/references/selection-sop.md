@@ -1,46 +1,34 @@
 # SEO Keyword Selection SOP
 
-This is the canonical workflow. Discovery is intentionally broad; decision stages become progressively stricter.
+This workflow starts at the former Step 5. Former Steps 0–4 now belong to `seo-keyword-discovery`; their business logic is migrated, not redesigned.
 
-## 0. Candidate domains
-
-Build a domain pool from interests, experience, observed markets, and prior wins. Do not use Volume/KD/CPC to eliminate domains before demand discovery.
-
-## 1. Root handoff
-
-Obtain roots from `keyword-root-library`. Prefer relevant `verified`/`active` roots; keep new `candidate` roots separate. Do not duplicate the root asset here.
-
-## 2. Domain × root → Seed
-
-Generate natural demand-entry Seeds. A Seed is a demand starting point, not yet an opportunity keyword. Avoid mechanical root permutations that produce unnatural phrases.
-
-## 3. Expand candidates
-
-Prioritize real search signals: Google Autocomplete/Related/PAA, Semrush ideas/related keywords, and competitor organic keywords. AI may expand long-tail forms from those signals, but AI-generated phrases remain candidates until real data exists.
-
-## 4. Low-risk cleaning
-
-Deduplicate. Remove clear brand/navigation terms and obvious semantic drift. Do not remove a term merely because competition “feels high.” Preserve `domain`, `root`, `parent_seed`, and source provenance.
+Inputs are either a valid discovery handoff or a confirmed `emerging`/`breakout` `selection_handoff`. Emerging handoffs never rerun Seed, Google Autocomplete, or Semrush Ideas discovery. Reuse compatible fresh evidence and resume from the earliest missing selection contract.
 
 ## 5. Ideas-stage wide recall
 
-Use broad recall thresholds from `decision-rules.md`. This stage minimizes false negatives; it is not the final gate. Rows whose Volume/KD are missing remain `pending_metrics`, not rejected. If their source and semantics are credible, route them to exact lookup when the cost is acceptable or park them explicitly for later review.
+Use the unchanged broad recall thresholds from `decision-rules.md`. Rows whose Ideas Volume/KD are missing remain `pending_metrics`, not rejected and not final decisions. Route credible `pending_metrics` rows to Stage 6 Exact acquisition or park them explicitly.
 
-## 6. Exact metric retrieval
+## 6. Exact metric retrieval — production hard gate
 
-For recall survivors obtain current US Volume, Semrush KD, CPC, intent, competition level, and 12-month trend from a real source. From this point forward, use the exact/current values for decisions.
+For each candidate obtain current US Volume, Semrush KD, CPC, intent, competition level, and 12-month trend through the project `sem.3ue.com` relay collector. Preserve:
+
+`metric_source=Semrush | metric_database=us | metric_stage=exact | observed_at | relay_origin | provenance_ref`
+
+Validate the candidate against `runtime/stage_contracts.json` stage `stage6_exact` before Stage 7+ production evaluation.
+
+The existing evaluator may still mechanically process incomplete rows and retain `pending_metrics`; production code must not present those rows as completed candidates. If Exact acquisition still cannot satisfy the contract, mark that candidate `BLOCKED` and continue other evidence-complete candidates.
 
 ## 7. Exact pool + KD band
 
-Classify exact Volume into main/blue-ocean/below-floor pools and KD into do-candidate/observe/principle-eliminate bands. KD 40–50 remains observable, not automatically viable.
+Apply the unchanged exact Volume pools and KD bands. KD 40–50 remains observable, not automatically viable.
 
 ## 8. CPC + intent review
 
-Treat CPC ≥ $0.10 as a positive commercial signal, not a universal hard gate. Review actual user intent and best fulfillment form: tool, information, resource, commercial page, interactive experience, etc.
+Treat CPC ≥ $0.10 as the existing positive commercial signal, not a universal hard gate. Review actual user intent and best fulfillment form.
 
 ## 9. AI intent / SERP hypothesis
 
-Predict likely SERP shape and page form only to prioritize review work. Label this as analysis. Do not use predicted DR, rankings, or competitor strength as facts.
+AI may predict likely SERP shape only to prioritize review work. It is `analysis`, not observed rank, DR, or competitor strength.
 
 ## 10. Compress manual-review pool
 
@@ -48,29 +36,31 @@ Using observed Volume/KD/CPC/intent plus clear exclusions, reduce the set to rou
 
 ## 11. Observe `intitle`
 
-Search Google using exactly `intitle:"keyword"` and record the visible result count. If a reliable count is unavailable, store `unknown`. Do not substitute Bing, generic result counts, API row counts, or AI estimates.
+Use the project Google live collector for the exact query `intitle:"keyword"`. Save real visible count, market, timestamp, and evidence. Bing counts, generic Google counts, API row counts, AI estimates, or KD inference are prohibited.
+
+If the count cannot be reliably obtained, the candidate becomes `BLOCKED_KGR` / pending KGR execution state. Do not replace the evaluator's canonical business status with that execution state.
 
 ## 12. Calculate KGR
 
-Calculate KGR from observed inputs. Use the rule in `decision-rules.md`. Missing numerator or denominator means KGR remains unknown.
+KGR remains calculated by `evaluate_candidates.py` from real `intitle_results` and Volume. Do not hand-fill KGR or add an independent KGR hook. The existing `<0.25` rule is unchanged.
 
 ## 13. Review real SERP top 10
 
-Inspect actual result types and competitive positions: homepages, inner pages, tools, publishers, UGC, small sites, new sites, page quality, intent fit, freshness, and page-level strength where available. Document weak positions rather than merely assigning a vibe.
+Use the project Google live collector to obtain current top-10 rank/url evidence. AI may analyze intent fit, page quality, weakness, freshness, UGC, small-site presence, and similar qualities on top of those observed facts. External facts such as DR must be actually acquired or remain unknown.
 
-KD 40–50 may upgrade only under the weak-position rule in `decision-rules.md`.
+KD 40–50 may upgrade only under the existing rule: KGR < 0.25 plus real top 10 plus structured weak evidence plus at least two verifiable weak positions. The evaluator remains authoritative for this mechanical upgrade behavior.
 
 ## 14. Trend validation
 
-Use Semrush 12-month trend first. For finalists, cross-check Google Trends to identify stable, rising, declining, seasonal, or event-driven demand.
+Semrush 12-month trend is already mandatory in the Stage 6 Exact contract. Serious finalists additionally require a real Google Trends cross-check through the project collector. This is `CONDITIONAL_REQUIRED` only for finalists.
 
 ## 15. Optional Keyword Planner cross-check
 
-For roughly 5–10 serious finalists, cross-check search volume in Google Ads Keyword Planner when available. This is a late validation layer, not a requirement for thousands of candidates.
+Google Ads Keyword Planner remains optional. Its absence is not a production-stage failure.
 
 ## 16. Calculate KDRoi
 
-Calculate KDRoi only from observed Volume/CPC/KD and only when KD > 0. It is a ranking aid, not a gate or final score.
+Keep the existing formula and evaluator semantics: `Volume × CPC ÷ KD` when required inputs exist and KD > 0. KD = 0 is `not_applicable` for KDRoi in reporting and must not block the workflow. Do not add a collector or independent hook for KDRoi.
 
 ## 17. Final decision table
 
@@ -78,28 +68,24 @@ Maintain at least:
 
 `keyword | domain | root | parent_seed | volume | kd | cpc | metric_source | metric_database | observed_at | metric_stage | provenance_status | intent | trend | intitle_results | kgr | serp_weak_evidence | serp_weak_points | page_form | kdroi | risk | status | duplicate_warning`
 
-Every numeric field must preserve provenance or be a transparent formula.
+Also report `complete_count`, `blocked_count`, and blocked reasons. Never silently delete blocked candidates.
 
 ## 18. Cluster opportunities
 
-Cluster surviving terms back to `domain × root × parent_seed`. The unit of strategic interest is the density and quality of opportunities in a demand family, not the count of isolated keywords.
+Cluster surviving evidence-complete terms back to `domain × root × parent_seed` using the existing method.
 
 ## 19. Infer product directions
 
-Translate strong demand clusters into possible product/content architectures. Keywords are demand evidence, not products.
+Translate strong demand clusters into possible product/content architectures. Keywords remain demand evidence, not products.
 
 ## 20. Human final decision
 
-The human selects 1–3 priorities after considering product advantage, build cost, content ability, SEO resources, monetization, data access, time, interest, and whether a materially better result can be built.
+The human selects 1–3 priorities after considering product advantage, build cost, content ability, SEO resources, monetization, data access, time, interest, and whether a materially better result can be built. No hook or evaluator replaces this decision.
 
 ## 21. Calibrate thresholds
 
-After every two completed batches, review the medians/distribution of Volume, KD, CPC, and KGR among human-selected terms. If results consistently sit outside current defaults, revise `decision-rules.md` and tests together. Do not silently drift thresholds during a batch.
+Keep the existing calibration rule. Never alter thresholds ad hoc during a batch.
 
 ## Feedback to root library
 
-After each batch, recurring demand patterns missing from the root asset may be proposed back to `keyword-root-library` as candidates with provenance. This workflow never auto-promotes or silently edits the root library.
-
-### Reliability checks before final decision
-
-Before trusting the final decision table, repair all `invalid_row` records, inspect `provenance_status`, and resolve duplicate warnings. For KD 40–50 terms, SERP weak-position counts must be derived from structured evidence tied to real top-10 results; a bare count is not sufficient. These checks do not change the locked Volume/KD/CPC/KGR thresholds.
+Recurring demand patterns may be proposed back to `keyword-root-library`; selection never silently edits the canonical root asset.
