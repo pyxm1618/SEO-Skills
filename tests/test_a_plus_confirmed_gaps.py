@@ -28,8 +28,8 @@ def exact_row(**overrides):
         "volume": 1000,
         "kd": 20,
         "cpc": 0.20,
-        "intent": "informational",
-        "competition_level": "low",
+        "intent": [0],
+        "competition_level": 0.33,
         "trend": list(range(1, 13)),
         "metric_source": "Semrush",
         "metric_database": "us",
@@ -128,22 +128,24 @@ def relay_descriptor(mode, **extra):
     return data
 
 
-def test_semrush_exact_collect_deterministically_normalizes_current_response_shape():
+def test_semrush_exact_collect_deterministically_normalizes_observed_relay_shape():
     semrush = load_module("semrush_relay_collector", SEMRUSH)
     raw = {
-        "data": {
-            "rows": [
+        "jsonrpc": "2.0",
+        "result": {
+            "keywords": [
                 {
-                    "keyword": "wedding calculator",
+                    "phrase": "wedding calculator",
+                    "database": "us",
                     "volume": 1000,
-                    "kd": 20,
+                    "difficulty": 20,
                     "cpc": 0.2,
-                    "intent": "informational",
-                    "competition_level": "low",
+                    "intents": [0],
+                    "competition_level": 0.33,
                     "trend": list(range(1, 13)),
                 }
             ]
-        }
+        },
     }
     result = semrush.collect(
         FakePage(raw),
@@ -153,6 +155,9 @@ def test_semrush_exact_collect_deterministically_normalizes_current_response_sha
     assert result.get("volume") == 1000
     assert result.get("kd") == 20
     assert result.get("cpc") == 0.2
+    assert result.get("intent") == [0]
+    assert result.get("competition_level") == 0.33
+    assert result.get("trend") == list(range(1, 13))
     assert result.get("metric_source") == "Semrush"
     assert result.get("metric_database") == "us"
     assert result.get("metric_stage") == "exact"
@@ -161,24 +166,23 @@ def test_semrush_exact_collect_deterministically_normalizes_current_response_sha
     assert "response" not in result
 
 
-def test_semrush_ideas_collect_normalizes_rows_instead_of_returning_raw_response():
+def test_semrush_ideas_collect_normalizes_observed_rows_instead_of_returning_raw_response():
     semrush = load_module("semrush_relay_collector_ideas", SEMRUSH)
     raw = {
-        "data": {
-            "rows": [
-                {"keyword": "wedding cost calculator", "volume": 900, "kd": 22},
-                {"keyword": "wedding budget calculator", "volume": 1200, "kd": 25},
-            ]
-        }
+        "jsonrpc": "2.0",
+        "result": [
+            {"phrase": "wedding cost calculator", "volume": 900, "difficulty": 22},
+            {"phrase": "wedding budget calculator", "volume": 1200, "difficulty": 25},
+        ],
     }
     result = semrush.collect(
         FakePage(raw),
         relay_descriptor("ideas", seed="wedding calculator"),
     )
     assert result.get("seed") == "wedding calculator"
-    assert [row["keyword"] for row in result.get("rows", [])] == [
-        "wedding cost calculator",
-        "wedding budget calculator",
+    assert result.get("rows") == [
+        {"keyword": "wedding cost calculator", "volume": 900, "kd": 22},
+        {"keyword": "wedding budget calculator", "volume": 1200, "kd": 25},
     ]
     assert result.get("metric_source") == "Semrush"
     assert result.get("provenance_ref")
@@ -187,13 +191,47 @@ def test_semrush_ideas_collect_normalizes_rows_instead_of_returning_raw_response
 
 def test_semrush_exact_schema_mismatch_fails_closed():
     semrush = load_module("semrush_relay_collector_bad_schema", SEMRUSH)
-    raw = {"data": {"rows": [{"keyword": "wedding calculator", "volume": 1000}]}}
+    raw = {
+        "jsonrpc": "2.0",
+        "result": {
+            "keywords": [
+                {"phrase": "wedding calculator", "database": "us", "volume": 1000}
+            ]
+        },
+    }
     try:
         semrush.collect(FakePage(raw), relay_descriptor("exact", keyword="wedding calculator"))
     except RuntimeError as exc:
         assert "schema" in str(exc).lower() or "missing" in str(exc).lower()
     else:
         raise AssertionError("exact schema mismatch must fail closed")
+
+
+def test_semrush_exact_missing_metric_is_not_coerced_to_zero():
+    semrush = load_module("semrush_relay_collector_missing_metric", SEMRUSH)
+    raw = {
+        "jsonrpc": "2.0",
+        "result": {
+            "keywords": [
+                {
+                    "phrase": "wedding calculator",
+                    "database": "us",
+                    "volume": 1000,
+                    "difficulty": None,
+                    "cpc": 0,
+                    "intents": [0],
+                    "competition_level": 0.33,
+                    "trend": list(range(1, 13)),
+                }
+            ]
+        },
+    }
+    try:
+        semrush.collect(FakePage(raw), relay_descriptor("exact", keyword="wedding calculator"))
+    except RuntimeError as exc:
+        assert "difficulty" in str(exc).lower() or "missing" in str(exc).lower()
+    else:
+        raise AssertionError("missing exact metric must fail closed, not become zero")
 
 
 def test_stage6_numeric_sanity_rejects_impossible_values():
