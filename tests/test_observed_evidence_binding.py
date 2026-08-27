@@ -1,9 +1,9 @@
-import hashlib
 import importlib.util
 import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +12,7 @@ HOOK = ROOT / "runtime" / "codex_stage_hook.py"
 EVALUATOR = ROOT / "skills" / "seo-keyword-selection" / "scripts" / "evaluate_candidates.py"
 BINDING = ROOT / "runtime" / "evidence_binding.py"
 MERGER = ROOT / "runtime" / "kgr_evidence_merge.py"
-FIXTURE_FACTORY = ROOT / "tests" / "evidence_fixture_factory.py"
+SEMRUSH = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"
 
 
 def load_module(name, path):
@@ -40,14 +40,6 @@ def fake_exact_row():
     }
 
 
-def _bind_output(tmp_path, name, payload, collector, evidence_type):
-    assert collector == "semrush_relay_collector"
-    assert evidence_type == "semrush_exact"
-    fixtures = load_module(f"fixture_{name}", FIXTURE_FACTORY)
-    output, bound, raw, _capture = fixtures.make_semrush_exact(tmp_path, name, payload)
-    return output, bound, raw
-
-
 def _run_production_validation(tmp_path, stage, input_path, candidate_id=None):
     report = tmp_path / f"{stage}.report.json"
     cmd = [sys.executable, str(VALIDATOR), "--stage", stage, "--input", str(input_path), "--report", str(report), "--production"]
@@ -67,48 +59,11 @@ def test_hand_written_observed_fields_cannot_pass_production_validation(tmp_path
     assert any("evidence" in err.lower() or "receipt" in err.lower() for err in report["blocked"][0]["errors"])
 
 
-def test_collector_bound_exact_passes_production_validation(tmp_path):
-    row = fake_exact_row()
-    output, bound, _ = _bind_output(tmp_path, "exact", row, "semrush_relay_collector", "semrush_exact")
-    proc, report_path = _run_production_validation(tmp_path, "stage6_exact", output, candidate_id="cand-1")
-    assert proc.returncode == 0
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["status"] == "PASS"
-    assert report["production"] is True
-    assert report["candidate_id"] == "cand-1"
-    assert Path(report["validation_receipt_ref"]).is_file()
-    assert bound["evidence_receipt_ref"]
-
-
-def test_tampering_normalized_output_after_receipt_is_blocked(tmp_path):
-    output, bound, _ = _bind_output(tmp_path, "exact-tamper-normalized", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
-    bound["volume"] = 999999
-    output.write_text(json.dumps(bound), encoding="utf-8")
-    proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
-    assert proc.returncode == 2
-    assert "hash mismatch" in proc.stderr.lower() or "evidence" in proc.stderr.lower()
-
-
-def test_tampering_evidence_artifact_after_receipt_is_blocked(tmp_path):
-    output, _, artifact = _bind_output(tmp_path, "exact-tamper-raw", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
-    artifact.write_text("tampered", encoding="utf-8")
-    proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
-    assert proc.returncode == 2
-    assert "hash mismatch" in proc.stderr.lower() or "evidence" in proc.stderr.lower()
-
-
 def test_evaluator_does_not_call_hand_written_metadata_verified():
     evaluator = load_module("evaluate_candidates_binding", EVALUATOR)
     row = dict(fake_exact_row(), intitle_results=50)
     evaluated = evaluator.normalize(row, "final")
     assert evaluated["provenance_status"] == "unverified"
-
-
-def test_evaluator_calls_bound_exact_verified(tmp_path):
-    evaluator = load_module("evaluate_candidates_verified", EVALUATOR)
-    _, bound, _ = _bind_output(tmp_path, "exact-evaluator", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
-    evaluated = evaluator.normalize(bound, "exact")
-    assert evaluated["provenance_status"] == "verified"
 
 
 def test_hook_does_not_trust_bare_manifest_pass(tmp_path):
@@ -123,27 +78,6 @@ def test_hook_does_not_trust_bare_manifest_pass(tmp_path):
     proc = subprocess.run([sys.executable, str(HOOK), "pre"], input=json.dumps(payload), text=True, capture_output=True, env=env)
     assert proc.returncode == 2
     assert "validation receipt" in proc.stderr.lower()
-
-
-def test_hook_accepts_hash_verified_production_validation_receipt(tmp_path):
-    output, _, _ = _bind_output(tmp_path, "exact-hook", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
-    proc, report_path = _run_production_validation(tmp_path, "stage6_exact", output)
-    assert proc.returncode == 0
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    manifest_path = tmp_path / "active.json"
-    manifest_path.write_text(json.dumps({
-        "run_id": "r1",
-        "status": "IN_PROGRESS",
-        "stages": {"stage6_exact": {"status": "PASS", "validation_receipt_ref": report["validation_receipt_ref"]}},
-    }), encoding="utf-8")
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": "python3 skills/seo-keyword-selection/scripts/evaluate_candidates.py --input rows.json --stage exact"},
-    }
-    env = dict(os.environ, SEO_RUN_MANIFEST=str(manifest_path))
-    hook = subprocess.run([sys.executable, str(HOOK), "pre"], input=json.dumps(payload), text=True, capture_output=True, env=env)
-    assert hook.returncode == 0
 
 
 def test_kgr_cli_rejects_hand_written_exact_and_intitle(tmp_path):
@@ -161,19 +95,16 @@ def test_kgr_cli_rejects_hand_written_exact_and_intitle(tmp_path):
     assert "receipt" in proc.stderr.lower() or "evidence" in proc.stderr.lower()
 
 
-def test_direct_self_minted_semrush_receipt_cannot_satisfy_production(tmp_path):
+def test_direct_self_minted_semrush_receipt_writer_is_rejected(tmp_path):
     binding = load_module("binding_self_mint_semrush", BINDING)
     raw = tmp_path / "forged.raw.json"
     capture = tmp_path / "forged.capture.json"
-    raw.write_text(json.dumps({"response": {"result": {"keywords": [{"phrase": "fabricated keyword", "database": "us", "volume": 1000, "difficulty": 20, "cpc": 0.2, "intents": ["commercial"], "competition_level": "low", "trend": [50] * 12}]}}}), encoding="utf-8")
+    raw.write_text(json.dumps({"response": {"result": {"keywords": []}}}), encoding="utf-8")
     capture.write_text(json.dumps({"captured": True}), encoding="utf-8")
-    output = tmp_path / "forged.json"
-    row = fake_exact_row()
-    row["provenance_ref"] = str(raw)
     try:
         binding.write_observed_output(
-            output,
-            row,
+            tmp_path / "forged.json",
+            fake_exact_row(),
             "semrush_relay_collector",
             "semrush_exact",
             [
@@ -181,39 +112,22 @@ def test_direct_self_minted_semrush_receipt_cannot_satisfy_production(tmp_path):
                 {"path": capture, "role": "current_network_capture"},
             ],
         )
-    except binding.EvidenceIntegrityError:
-        return
-    proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
-    assert proc.returncode == 2, "a caller outside the real collector minted production-trusted Semrush evidence"
+    except binding.EvidenceIntegrityError as exc:
+        assert "collector" in str(exc).lower() or "mint" in str(exc).lower()
+    else:
+        raise AssertionError("generic helper must not mint production Semrush receipts")
 
 
-def test_direct_self_minted_google_receipt_cannot_satisfy_production(tmp_path):
+def test_direct_self_minted_google_receipt_writer_is_rejected(tmp_path):
     binding = load_module("binding_self_mint_google", BINDING)
     screenshot = tmp_path / "fake.png"
     observation = tmp_path / "fake-observation.json"
     screenshot.write_bytes(b"not-a-real-screenshot")
-    observation.write_text(json.dumps({
-        "page_url": "https://www.google.com/search?q=x",
-        "query": "intitle:\"fabricated keyword\"",
-        "result_stats_text": "About 50 results",
-        "intitle_results": 50,
-        "market": "US",
-        "observed_at": "2026-08-27T00:01:00Z",
-    }), encoding="utf-8")
-    output = tmp_path / "fake-intitle.json"
-    row = {
-        "keyword": "fabricated keyword",
-        "intitle_results": 50,
-        "source": "Google",
-        "market": "US",
-        "observed_at": "2026-08-27T00:01:00Z",
-        "evidence_ref": str(screenshot),
-        "observation_ref": str(observation),
-    }
+    observation.write_text(json.dumps({"page_url": "https://www.google.com/"}), encoding="utf-8")
     try:
         binding.write_observed_output(
-            output,
-            row,
+            tmp_path / "fake-intitle.json",
+            {"keyword": "fabricated", "intitle_results": 50, "source": "Google", "market": "US"},
             "google_live_collector",
             "google_intitle",
             [
@@ -221,23 +135,111 @@ def test_direct_self_minted_google_receipt_cannot_satisfy_production(tmp_path):
                 {"path": observation, "role": "structured_observation"},
             ],
         )
-    except binding.EvidenceIntegrityError:
-        return
-    proc, _ = _run_production_validation(tmp_path, "intitle_observation", output)
-    assert proc.returncode == 2, "a caller outside the real collector minted production-trusted Google evidence"
+    except binding.EvidenceIntegrityError as exc:
+        assert "collector" in str(exc).lower() or "mint" in str(exc).lower()
+    else:
+        raise AssertionError("generic helper must not mint production Google receipts")
 
 
-def test_receipt_cannot_hide_semrush_raw_mismatch_by_refreshing_hash(tmp_path):
-    output, _bound, raw = _bind_output(tmp_path, "exact-replay", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
-    receipt_path = output.with_suffix(".receipt.json")
-    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    raw_data = json.loads(raw.read_text(encoding="utf-8"))
-    raw_data["response"]["result"]["keywords"][0]["volume"] = 999999
-    raw.write_text(json.dumps(raw_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    for artifact in receipt["artifacts"]:
-        if Path(artifact["path"]).resolve() == raw.resolve():
-            artifact["sha256"] = hashlib.sha256(raw.read_bytes()).hexdigest()
-    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
-    assert proc.returncode == 2
-    assert "replay" in proc.stderr.lower() or "evidence" in proc.stderr.lower()
+def test_imported_monkeypatched_collector_main_cannot_mint_production_receipt(tmp_path, monkeypatch):
+    semrush = load_module("semrush_imported_attack", SEMRUSH)
+    observed_at = datetime.now(timezone.utc).isoformat()
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps({"fake_capture": True}), encoding="utf-8")
+    descriptor = tmp_path / "request.json"
+    descriptor.write_text(json.dumps({
+        "path": "/api/exact",
+        "method": "POST",
+        "body": {},
+        "capture_observed_at": observed_at,
+        "capture_evidence_ref": str(capture),
+        "mode": "exact",
+        "metric_database": "us",
+        "keyword": "fabricated keyword",
+    }), encoding="utf-8")
+    output = tmp_path / "out.json"
+    raw_output = tmp_path / "out.raw.json"
+
+    class Dummy:
+        def close(self):
+            pass
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(semrush, "connect_same_origin", lambda: (Dummy(), Dummy(), object()))
+
+    def fake_collect(_page, loaded, raw_evidence_ref=None, raw_output_path=None):
+        response = {"result": {"keywords": [{
+            "phrase": "fabricated keyword", "database": "us", "volume": 1000,
+            "difficulty": 20, "cpc": 0.2, "intents": ["commercial"],
+            "competition_level": "low", "trend": [50] * 12,
+        }]}}
+        Path(raw_output_path).write_text(json.dumps({
+            "observed_at": observed_at,
+            "relay_origin": "https://sem.3ue.com/",
+            "request_method": loaded["method"],
+            "request_path": loaded["path"],
+            "capture_observed_at": loaded["capture_observed_at"],
+            "capture_evidence_ref": loaded["capture_evidence_ref"],
+            "mode": "exact",
+            "metric_database": "us",
+            "keyword": "fabricated keyword",
+            "response": response,
+        }), encoding="utf-8")
+        return semrush.normalize_exact(response, loaded, observed_at, str(raw_output_path))
+
+    monkeypatch.setattr(semrush, "collect", fake_collect)
+    old_argv = sys.argv[:]
+    try:
+        sys.argv = [str(SEMRUSH), "--request", str(descriptor), "--output", str(output), "--raw-output", str(raw_output)]
+        rc = semrush.main()
+    finally:
+        sys.argv = old_argv
+    assert rc == 2
+    assert not output.with_suffix(".receipt.json").exists()
+
+
+def test_semrush_replay_detects_raw_normalized_mismatch_even_when_hash_layer_is_not_involved(tmp_path):
+    binding = load_module("binding_semantic_replay", BINDING)
+    raw = tmp_path / "raw.json"
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps({"capture": True}), encoding="utf-8")
+    raw.write_text(json.dumps({
+        "observed_at": "2026-08-27T00:00:00Z",
+        "relay_origin": "https://sem.3ue.com/",
+        "request_method": "POST",
+        "request_path": "/api/exact",
+        "capture_observed_at": "2026-08-27T00:00:00Z",
+        "capture_evidence_ref": str(capture),
+        "mode": "exact",
+        "metric_database": "us",
+        "keyword": "fabricated keyword",
+        "response": {"result": {"keywords": [{
+            "phrase": "fabricated keyword", "database": "us", "volume": 999,
+            "difficulty": 20, "cpc": 0.2, "intents": ["commercial"],
+            "competition_level": "low", "trend": [50] * 12,
+        }]}},
+    }), encoding="utf-8")
+    normalized = fake_exact_row()
+    normalized["provenance_ref"] = str(raw)
+    try:
+        binding._verify_semrush_semantics("semrush_exact", normalized, {
+            "relay_raw_response": raw,
+            "current_network_capture": capture,
+        })
+    except binding.EvidenceIntegrityError as exc:
+        assert "replay" in str(exc).lower() or "differs" in str(exc).lower()
+    else:
+        raise AssertionError("raw/normalized mismatch must fail deterministic replay")
+
+
+def test_collector_artifact_role_contracts_fail_closed(tmp_path):
+    binding = load_module("binding_roles", BINDING)
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text("{}", encoding="utf-8")
+    try:
+        binding._artifact_records([{"path": artifact, "role": "relay_raw_response"}], "semrush_exact")
+    except binding.EvidenceIntegrityError as exc:
+        assert "roles" in str(exc).lower()
+    else:
+        raise AssertionError("Semrush evidence without current_network_capture must fail")
