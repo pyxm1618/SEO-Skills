@@ -43,6 +43,23 @@ def exact_row(**overrides):
     return row
 
 
+def _bound_stage_row(tmp_path, stage, label):
+    if stage != "stage6_exact":
+        return {"test": True}
+    binding = load_module(f"hook_evidence_binding_{label}", ROOT / "runtime" / "evidence_binding.py")
+    artifact = tmp_path / f"{label}-{stage}.raw.json"
+    artifact.write_text(json.dumps({"response": {"test": True}}), encoding="utf-8")
+    output = tmp_path / f"{label}-{stage}.json"
+    payload = exact_row(provenance_ref=str(artifact))
+    return binding.write_observed_output(
+        output,
+        payload,
+        "semrush_relay_collector",
+        "semrush_exact",
+        [{"path": str(artifact), "role": "raw_relay_response"}],
+    )
+
+
 def _bind_pass_records(tmp_path, manifest):
     def bind(record, stage, candidate_id, label):
         if not isinstance(record, dict) or record.get("status") != "PASS" or record.get("validation_receipt_ref"):
@@ -56,7 +73,7 @@ def _bind_pass_records(tmp_path, manifest):
             "candidate_id": candidate_id,
             "complete_count": 1,
             "blocked_count": 0,
-            "complete": [{"test": True}],
+            "complete": [_bound_stage_row(tmp_path, stage, label)],
             "blocked": [],
             "validation_receipt_ref": str(receipt_path),
         }
