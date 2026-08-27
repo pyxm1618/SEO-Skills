@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 """Bind observed SEO rows to evidence emitted by the real project collectors.
 
-This is an execution-integrity mechanism for normal Codex/agent workflows, not
-an adversarial cryptographic signature. Production receipts can only be minted
-from the expected collector CLI module, must carry that collector's artifact
-set, and are re-derived from recorded raw/structured evidence during validation.
+Production evidence is structurally replayed from raw/structured collector
+artifacts and must also carry an issuance proof from an OS-level trusted broker.
+The repository never stores or generates the broker's signing secret. When the
+broker is not installed, production issuance and verification fail closed.
 """
 
 import hashlib
-import hmac
 import importlib.util
 import inspect
 import json
 import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 SCHEMA = "seo-observed-evidence/v2"
-ISSUANCE_SCHEMA = "seo-issuance-proof/v1"
+ISSUANCE_SCHEMA = "seo-issuance-broker/v1"
+ATTESTATION_SCHEMA = "seo-external-attestation/v1"
 ROOT = Path(__file__).resolve().parent
+TRUSTED_BROKER_CANDIDATES = (
+    Path("/usr/local/libexec/seo-issuance-broker"),
+    Path("/opt/openai/libexec/seo-issuance-broker"),
+)
 COLLECTOR_FILES = {
     "semrush_ideas": ROOT / "collectors" / "semrush_relay_collector.py",
     "semrush_exact": ROOT / "collectors" / "semrush_relay_collector.py",
@@ -74,52 +79,95 @@ def _json_read(path, label):
     return value
 
 
-def _get_issuance_secret():
-    secret = os.environ.get("SEO_ISSUANCE_SECRET")
-    if secret:
-        return secret.encode("utf-8")
-    manifest_override = os.environ.get("SEO_RUN_MANIFEST")
-    secret_file = (
-        Path(manifest_override).parent / ".issuance_secret"
-        if manifest_override
-        else Path(".seo-run/.issuance_secret")
-    )
-    if secret_file.is_file():
+def _trusted_broker_path():
+    """Return a fixed, root-owned, non-writable broker executable or fail closed."""
+    for candidate in TRUSTED_BROKER_CANDIDATES:
         try:
-            content = secret_file.read_bytes().strip()
-            if content:
-                return content
+            if not candidate.is_file() or candidate.is_symlink():
+                continue
+            resolved = candidate.resolve(strict=True)
+            stat = resolved.stat()
         except OSError:
-            pass
-    return None
-
-
-def _ensure_issuance_secret():
-    secret = _get_issuance_secret()
-    if secret:
-        return secret
-    manifest_override = os.environ.get("SEO_RUN_MANIFEST")
-    secret_file = (
-        Path(manifest_override).parent / ".issuance_secret"
-        if manifest_override
-        else Path(".seo-run/.issuance_secret")
+            continue
+        if stat.st_uid != 0:
+            continue
+        if stat.st_mode & 0o022:
+            continue
+        if not os.access(resolved, os.X_OK):
+            continue
+        return resolved
+    raise EvidenceIntegrityError(
+        "trusted issuance broker unavailable; install a root-owned non-writable "
+        "seo-issuance-broker at /usr/local/libexec or /opt/openai/libexec"
     )
-    secret_file.parent.mkdir(parents=True, exist_ok=True)
-    generated = hashlib.sha256(os.urandom(32) + str(Path(__file__).resolve()).encode("utf-8")).hexdigest().encode("utf-8")
-    secret_file.write_bytes(generated + b"\n")
-    return generated
 
 
-def _mint_issuance_proof(collector, evidence_type, normalized_sha256, issued_at):
-    secret = _ensure_issuance_secret()
-    msg = f"{collector}:{evidence_type}:{normalized_sha256}:{issued_at}".encode("utf-8")
-    token = hmac.new(secret, msg, hashlib.sha256).hexdigest()
-    return {
-        "schema": ISSUANCE_SCHEMA,
+def _broker_request(action, payload):
+    broker = _trusted_broker_path()
+    try:
+        proc = subprocess.run(
+            [str(broker), action],
+            input=json.dumps(payload, ensure_ascii=False),
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EvidenceIntegrityError(f"trusted issuance broker execution failed: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "broker denied request").strip()
+        raise EvidenceIntegrityError(f"trusted issuance broker denied {action}: {detail}")
+    try:
+        response = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise EvidenceIntegrityError("trusted issuance broker returned invalid JSON") from exc
+    if not isinstance(response, dict) or response.get("ok") is not True:
+        raise EvidenceIntegrityError("trusted issuance broker did not confirm request")
+    return response
+
+
+def _assert_issuance_mint_caller(issuer, kind):
+    """Prevent repository helpers from becoming a generic signing oracle.
+
+    The external broker MUST independently enforce the same parent-process
+    policy. This local check is defense in depth; the actual secret remains
+    outside the agent security principal.
+    """
+    frame = inspect.currentframe()
+    caller = frame.f_back.f_back if frame and frame.f_back else None
+    caller_path = Path(caller.f_code.co_filename).resolve() if caller is not None else None
+    caller_module = str(caller.f_globals.get("__name__") or "") if caller is not None else ""
+    caller_name = str(caller.f_code.co_name or "") if caller is not None else ""
+
+    if issuer in set(EXPECTED_COLLECTORS.values()):
+        if caller_path != Path(__file__).resolve() or caller_name != "write_observed_output":
+            raise EvidenceIntegrityError("collector issuance may only be requested by write_observed_output")
+        return
+    if issuer == "stage_validator":
+        expected = (ROOT / "stage_validator.py").resolve()
+        if caller_path != expected or caller_module != "__main__" or caller_name != "_write_validation_receipt":
+            raise EvidenceIntegrityError("validation issuance may only be requested by direct stage_validator CLI execution")
+        return
+    raise EvidenceIntegrityError(f"unsupported issuance issuer: {issuer} kind={kind}")
+
+
+def _mint_issuance_proof(issuer, kind, subject_sha256, issued_at):
+    _assert_issuance_mint_caller(issuer, kind)
+    expected = {
+        "issuer": str(issuer),
+        "kind": str(kind),
+        "subject_sha256": str(subject_sha256),
         "issued_at": str(issued_at),
-        "issuer": collector,
-        "token": token,
     }
+    response = _broker_request("sign", expected)
+    proof = response.get("proof")
+    if not isinstance(proof, dict) or proof.get("schema") != ISSUANCE_SCHEMA:
+        raise EvidenceIntegrityError("trusted issuance broker returned invalid issuance proof")
+    for field, value in expected.items():
+        if proof.get(field) != value:
+            raise EvidenceIntegrityError(f"trusted issuance broker proof {field} mismatch")
+    return proof
 
 
 def _verify_issuance_proof(receipt):
@@ -127,22 +175,38 @@ def _verify_issuance_proof(receipt):
     if not isinstance(issuance, dict):
         raise EvidenceIntegrityError("evidence receipt issuance proof missing; untrusted synthetic receipt rejected")
     if issuance.get("schema") != ISSUANCE_SCHEMA:
-        raise EvidenceIntegrityError(f"evidence receipt issuance proof schema mismatch: {issuance.get('schema')}")
-    expected_issuer = receipt.get("collector") if receipt.get("schema") == SCHEMA else "stage_validator"
-    if issuance.get("issuer") != expected_issuer:
-        raise EvidenceIntegrityError(
-            f"evidence receipt issuance proof issuer mismatch: expected {expected_issuer}, got {issuance.get('issuer')}"
-        )
-    secret = _get_issuance_secret()
-    if not secret:
-        raise EvidenceIntegrityError("evidence receipt issuance proof cannot be verified; run-scoped issuance secret missing")
+        raise EvidenceIntegrityError("evidence receipt issuance proof schema mismatch")
     if receipt.get("schema") == SCHEMA:
-        msg = f"{issuance.get('issuer')}:{receipt.get('evidence_type')}:{receipt.get('normalized_sha256')}:{issuance.get('issued_at')}".encode("utf-8")
+        expected = {
+            "issuer": receipt.get("collector"),
+            "kind": receipt.get("evidence_type"),
+            "subject_sha256": receipt.get("normalized_sha256"),
+            "issued_at": issuance.get("issued_at"),
+        }
     else:
-        msg = f"{issuance.get('issuer')}:{receipt.get('stage')}:{receipt.get('report_sha256')}:{issuance.get('issued_at')}".encode("utf-8")
-    expected_token = hmac.new(secret, msg, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(str(issuance.get("token") or ""), expected_token):
-        raise EvidenceIntegrityError("evidence receipt issuance proof token invalid; forged receipt rejected")
+        expected = {
+            "issuer": "stage_validator",
+            "kind": receipt.get("stage"),
+            "subject_sha256": receipt.get("report_sha256"),
+            "issued_at": issuance.get("issued_at"),
+        }
+    response = _broker_request("verify", {"proof": issuance, "expected": expected})
+    if response.get("verified") is not True:
+        raise EvidenceIntegrityError("trusted issuance broker rejected issuance proof")
+    return True
+
+
+def verify_external_attestation(proof, kind, expected_claims):
+    """Verify host/human workflow claims that must not be self-asserted by the agent."""
+    if not isinstance(proof, dict) or proof.get("schema") != ATTESTATION_SCHEMA:
+        raise EvidenceIntegrityError(f"trusted {kind} attestation missing or invalid")
+    response = _broker_request(
+        "verify-attestation",
+        {"proof": proof, "expected": {"kind": str(kind), "claims": dict(expected_claims)}},
+    )
+    if response.get("verified") is not True:
+        raise EvidenceIntegrityError(f"trusted {kind} attestation rejected")
+    return True
 
 
 def _load_module(path, name):
