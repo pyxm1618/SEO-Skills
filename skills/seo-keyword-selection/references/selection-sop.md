@@ -10,7 +10,9 @@ Use the unchanged broad recall thresholds from `decision-rules.md`. Rows whose I
 
 ## 6. Exact metric retrieval — production hard gate
 
-For each candidate obtain current US Volume, Semrush KD, CPC, intent, competition level, and 12-month trend through the project `sem.3ue.com` relay collector. Preserve:
+For each candidate obtain current US Volume, Semrush KD, CPC, intent, competition level, and 12-month trend through the project `sem.3ue.com` relay collector. The request descriptor must come from the current authenticated same-origin network capture; the collector preserves the raw current response as evidence and deterministically normalizes the observed relay schema. AI must not copy values out of raw JSON.
+
+Preserve:
 
 `metric_source=Semrush | metric_database=us | metric_stage=exact | observed_at | relay_origin | provenance_ref`
 
@@ -42,7 +44,9 @@ If the count cannot be reliably obtained, the candidate becomes `BLOCKED_KGR` / 
 
 ## 12. Calculate KGR
 
-KGR remains calculated by `evaluate_candidates.py` from real `intitle_results` and Volume. Do not hand-fill KGR or add an independent KGR hook. The existing `<0.25` rule is unchanged.
+Join the verified Stage 6 Exact row and the verified Google `intitle` observation with `runtime/kgr_evidence_merge.py`. The merger must verify keyword identity, US market/database compatibility, both source contracts, and both provenance references. It only supplies `volume` + `intitle_results`; it does not calculate KGR.
+
+KGR remains calculated by `evaluate_candidates.py` from those real inputs. Do not hand-copy Volume, hand-fill KGR, or add an independent KGR algorithm. The existing `<0.25` rule is unchanged.
 
 ## 13. Review real SERP top 10
 
@@ -53,6 +57,8 @@ KD 40–50 may upgrade only under the existing rule: KGR < 0.25 plus real top 10
 ## 14. Trend validation
 
 Semrush 12-month trend is already mandatory in the Stage 6 Exact contract. Serious finalists additionally require a real Google Trends cross-check through the project collector. This is `CONDITIONAL_REQUIRED` only for finalists.
+
+The Trends collector must persist current temporal payload/series evidence sufficient to show what was observed. A page-open check, the words “Interest over time,” or a screenshot by itself is not sufficient. After observed temporal evidence exists, AI may classify the pattern as stable/rising/declining/seasonal/event-driven as `analysis`.
 
 ## 15. Optional Keyword Planner cross-check
 
