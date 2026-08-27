@@ -1,0 +1,139 @@
+{
+  "target_sha": "d00957e4fd7df1f4e135471e50427448c04ef01b",
+  "repository": "https://github.com/pyxm1618/SEO-Skills",
+  "target_pr": "https://github.com/pyxm1618/SEO-Skills/pull/18",
+  "generated_at": "2026-08-27T06:00:17.817279+00:00",
+  "evidence_file_count": 26,
+  "files": [
+    {
+      "path": "FINAL_ACCEPTANCE_REPORT.md",
+      "size_bytes": 13022,
+      "sha256": "2802b9c321dfd3b1a228f82c50dcb9dcbbdce0fcb575941154ca571970267edb"
+    },
+    {
+      "path": "TARGET_SHA.txt",
+      "size_bytes": 41,
+      "sha256": "80831bb5dee60e73fcc5db8f02654272e98de025e0a153da1bcf5fd68239d88f"
+    },
+    {
+      "path": "automated-tests/compileall.txt",
+      "size_bytes": 13,
+      "sha256": "b908b7176480bdd0b7e0b57935361748e1945f54426841ce0c537b4590af36c9"
+    },
+    {
+      "path": "automated-tests/test_all_q.txt",
+      "size_bytes": 273,
+      "sha256": "7a16a41c02a1b703f4f995f24adbb6df0fd909c5ad29078444d3082599f58f70"
+    },
+    {
+      "path": "automated-tests/test_all_verbose.txt",
+      "size_bytes": 21433,
+      "sha256": "22e1825d96b8c597f7094f5237ec72699d2fedf43de805f9512070cfa379e934"
+    },
+    {
+      "path": "automated-tests/test_emerging_q.txt",
+      "size_bytes": 112,
+      "sha256": "289d83d4710046e9ab7994c12dfc6a8b8615fc37088d5ccbc36f8639ba643373"
+    },
+    {
+      "path": "automated-tests/test_root_library_q.txt",
+      "size_bytes": 112,
+      "sha256": "4a3d15b9fd4ddb0774eacb427bc8583da08623f775e42745d06f86fb042bee9b"
+    },
+    {
+      "path": "automated-tests/test_selection_q.txt",
+      "size_bytes": 112,
+      "sha256": "7c7db71a027bb92fe313d13d1ed787a3641d4fc1cecd588762f0b5815d42843c"
+    },
+    {
+      "path": "code-audit/static_audit_summary.md",
+      "size_bytes": 3846,
+      "sha256": "e9b1648e22c4f821c3130e4843ba8165dcf8b80b5560ad0738dae9f7c9da5700"
+    },
+    {
+      "path": "codex-hooks/codex_hooks_live.md",
+      "size_bytes": 962,
+      "sha256": "daa61c7035383336a00bbf4f00cdc3a2f6ad19a96666bdf2800e0a0f9c3d768e"
+    },
+    {
+      "path": "e2e-emerging/e2e_emerging_live.md",
+      "size_bytes": 281,
+      "sha256": "8f0d2a03603e938af8237d6a8ca46d735ec8469ff71ff7074b139afa54c760d1"
+    },
+    {
+      "path": "e2e-traditional/e2e_traditional_live.md",
+      "size_bytes": 274,
+      "sha256": "49565cafa2c46a0974168e007945a8cc2e4f5276faf2571413d5c34ce4cd47f9"
+    },
+    {
+      "path": "environment.txt",
+      "size_bytes": 356,
+      "sha256": "38cda60f1dfc73950b973337218f237c5106cea4710951a514717c27eeb82977"
+    },
+    {
+      "path": "environment_probe.json",
+      "size_bytes": 558,
+      "sha256": "8f85f94baeedac4583193dd13eec386fae35d4072065aace70cde7a6788e0c4d"
+    },
+    {
+      "path": "environment_probe.py",
+      "size_bytes": 2224,
+      "sha256": "e65a14bfbd9f73b87992e1ef4b7149b7a94c7d15ec1010c7313fc66a67322b9b"
+    },
+    {
+      "path": "google-autocomplete/google_autocomplete_live.md",
+      "size_bytes": 415,
+      "sha256": "cfef193358c0566885649f2daff19893270cf682f012946499c604535c6c20b6"
+    },
+    {
+      "path": "intitle/intitle_live.md",
+      "size_bytes": 266,
+      "sha256": "82533a3436bb84b4e8bb6ab7c43357fb33c07a2548f0c95f1636c2efbbfcaf68"
+    },
+    {
+      "path": "kgr/kgr_live.md",
+      "size_bytes": 340,
+      "sha256": "384fab20596d9fe6ecb983103be5df4999b36f475a2135a97a378ff2c8de9e98"
+    },
+    {
+      "path": "p1-attacks/p1_attack_results.json",
+      "size_bytes": 2063,
+      "sha256": "47aa9ff8a292b0a8aee8b813a27d59b6c8860e5871b2349119b08568b546cf5a"
+    },
+    {
+      "path": "p1-attacks/p1_attack_summary.md",
+      "size_bytes": 4367,
+      "sha256": "6461cc869728218ceecfba4d33edd702e2e0239c1dd23a66a37398e89e5330fd"
+    },
+    {
+      "path": "p1-attacks/p1_attacks_terminal.log",
+      "size_bytes": 1606,
+      "sha256": "7674518db18766d0094678eaf24fea8e4b84c5b64f43a584062e1b12d1079583"
+    },
+    {
+      "path": "p1-attacks/run_p1_attacks.py",
+      "size_bytes": 27794,
+      "sha256": "3e8e24d8e06356cad94ed813dc1696bcc1617b6772695e892b12a08d95d40291"
+    },
+    {
+      "path": "semrush-exact/semrush_exact_live.md",
+      "size_bytes": 443,
+      "sha256": "affd792d9f05d40902e3dc8449bd3ca8e88aab757130e306a61893a0c70d36bb"
+    },
+    {
+      "path": "semrush-ideas/semrush_ideas_live.md",
+      "size_bytes": 410,
+      "sha256": "188ac1f504a088d4112f1c3b8c5bcc12b49f46deb75d55bdf2e9113606ea3020"
+    },
+    {
+      "path": "serp/serp_live.md",
+      "size_bytes": 280,
+      "sha256": "f26a8e7d8ee55990d5e6e629b16dc05e1bd589a8c9bad2da3dcf6b3c98e60e33"
+    },
+    {
+      "path": "trends/trends_live.md",
+      "size_bytes": 319,
+      "sha256": "81d3dacab3a71dfafd5f7d46cd94460ff222d122b46c3eeba80921a7aec3c2e8"
+    }
+  ]
+}

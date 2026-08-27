@@ -1,0 +1,70 @@
+{
+  "P1-A": {
+    "status": "PASS",
+    "detail": "Hand-written observed without receipt correctly BLOCKED (code=2)"
+  },
+  "P1-B": {
+    "status": "PASS",
+    "detail": "Evaluator provenance_status is 'unverified' (not 'verified')"
+  },
+  "P1-H": {
+    "status": "PASS",
+    "detail": "Direct call to evidence_binding.write_observed_output was rejected with EvidenceIntegrityError"
+  },
+  "P1-I": {
+    "status": "PASS",
+    "detail": "Imported collector monkeypatch rejected (code=2)"
+  },
+  "P1-J": {
+    "status": "PASS",
+    "detail": "Missing required artifact role (current_network_capture) raised EvidenceIntegrityError"
+  },
+  "P1-C": {
+    "status": "PASS",
+    "detail": "Tampered normalized volume rejected (code=2)"
+  },
+  "P1-D": {
+    "status": "PASS",
+    "detail": "Tampered raw artifact rejected by semantics replay (code=2)"
+  },
+  "P1-K": {
+    "status": "PASS",
+    "detail": "Raw replay volume mismatch detected and blocked (code=2)"
+  },
+  "P1-L": {
+    "status": "PASS",
+    "detail": "Capture binding mismatch correctly blocked (code=2)"
+  },
+  "P1-M": {
+    "status": "PASS",
+    "detail": "Google structured observation mismatch detected and blocked (code=2)"
+  },
+  "P1-N": {
+    "status": "PASS",
+    "detail": "Trends temporal payload replay mismatch detected and blocked (code=2)"
+  },
+  "P1-F": {
+    "status": "PASS",
+    "detail": "Bare PASS in manifest correctly denied by PreToolUse hook (code=2)"
+  },
+  "P1-G": {
+    "status": "PASS",
+    "detail": "Bare COMPLETE status correctly denied by Stop hook (code=2)"
+  },
+  "P1-E": {
+    "status": "PASS",
+    "detail": "Post-validation tampering detected by re-verification in Hook (init=0, tampered=2)"
+  },
+  "P1-O": {
+    "status": "PASS",
+    "detail": "Marker spoofing ignored; inferred stage 'stage6_exact' enforced and denied (code=2)"
+  },
+  "P1-P": {
+    "status": "PASS",
+    "detail": "Fake completion stage rejected by Stop hook (code=2)"
+  },
+  "P1-Q": {
+    "status": "PASS",
+    "detail": "Missing route minimum stages contract enforced and rejected (code=2)"
+  }
+}

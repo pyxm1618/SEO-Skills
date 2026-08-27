@@ -1,0 +1,24 @@
+========================================
+Running P1 Attack Matrix (P1-A to P1-Q)
+========================================
+[PASS] P1-A: Hand-written observed without receipt correctly BLOCKED (code=2)
+[PASS] P1-B: Evaluator provenance_status is 'unverified' (not 'verified')
+[PASS] P1-H: Direct call to evidence_binding.write_observed_output was rejected with EvidenceIntegrityError
+[PASS] P1-I: Imported collector monkeypatch rejected (code=2)
+[PASS] P1-J: Missing required artifact role (current_network_capture) raised EvidenceIntegrityError
+[PASS] P1-C: Tampered normalized volume rejected (code=2)
+[PASS] P1-D: Tampered raw artifact rejected by semantics replay (code=2)
+[PASS] P1-K: Raw replay volume mismatch detected and blocked (code=2)
+[PASS] P1-L: Capture binding mismatch correctly blocked (code=2)
+[PASS] P1-M: Google structured observation mismatch detected and blocked (code=2)
+[PASS] P1-N: Trends temporal payload replay mismatch detected and blocked (code=2)
+[PASS] P1-F: Bare PASS in manifest correctly denied by PreToolUse hook (code=2)
+[PASS] P1-G: Bare COMPLETE status correctly denied by Stop hook (code=2)
+[PASS] P1-E: Post-validation tampering detected by re-verification in Hook (init=0, tampered=2)
+[PASS] P1-O: Marker spoofing ignored; inferred stage 'stage6_exact' enforced and denied (code=2)
+[PASS] P1-P: Fake completion stage rejected by Stop hook (code=2)
+[PASS] P1-Q: Missing route minimum stages contract enforced and rejected (code=2)
+========================================
+P1 Attack Matrix Result: ALL PASS (17/17)
+========================================
+EXIT_CODE: 0

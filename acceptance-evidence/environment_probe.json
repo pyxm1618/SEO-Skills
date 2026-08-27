@@ -1,0 +1,17 @@
+{
+  "env_vars": {
+    "SEO_BROWSER_CDP_URL": null,
+    "SEO_RUN_MANIFEST": null,
+    "SEO_RELAY_CAPTURE_MAX_AGE_SECONDS": null
+  },
+  "cdp_available": false,
+  "browser_connected": false,
+  "semrush_authenticated_page": false,
+  "google_live_available": false,
+  "trends_live_available": false,
+  "codex_host_hook_active": false,
+  "blocker_reasons": [
+    "SEO_BROWSER_CDP_URL is not set in environment",
+    "No active external authenticated browser session on sem.3ue.com or Google CDP endpoint provided in current standalone acceptance environment"
+  ]
+}
