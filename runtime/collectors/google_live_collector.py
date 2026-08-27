@@ -7,11 +7,12 @@ No HTTP/search API fallback is implemented by design.
 
 import argparse
 import json
+import math
 import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 
 def now():
@@ -51,6 +52,14 @@ def screenshot(page, evidence_dir, name):
     evidence_dir.mkdir(parents=True, exist_ok=True)
     path = evidence_dir / name
     page.screenshot(path=str(path), full_page=False)
+    return str(path)
+
+
+def evidence_json(evidence_dir, name, payload):
+    evidence_dir = Path(evidence_dir)
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    path = evidence_dir / name
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return str(path)
 
 
@@ -106,7 +115,6 @@ def intitle(context, keyword, market, evidence_dir):
     evidence = screenshot(page, evidence_dir, f"intitle-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png")
     return {
         "keyword": keyword,
-        "volume": None,
         "intitle_results": int(digits),
         "source": "Google",
         "market": market,
@@ -148,23 +156,109 @@ def serp(context, keyword, market, evidence_dir):
     }
 
 
+def _decode_trends_payload(text):
+    text = str(text or "").lstrip()
+    if text.startswith(")]}'"):
+        newline = text.find("\n")
+        text = text[newline + 1:] if newline >= 0 else text[4:]
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Google Trends temporal response is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Google Trends temporal response is not a JSON object")
+    return payload
+
+
+def _trend_value(value, index):
+    if isinstance(value, list):
+        if not value:
+            raise RuntimeError(f"Google Trends timeline row {index} has empty value")
+        value = value[0]
+    if isinstance(value, bool):
+        raise RuntimeError(f"Google Trends timeline row {index} has invalid value")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"Google Trends timeline row {index} has invalid value") from exc
+    if not math.isfinite(number) or number < 0:
+        raise RuntimeError(f"Google Trends timeline row {index} has invalid value")
+    return int(number) if number.is_integer() else number
+
+
+def parse_trends_timeline(payload):
+    default = payload.get("default") if isinstance(payload, dict) else None
+    timeline = default.get("timelineData") if isinstance(default, dict) else None
+    if not isinstance(timeline, list) or len(timeline) < 2:
+        raise RuntimeError("Google Trends temporal payload missing timelineData")
+    series = []
+    for index, row in enumerate(timeline):
+        if not isinstance(row, dict) or row.get("time") in (None, "") or "value" not in row:
+            raise RuntimeError(f"Google Trends timeline row {index} is incomplete")
+        point = {
+            "time": str(row["time"]),
+            "value": _trend_value(row["value"], index),
+        }
+        if row.get("formattedTime") not in (None, ""):
+            point["formatted_time"] = str(row["formattedTime"])
+        series.append(point)
+    return series
+
+
 def trends(context, keyword, market, evidence_dir):
     page = context.new_page()
+    observed_payloads = []
+
+    def capture_temporal_response(response):
+        try:
+            parsed = urlparse(response.url)
+            if parsed.hostname != "trends.google.com" or "/trends/api/widgetdata" not in parsed.path:
+                return
+            if response.status != 200:
+                return
+            payload = _decode_trends_payload(response.text())
+            series = parse_trends_timeline(payload)
+            observed_payloads.append({"url": response.url, "payload": payload, "series": series})
+        except Exception:
+            return
+
+    page.on("response", capture_temporal_response)
     page.goto(f"https://trends.google.com/trends/explore?geo={quote_plus(market)}&q={quote_plus(keyword)}", wait_until="domcontentloaded")
-    page.wait_for_timeout(4000)
+    page.wait_for_timeout(5000)
     host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
     if host != "trends.google.com":
         raise RuntimeError(f"wrong Google Trends origin: {host}")
     body = page.locator("body").inner_text(timeout=5000)
     if "Interest over time" not in body and "热度随时间变化" not in body:
         raise RuntimeError("Google Trends current result could not be confirmed")
-    evidence = screenshot(page, evidence_dir, f"trends-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png")
+    if not observed_payloads:
+        raise RuntimeError("Google Trends real temporal payload was not observed; screenshot-only evidence is insufficient")
+
+    captured = observed_payloads[-1]
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", keyword).strip("-")
+    observed_at = now()
+    raw_evidence = evidence_json(
+        evidence_dir,
+        f"trends-{slug}.json",
+        {
+            "keyword": keyword,
+            "market": market,
+            "observed_at": observed_at,
+            "source_url": captured["url"],
+            "payload": captured["payload"],
+            "series": captured["series"],
+        },
+    )
+    screenshot_ref = screenshot(page, evidence_dir, f"trends-{slug}.png")
     return {
         "keyword": keyword,
         "is_finalist": True,
         "google_trends_source": "Google Trends",
-        "google_trends_observed_at": now(),
-        "google_trends_evidence_ref": evidence,
+        "google_trends_market": market,
+        "google_trends_observed_at": observed_at,
+        "google_trends_evidence_ref": raw_evidence,
+        "google_trends_screenshot_ref": screenshot_ref,
+        "google_trends_series": captured["series"],
     }
 
 
@@ -196,7 +290,9 @@ def main():
                 result = serp(context, args.keyword, args.market, args.evidence_dir)
             else:
                 result = trends(context, args.keyword, args.market, args.evidence_dir)
-        Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as exc:
