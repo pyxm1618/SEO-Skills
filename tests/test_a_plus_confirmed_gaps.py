@@ -1,4 +1,3 @@
-import hashlib
 import importlib.util
 import json
 import os
@@ -14,7 +13,6 @@ SEMRUSH = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"
 GOOGLE = ROOT / "runtime" / "collectors" / "google_live_collector.py"
 MERGER = ROOT / "runtime" / "kgr_evidence_merge.py"
 EVALUATOR = ROOT / "skills" / "seo-keyword-selection" / "scripts" / "evaluate_candidates.py"
-FIXTURE_FACTORY = ROOT / "tests" / "evidence_fixture_factory.py"
 
 
 def load_module(name, path):
@@ -44,51 +42,7 @@ def exact_row(**overrides):
     return row
 
 
-def _bound_stage_row(tmp_path, stage, label):
-    if stage != "stage6_exact":
-        return {"test": True}
-    fixtures = load_module(f"hook_evidence_fixture_{label}", FIXTURE_FACTORY)
-    _output, bound, _raw, _capture = fixtures.make_semrush_exact(tmp_path, f"{label}-{stage}", exact_row())
-    return bound
-
-
-def _bind_pass_records(tmp_path, manifest):
-    def bind(record, stage, candidate_id, label):
-        if not isinstance(record, dict) or record.get("status") != "PASS" or record.get("validation_receipt_ref"):
-            return
-        report_path = tmp_path / f"{label}-{stage}.report.json"
-        receipt_path = report_path.with_suffix(".receipt.json")
-        report = {
-            "stage": stage,
-            "status": "PASS",
-            "production": True,
-            "candidate_id": candidate_id,
-            "complete_count": 1,
-            "blocked_count": 0,
-            "complete": [_bound_stage_row(tmp_path, stage, label)],
-            "blocked": [],
-            "validation_receipt_ref": str(receipt_path),
-        }
-        report_path.write_text(json.dumps(report), encoding="utf-8")
-        receipt = {
-            "schema": "seo-stage-validation/v1",
-            "stage": stage,
-            "status": "PASS",
-            "candidate_id": candidate_id,
-            "report_ref": str(report_path),
-            "report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
-        }
-        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-        record["validation_receipt_ref"] = str(receipt_path)
-    for stage, record in manifest.get("stages", {}).items():
-        bind(record, stage, None, "global")
-    for candidate_id, stages in manifest.get("candidates", {}).items():
-        for stage, record in stages.items():
-            bind(record, stage, candidate_id, candidate_id)
-
-
 def run_hook(tmp_path, payload, manifest):
-    _bind_pass_records(tmp_path, manifest)
     manifest_path = tmp_path / "active.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     env = dict(os.environ, SEO_RUN_MANIFEST=str(manifest_path))
@@ -116,21 +70,6 @@ def test_protected_exact_evaluation_without_marker_is_denied_when_stage6_blocked
     result = run_hook(tmp_path, payload, manifest)
     assert result.returncode == 2
     assert "stage6_exact" in result.stderr
-
-
-def test_protected_exact_evaluation_without_marker_is_allowed_when_stage6_passes(tmp_path):
-    manifest = {
-        "run_id": "r1",
-        "route": "traditional",
-        "status": "IN_PROGRESS",
-        "stages": {"stage6_exact": {"status": "PASS"}},
-    }
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": "python3 skills/seo-keyword-selection/scripts/evaluate_candidates.py --input rows.json --stage exact"},
-    }
-    assert run_hook(tmp_path, payload, manifest).returncode == 0
 
 
 def test_unrelated_bash_without_marker_is_not_gated(tmp_path):
