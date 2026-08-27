@@ -17,31 +17,39 @@
   },
   "stage6_exact": {
     "required": [
-      "keyword",
-      "volume",
-      "kd",
-      "cpc",
-      "intent",
-      "competition_level",
-      "trend",
-      "metric_source",
-      "metric_database",
-      "metric_stage",
-      "observed_at",
-      "relay_origin",
-      "provenance_ref"
+      "keyword", "volume", "kd", "cpc", "intent", "competition_level", "trend",
+      "metric_source", "metric_database", "metric_stage", "observed_at", "relay_origin", "provenance_ref"
+    ],
+    "equals": {"metric_source": "Semrush", "metric_database": "us", "metric_stage": "exact"},
+    "host_equals": {"relay_origin": "sem.3ue.com"},
+    "list_length": {"trend": 12},
+    "number_range": {
+      "volume": {"min": 0},
+      "kd": {"min": 0, "max": 100},
+      "cpc": {"min": 0}
+    }
+  },
+  "intitle_observation": {
+    "required": ["keyword", "intitle_results", "source", "market", "observed_at", "evidence_ref"],
+    "equals": {"source": "Google"},
+    "number_range": {"intitle_results": {"min": 0, "integer": true}}
+  },
+  "kgr_intitle": {
+    "required": [
+      "keyword", "volume", "intitle_results", "metric_source", "metric_database", "metric_stage",
+      "exact_observed_at", "exact_provenance_ref", "intitle_source", "market",
+      "intitle_observed_at", "intitle_provenance_ref"
     ],
     "equals": {
       "metric_source": "Semrush",
       "metric_database": "us",
-      "metric_stage": "exact"
+      "metric_stage": "exact",
+      "intitle_source": "Google"
     },
-    "host_equals": {"relay_origin": "sem.3ue.com"},
-    "list_length": {"trend": 12}
-  },
-  "kgr_intitle": {
-    "required": ["keyword", "volume", "intitle_results", "source", "market", "observed_at", "evidence_ref"],
-    "equals": {"source": "Google"}
+    "number_range": {
+      "volume": {"min": 0},
+      "intitle_results": {"min": 0, "integer": true}
+    }
   },
   "serp_review": {
     "required": ["keyword", "source", "market", "observed_at", "evidence_ref", "results"],
@@ -54,7 +62,10 @@
     "conditional_required": [
       {
         "when": {"field": "is_finalist", "equals": true},
-        "fields": ["google_trends_source", "google_trends_observed_at", "google_trends_evidence_ref"]
+        "fields": [
+          "google_trends_source", "google_trends_market", "google_trends_observed_at",
+          "google_trends_evidence_ref", "google_trends_series"
+        ]
       }
     ],
     "conditional_equals": [
@@ -63,6 +74,8 @@
         "field": "google_trends_source",
         "equals": "Google Trends"
       }
-    ]
+    ],
+    "list_min": {"google_trends_series": 2},
+    "items_required": {"google_trends_series": ["time", "value"]}
   }
 }

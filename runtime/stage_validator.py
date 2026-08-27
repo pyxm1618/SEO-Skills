@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 
 NOT_APPLICABLE = "not_applicable"
+UNKNOWN = "unknown"
 
 
 def value_state(value):
@@ -24,8 +25,11 @@ def value_state(value):
         text = value.strip()
         if text == "":
             return "missing"
-        if text.lower() == NOT_APPLICABLE:
+        lowered = text.lower()
+        if lowered == NOT_APPLICABLE:
             return "not_applicable"
+        if lowered == UNKNOWN:
+            return "unknown"
     if isinstance(value, float) and not math.isfinite(value):
         return "invalid"
     return "value"
@@ -61,6 +65,35 @@ def _condition_matches(payload, condition):
     return True
 
 
+def _parse_number(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        text = str(value).strip().replace(",", "") if not isinstance(value, (int, float)) else value
+        number = float(text)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _validate_number_range(field, value, rule):
+    if value_state(value) != "value":
+        return []
+    number = _parse_number(value)
+    if number is None:
+        return [f"{field}:not_numeric"]
+    errors = []
+    if rule.get("integer") and not number.is_integer():
+        errors.append(f"{field}:must_be_integer")
+    if "min" in rule and number < float(rule["min"]):
+        errors.append(f"{field}:below_min_{rule['min']}")
+    if "max" in rule and number > float(rule["max"]):
+        errors.append(f"{field}:above_max_{rule['max']}")
+    return errors
+
+
 def validate_stage(stage, payload, contracts):
     if stage not in contracts:
         return [f"stage:unknown:{stage}"]
@@ -76,6 +109,8 @@ def validate_stage(stage, payload, contracts):
             errors.append(f"{field}:required")
         elif state == "invalid":
             errors.append(f"{field}:invalid")
+        elif state == "unknown":
+            errors.append(f"{field}:unknown_not_allowed")
         elif state == "not_applicable":
             errors.append(f"{field}:not_applicable_not_allowed")
 
@@ -96,6 +131,9 @@ def validate_stage(stage, payload, contracts):
         value = payload.get(field)
         if value_state(value) == "value" and (not isinstance(value, list) or len(value) != length):
             errors.append(f"{field}:requires_exactly_{length}_items")
+
+    for field, rule in spec.get("number_range", {}).items():
+        errors.extend(_validate_number_range(field, payload.get(field), rule))
 
     for left, right in spec.get("equal_fields", []):
         if value_state(payload.get(left)) == "value" and value_state(payload.get(right)) == "value":
@@ -149,6 +187,14 @@ def validate_payload(stage, data, contracts):
     return complete, blocked
 
 
+def batch_status(complete, blocked):
+    if complete and not blocked:
+        return "PASS"
+    if complete and blocked:
+        return "PARTIAL"
+    return "BLOCKED"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--contracts", default=str(Path(__file__).with_name("stage_contracts.json")))
@@ -162,7 +208,7 @@ def main():
     complete, blocked = validate_payload(args.stage, data, contracts)
     report = {
         "stage": args.stage,
-        "status": "PASS" if complete else "BLOCKED",
+        "status": batch_status(complete, blocked),
         "complete_count": len(complete),
         "blocked_count": len(blocked),
         "complete": complete,
@@ -172,7 +218,7 @@ def main():
     if args.report:
         Path(args.report).write_text(text + "\n", encoding="utf-8")
     print(text)
-    if blocked and not complete:
+    if blocked:
         for item in blocked:
             print(" | ".join(item["errors"]), file=sys.stderr)
         return 2

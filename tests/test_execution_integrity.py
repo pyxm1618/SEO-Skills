@@ -73,21 +73,26 @@ def test_stage6_wrong_relay_fails_and_full_evidence_passes():
     assert validator.validate_stage("stage6_exact", exact_row(), contracts) == []
 
 
-def test_kgr_contract_requires_real_google_intitle():
+def test_kgr_contract_requires_verified_exact_and_real_google_intitle():
     validator = load_validator()
     contracts = json.loads(CONTRACTS_PATH.read_text(encoding="utf-8"))
     base = {
         "keyword": "travel checklist",
         "volume": 1000,
         "intitle_results": 50,
-        "source": "Google",
-        "market": "us",
-        "observed_at": "2026-08-26T10:00:00Z",
-        "evidence_ref": "evidence/intitle-travel-checklist.png",
+        "metric_source": "Semrush",
+        "metric_database": "us",
+        "metric_stage": "exact",
+        "exact_observed_at": "2026-08-26T09:00:00Z",
+        "exact_provenance_ref": "evidence/exact-travel-checklist.json",
+        "intitle_source": "Google",
+        "market": "US",
+        "intitle_observed_at": "2026-08-26T10:00:00Z",
+        "intitle_provenance_ref": "evidence/intitle-travel-checklist.png",
     }
     assert validator.validate_stage("kgr_intitle", base, contracts) == []
-    fake = dict(base, source="Bing")
-    assert any("source" in error for error in validator.validate_stage("kgr_intitle", fake, contracts))
+    fake = dict(base, intitle_source="Bing")
+    assert any("intitle_source" in error for error in validator.validate_stage("kgr_intitle", fake, contracts))
     missing = dict(base)
     missing.pop("intitle_results")
     assert any("intitle_results" in error for error in validator.validate_stage("kgr_intitle", missing, contracts))
@@ -116,8 +121,13 @@ def test_finalist_trend_is_conditional_and_keyword_planner_is_not_required():
         "keyword": "dream meaning",
         "is_finalist": True,
         "google_trends_source": "Google Trends",
+        "google_trends_market": "US",
         "google_trends_observed_at": "2026-08-26T10:00:00Z",
-        "google_trends_evidence_ref": "evidence/trends-dream-meaning.png",
+        "google_trends_evidence_ref": "evidence/trends-dream-meaning.json",
+        "google_trends_series": [
+            {"time": "1767225600", "value": 20},
+            {"time": "1767830400", "value": 35},
+        ],
     }
     assert validator.validate_stage("finalist_trend", finalist, contracts) == []
     missing = {"keyword": "dream meaning", "is_finalist": True}
@@ -126,8 +136,9 @@ def test_finalist_trend_is_conditional_and_keyword_planner_is_not_required():
     assert validator.validate_stage("finalist_trend", not_finalist, contracts) == []
 
 
-def test_missing_zero_and_not_applicable_are_distinct_states():
+def test_missing_zero_unknown_and_not_applicable_are_distinct_states():
     validator = load_validator()
     assert validator.value_state(None) == "missing"
     assert validator.value_state(0) == "value"
+    assert validator.value_state("unknown") == "unknown"
     assert validator.value_state("not_applicable") == "not_applicable"
