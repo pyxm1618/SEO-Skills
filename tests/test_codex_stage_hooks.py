@@ -9,6 +9,39 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "runtime" / "codex_stage_hook.py"
 
 
+def _bound_stage_row(tmp_path, stage, label):
+    if stage != "stage6_exact":
+        return {"test": True}
+    sys.path.insert(0, str(ROOT / "runtime"))
+    import evidence_binding
+
+    artifact = tmp_path / f"{label}-{stage}.raw.json"
+    artifact.write_text(json.dumps({"response": {"test": True}}), encoding="utf-8")
+    output = tmp_path / f"{label}-{stage}.json"
+    payload = {
+        "keyword": "wedding calculator",
+        "volume": 1000,
+        "kd": 20,
+        "cpc": 0.2,
+        "intent": ["commercial"],
+        "competition_level": "low",
+        "trend": [50] * 12,
+        "metric_source": "Semrush",
+        "metric_database": "us",
+        "metric_stage": "exact",
+        "observed_at": "2026-08-27T03:00:00Z",
+        "relay_origin": "https://sem.3ue.com/",
+        "provenance_ref": str(artifact),
+    }
+    return evidence_binding.write_observed_output(
+        output,
+        payload,
+        "semrush_relay_collector",
+        "semrush_exact",
+        [{"path": str(artifact), "role": "raw_relay_response"}],
+    )
+
+
 def _bind_pass_records(tmp_path, manifest):
     def bind(record, stage, candidate_id, label):
         if not isinstance(record, dict) or record.get("status") != "PASS" or record.get("validation_receipt_ref"):
@@ -22,7 +55,7 @@ def _bind_pass_records(tmp_path, manifest):
             "candidate_id": candidate_id,
             "complete_count": 1,
             "blocked_count": 0,
-            "complete": [{"test": True}],
+            "complete": [_bound_stage_row(tmp_path, stage, label)],
             "blocked": [],
             "validation_receipt_ref": str(receipt_path),
         }
