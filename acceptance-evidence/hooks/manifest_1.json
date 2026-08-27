@@ -1,0 +1,9 @@
+{
+  "run_id": "r1",
+  "status": "IN_PROGRESS",
+  "stages": {
+    "stage6_exact": {
+      "status": "BLOCKED"
+    }
+  }
+}

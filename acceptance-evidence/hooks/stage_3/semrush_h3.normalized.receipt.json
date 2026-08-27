@@ -1,0 +1,14 @@
+{
+  "schema": "seo-observed-evidence/v1",
+  "collector": "semrush_relay_collector",
+  "evidence_type": "semrush_exact",
+  "normalized_ref": "acceptance-evidence/hooks/stage_3/semrush_h3.normalized.json",
+  "normalized_sha256": "e3cacad3dd98fe07b492d3d380f5de4f0cfa8104bc66b06225806238d609b8d6",
+  "artifacts": [
+    {
+      "role": "evidence",
+      "path": "acceptance-evidence/hooks/stage_3/semrush_h3.raw.json",
+      "sha256": "c2f7199c063727efd1f7ca244fd8d60c051c8bad6bbb8cf7c221221e3e5672b2"
+    }
+  ]
+}

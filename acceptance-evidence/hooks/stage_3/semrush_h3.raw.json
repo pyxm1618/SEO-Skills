@@ -1,0 +1,39 @@
+{
+  "observed_at": "2026-08-27T03:00:00Z",
+  "relay_origin": "https://sem.3ue.com/",
+  "request_method": "POST",
+  "request_path": "/api/exact",
+  "capture_observed_at": "2026-08-27T02:50:00Z",
+  "capture_evidence_ref": "evidence/capture.json",
+  "response": {
+    "result": {
+      "keywords": [
+        {
+          "phrase": "best h3",
+          "database": "us",
+          "volume": 1500,
+          "difficulty": 25,
+          "cpc": 1.2,
+          "intents": [
+            "commercial"
+          ],
+          "competition_level": "low",
+          "trend": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ]
+        }
+      ]
+    }
+  }
+}

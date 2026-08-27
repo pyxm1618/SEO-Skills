@@ -1,0 +1,10 @@
+{
+  "run_id": "r4",
+  "status": "IN_PROGRESS",
+  "stages": {
+    "stage6_exact": {
+      "status": "PASS",
+      "validation_receipt_ref": "acceptance-evidence/hooks/stage_4/report.receipt.json"
+    }
+  }
+}

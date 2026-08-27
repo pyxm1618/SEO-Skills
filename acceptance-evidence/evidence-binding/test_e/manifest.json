@@ -1,0 +1,10 @@
+{
+  "run_id": "run-e",
+  "status": "IN_PROGRESS",
+  "stages": {
+    "stage6_exact": {
+      "status": "PASS",
+      "validation_receipt_ref": "acceptance-evidence/evidence-binding/test_e/report.receipt.json"
+    }
+  }
+}

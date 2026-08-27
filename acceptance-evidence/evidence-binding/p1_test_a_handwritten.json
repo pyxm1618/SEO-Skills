@@ -1,0 +1,32 @@
+[
+  {
+    "keyword": "best backpacking tent",
+    "volume": 2400,
+    "kd": 28,
+    "cpc": 1.45,
+    "intent": [
+      "commercial"
+    ],
+    "competition_level": "low",
+    "trend": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "metric_source": "Semrush",
+    "metric_database": "us",
+    "metric_stage": "exact",
+    "observed_at": "2026-08-27T03:00:00Z",
+    "relay_origin": "https://sem.3ue.com/",
+    "provenance_ref": "evidence/handwritten.raw.json"
+  }
+]

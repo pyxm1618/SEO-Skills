@@ -1,0 +1,31 @@
+{
+  "keyword": "best h5b",
+  "volume": 1500,
+  "kd": 25,
+  "cpc": 1.2,
+  "intent": [
+    "commercial"
+  ],
+  "competition_level": "low",
+  "trend": [
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100
+  ],
+  "metric_source": "Semrush",
+  "metric_database": "us",
+  "metric_stage": "exact",
+  "observed_at": "2026-08-27T03:00:00Z",
+  "relay_origin": "https://sem.3ue.com/",
+  "provenance_ref": "acceptance-evidence/hooks/stage_5b/semrush_h5b.raw.json",
+  "evidence_receipt_ref": "acceptance-evidence/hooks/stage_5b/semrush_h5b.normalized.receipt.json"
+}

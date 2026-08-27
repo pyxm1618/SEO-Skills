@@ -1,0 +1,43 @@
+{
+  "Hook_1_no_marker": {
+    "exit_code": 2,
+    "denied": true,
+    "stderr": "SEO stage gate denied stage6_exact; status=BLOCKED"
+  },
+  "Hook_2_bare_pass": {
+    "exit_code": 2,
+    "denied": true,
+    "stderr": "SEO stage gate denied stage6_exact; PASS validation receipt invalid: PASS lacks validation receipt"
+  },
+  "Hook_3_valid_stage_pass": {
+    "exit_code": 0,
+    "allowed": true
+  },
+  "Hook_4_post_validation_tampering": {
+    "exit_code": 2,
+    "denied": true,
+    "stderr": "SEO stage gate denied stage6_exact; PASS validation receipt invalid: underlying evidence invalid: evidence artifact hash mismatch: acceptance-evidence/hooks/stage_4/semrush_h4.raw.json"
+  },
+  "Hook_5_candidate_isolation": {
+    "cand_a_denied": true,
+    "cand_b_allowed": true
+  },
+  "Hook_6_in_progress_stop": {
+    "exit_code": 2,
+    "denied": true,
+    "stderr": "Active SEO production run r6 is IN_PROGRESS; finish required stages or mark the run BLOCKED with the real blocker before stopping."
+  },
+  "Hook_7_bare_complete": {
+    "exit_code": 2,
+    "denied": true,
+    "stderr": "Active SEO production run r7 cannot be COMPLETE: COMPLETE lacks explicit completion_requirements"
+  },
+  "Hook_8_valid_complete": {
+    "exit_code": 0,
+    "allowed": true
+  },
+  "Hook_9_blocked_stop_allowed": {
+    "exit_code": 0,
+    "allowed": true
+  }
+}

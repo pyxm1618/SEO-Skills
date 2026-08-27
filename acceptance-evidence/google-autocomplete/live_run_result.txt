@@ -1,0 +1,6 @@
+Command: google_live_collector.py autocomplete --seed 'wedding calculator'
+Exit Code: 2
+Stdout: 
+Stderr: BLOCKED: SEO_BROWSER_CDP_URL is required; no hosted WebSearch fallback is allowed
+
+Status: BLOCKED (No CDP URL / browser session provided)

@@ -1,0 +1,15 @@
+{
+  "run_id": "run-h",
+  "status": "COMPLETE",
+  "stages": {
+    "stage6_exact": {
+      "status": "PASS",
+      "validation_receipt_ref": "acceptance-evidence/evidence-binding/test_h/report.receipt.json"
+    }
+  },
+  "completion_requirements": [
+    {
+      "stage": "stage6_exact"
+    }
+  ]
+}

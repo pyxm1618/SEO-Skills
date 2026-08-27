@@ -1,0 +1,54 @@
+{
+  "P1_Test_A": {
+    "desc": "Handwritten Semrush data in --production validator",
+    "exit_code": 2,
+    "blocked": true,
+    "stderr": "evidence:evidence receipt is required"
+  },
+  "P1_Test_B": {
+    "desc": "Evaluator provenance_status for handwritten data without receipt",
+    "provenance_status": "unverified",
+    "passed": true
+  },
+  "P1_Test_C": {
+    "desc": "Tampered normalized evidence volume",
+    "exit_code": 2,
+    "blocked": true,
+    "stderr": "evidence:normalized evidence hash mismatch"
+  },
+  "P1_Test_D": {
+    "desc": "Tampered raw evidence artifact",
+    "exit_code": 2,
+    "blocked": true,
+    "stderr": "evidence:evidence artifact hash mismatch: acceptance-evidence/evidence-binding/test_d/semrush_test_d.raw.json"
+  },
+  "P1_Test_E": {
+    "desc": "Tampered raw evidence after Stage validation receipt issued",
+    "exit_code": 2,
+    "blocked": true,
+    "stderr": "SEO stage gate denied stage6_exact; PASS validation receipt invalid: underlying evidence invalid: evidence artifact hash mismatch: acceptance-evidence/evidence-binding/test_e/semrush_test_e.raw.json"
+  },
+  "P1_Test_F": {
+    "desc": "Bare PASS without validation_receipt_ref",
+    "exit_code": 2,
+    "blocked": true,
+    "stderr": "SEO stage gate denied stage6_exact; PASS validation receipt invalid: PASS lacks validation receipt"
+  },
+  "P1_Test_G": {
+    "desc": "Bare COMPLETE without completion_requirements",
+    "exit_code": 2,
+    "blocked": true,
+    "stderr": "Active SEO production run run-g cannot be COMPLETE: COMPLETE lacks explicit completion_requirements"
+  },
+  "P1_Test_H": {
+    "desc": "Valid COMPLETE with valid production stage receipt",
+    "exit_code": 0,
+    "allowed": true
+  },
+  "P1_Test_I": {
+    "desc": "COMPLETE requirement raw evidence corrupted after validation",
+    "exit_code": 2,
+    "blocked": true,
+    "stderr": "Active SEO production run run-h cannot be COMPLETE: required stage6_exact is not verified: underlying evidence invalid: evidence artifact hash mismatch: acceptance-evidence/evidence-binding/test_h/semrush_test_h.raw.json"
+  }
+}

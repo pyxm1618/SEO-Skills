@@ -1,0 +1,6 @@
+Command: semrush_relay_collector.py --request ...
+Exit Code: 2
+Stdout: 
+Stderr: BLOCKED: live relay request capture evidence file is missing
+
+Status: BLOCKED (No authenticated session on sem.3ue.com)

@@ -1,0 +1,43 @@
+{
+  "stage": "stage6_exact",
+  "status": "PASS",
+  "production": true,
+  "candidate_id": null,
+  "complete_count": 1,
+  "blocked_count": 0,
+  "complete": [
+    {
+      "keyword": "best h8",
+      "volume": 1500,
+      "kd": 25,
+      "cpc": 1.2,
+      "intent": [
+        "commercial"
+      ],
+      "competition_level": "low",
+      "trend": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "metric_source": "Semrush",
+      "metric_database": "us",
+      "metric_stage": "exact",
+      "observed_at": "2026-08-27T03:00:00Z",
+      "relay_origin": "https://sem.3ue.com/",
+      "provenance_ref": "acceptance-evidence/hooks/stage_8/semrush_h8.raw.json",
+      "evidence_receipt_ref": "acceptance-evidence/hooks/stage_8/semrush_h8.normalized.receipt.json"
+    }
+  ],
+  "blocked": [],
+  "validation_receipt_ref": "acceptance-evidence/hooks/stage_8/report.receipt.json"
+}

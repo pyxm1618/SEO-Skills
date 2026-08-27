@@ -1,0 +1,9 @@
+{
+  "run_id": "run-f",
+  "status": "IN_PROGRESS",
+  "stages": {
+    "stage6_exact": {
+      "status": "PASS"
+    }
+  }
+}

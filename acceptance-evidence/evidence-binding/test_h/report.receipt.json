@@ -1,0 +1,8 @@
+{
+  "schema": "seo-stage-validation/v1",
+  "stage": "stage6_exact",
+  "status": "PASS",
+  "candidate_id": null,
+  "report_ref": "acceptance-evidence/evidence-binding/test_h/report.json",
+  "report_sha256": "197527788e99b3d4e6385eacc40afa01f97d512013a35a5458498b87a136b5a5"
+}

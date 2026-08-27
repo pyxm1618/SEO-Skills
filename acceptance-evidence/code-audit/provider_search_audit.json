@@ -1,0 +1,363 @@
+{
+  "api.semrush.com": [
+    {
+      "file": "tests/test_semrush_source_policy.py",
+      "line_no": 14,
+      "content": "\"api.semrush.com\","
+    }
+  ],
+  "semrush_api_key": [
+    {
+      "file": "tests/test_semrush_source_policy.py",
+      "line_no": 15,
+      "content": "\"SEMRUSH_API_KEY\","
+    },
+    {
+      "file": "tests/test_semrush_source_policy.py",
+      "line_no": 16,
+      "content": "\"semrush_api_key\","
+    }
+  ],
+  "dataforseo": [],
+  "ahrefs": [
+    {
+      "file": "skills/seo-keyword-discovery/SKILL.md",
+      "line_no": 31,
+      "content": "If Semrush Ideas/Related is used, current acquisition must use the authenticated same-origin `sem.3ue.com` relay collector. There is no official API, API-key, connector, Ahrefs, or alternative-provider fallback."
+    },
+    {
+      "file": "skills/seo-keyword-discovery/references/discovery-sop.md",
+      "line_no": 39,
+      "content": "No official Semrush API, API key, official connector, Ahrefs, or other provider may replace relay failure."
+    },
+    {
+      "file": "skills/seo-keyword-discovery/references/source-acquisition.md",
+      "line_no": 25,
+      "content": "There is no fallback to official Semrush API, API keys/units, official connectors, Ahrefs, alternative providers, or AI estimates."
+    },
+    {
+      "file": "skills/seo-page-keyword-mapping/references/source-acquisition.md",
+      "line_no": 15,
+      "content": "There is no fallback to official Semrush API, API keys/units, official connectors, Ahrefs, alternative providers, or AI estimates. Do not store cookies, relay tokens, credentials, session IDs, or account identifiers in the repository."
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/references/source-policy.md",
+      "line_no": 13,
+      "content": "Do not fall back to an official Semrush API, API key/units, official connector, Ahrefs, another provider, or an AI estimate. Historical Semrush exports/evidence may still be evaluated for compatibility/freshness as existing evidence; they are not permission to create a different live acquisition path."
+    },
+    {
+      "file": "skills/seo-keyword-selection/references/source-acquisition.md",
+      "line_no": 17,
+      "content": "- Ahrefs or another provider standing in for Semrush;"
+    },
+    {
+      "file": "tests/test_semrush_source_policy.py",
+      "line_no": 17,
+      "content": "\"ahrefs_fallback\","
+    }
+  ],
+  "moz": [],
+  "serpapi": [],
+  "bing": [
+    {
+      "file": "skills/seo-keyword-discovery/SKILL.md",
+      "line_no": 27,
+      "content": "Never substitute AI expansion, Bing, generic WebSearch results, or a third-party suggestion page for mandatory Google Autocomplete evidence."
+    },
+    {
+      "file": "skills/seo-keyword-discovery/references/discovery-sop.md",
+      "line_no": 33,
+      "content": "Do not substitute AI suggestions, Bing, WebSearch snippets/results, or third-party suggestion tools."
+    },
+    {
+      "file": "skills/seo-keyword-selection/references/source-acquisition.md",
+      "line_no": 32,
+      "content": "If a collector fails, keep the evidence missing and mark the affected execution scope blocked. Do not substitute Bing, generic result counts, APIs, WebSearch output, or AI estimates."
+    },
+    {
+      "file": "skills/seo-keyword-selection/references/data-contracts.md",
+      "line_no": 74,
+      "content": "- Bing counts;"
+    },
+    {
+      "file": "skills/seo-keyword-selection/references/selection-sop.md",
+      "line_no": 41,
+      "content": "Use the project Google live collector for the exact query `intitle:\"keyword\"`. Save real visible count, market, timestamp, and evidence. Bing counts, generic Google counts, API row counts, AI estimates, or KD inference are prohibited."
+    },
+    {
+      "file": "tests/test_execution_integrity.py",
+      "line_no": 94,
+      "content": "fake = dict(base, intitle_source=\"Bing\")"
+    }
+  ],
+  "duckduckgo": [],
+  "websearch": [
+    {
+      "file": "runtime/collectors/google_live_collector.py",
+      "line_no": 43,
+      "content": "raise RuntimeError(\"SEO_BROWSER_CDP_URL is required; no hosted WebSearch fallback is allowed\")"
+    },
+    {
+      "file": "skills/seo-keyword-discovery/SKILL.md",
+      "line_no": 27,
+      "content": "Never substitute AI expansion, Bing, generic WebSearch results, or a third-party suggestion page for mandatory Google Autocomplete evidence."
+    },
+    {
+      "file": "skills/seo-keyword-discovery/references/discovery-sop.md",
+      "line_no": 33,
+      "content": "Do not substitute AI suggestions, Bing, WebSearch snippets/results, or third-party suggestion tools."
+    },
+    {
+      "file": "skills/seo-keyword-discovery/references/source-acquisition.md",
+      "line_no": 5,
+      "content": "Formal Google Autocomplete evidence must come from `runtime/collectors/google_live_collector.py autocomplete` running against a real browser session. Hosted WebSearch may support ordinary research but cannot satisfy this contract."
+    },
+    {
+      "file": "skills/seo-keyword-selection/references/source-acquisition.md",
+      "line_no": 3,
+      "content": "Production evidence for this workflow comes from project collectors. Hosted WebSearch may support ordinary research but cannot become formal Google/Semrush evidence."
+    },
+    {
+      "file": "skills/seo-keyword-selection/references/source-acquisition.md",
+      "line_no": 32,
+      "content": "If a collector fails, keep the evidence missing and mark the affected execution scope blocked. Do not substitute Bing, generic result counts, APIs, WebSearch output, or AI estimates."
+    }
+  ],
+  "fallback": [
+    {
+      "file": "runtime/collectors/google_live_collector.py",
+      "line_no": 5,
+      "content": "No HTTP/search API fallback is implemented by design."
+    },
+    {
+      "file": "runtime/collectors/google_live_collector.py",
+      "line_no": 36,
+      "content": "raise RuntimeError(\"Playwright is required for live collectors; no fallback is allowed\") from exc"
+    },
+    {
+      "file": "runtime/collectors/google_live_collector.py",
+      "line_no": 43,
+      "content": "raise RuntimeError(\"SEO_BROWSER_CDP_URL is required; no hosted WebSearch fallback is allowed\")"
+    },
+    {
+      "file": "runtime/collectors/semrush_relay_collector.py",
+      "line_no": 5,
+      "content": "fallback. A request descriptor must come from a current live same-origin"
+    },
+    {
+      "file": "runtime/collectors/semrush_relay_collector.py",
+      "line_no": 41,
+      "content": "raise RuntimeError(\"Playwright is required for live relay collection; no provider fallback is allowed\") from exc"
+    },
+    {
+      "file": "skills/seo-keyword-discovery/SKILL.md",
+      "line_no": 31,
+      "content": "If Semrush Ideas/Related is used, current acquisition must use the authenticated same-origin `sem.3ue.com` relay collector. There is no official API, API-key, connector, Ahrefs, or alternative-provider fallback."
+    },
+    {
+      "file": "skills/seo-keyword-discovery/references/source-acquisition.md",
+      "line_no": 25,
+      "content": "There is no fallback to official Semrush API, API keys/units, official connectors, Ahrefs, alternative providers, or AI estimates."
+    },
+    {
+      "file": "skills/seo-page-keyword-mapping/references/source-acquisition.md",
+      "line_no": 15,
+      "content": "There is no fallback to official Semrush API, API keys/units, official connectors, Ahrefs, alternative providers, or AI estimates. Do not store cookies, relay tokens, credentials, session IDs, or account identifiers in the repository."
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/tests/test_audit_regressions.py",
+      "line_no": 172,
+      "content": "def test_recent_30d_fallback_uses_non_overlapping_baseline(tmp_path):"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 219,
+      "content": "fallback_persistence: float | None,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 220,
+      "content": "fallback_count: int,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 241,
+      "content": "fallback_window = primary.get(\"persistence_window\")"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 242,
+      "content": "if is_missing(fallback_window):"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 243,
+      "content": "fallback_window = None"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 245,
+      "content": "fallback_window = str(fallback_window)"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 246,
+      "content": "return fallback_window, fallback_persistence, fallback_count"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 252,
+      "content": "fallback_baseline: float | None,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 253,
+      "content": "fallback_recent: float | None,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 254,
+      "content": "fallback_growth: float | None,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 255,
+      "content": "fallback_growth_status: str,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 271,
+      "content": "fallback_baseline,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 272,
+      "content": "fallback_recent,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 273,
+      "content": "fallback_growth,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 274,
+      "content": "fallback_growth_status,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 279,
+      "content": "baseline = fallback_baseline"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 281,
+      "content": "recent = fallback_recent"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 283,
+      "content": "growth = fallback_growth"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 284,
+      "content": "growth_status = fallback_growth_status"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 294,
+      "content": "fallback_baseline: float | None,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 295,
+      "content": "fallback_count: int,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 310,
+      "content": "return None, fallback_baseline, fallback_count"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 357,
+      "content": "fallback_baseline = finite_number(row.get(\"baseline_signal\"))"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 358,
+      "content": "fallback_recent = finite_number(row.get(\"recent_signal\"))"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 359,
+      "content": "fallback_growth = finite_number(row.get(\"growth_rate\"))"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 360,
+      "content": "fallback_growth_status = str(row.get(\"growth_status\") or \"unknown\")"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 361,
+      "content": "fallback_persistence = finite_number(row.get(\"persistence\"))"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 363,
+      "content": "fallback_recent_obs = int(finite_number(primary.get(\"recent_observations\")) or row.get(\"persistence_observations\") or 0)"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 384,
+      "content": "fallback_persistence,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 385,
+      "content": "fallback_recent_obs,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 395,
+      "content": "fallback_baseline,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 396,
+      "content": "fallback_recent,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 397,
+      "content": "fallback_growth,"
+    },
+    {
+      "file": "skills/emerging-keyword-monitor/scripts/classify_emergence.py",
+      "line_no": 398,
+      "content": "fallback_growth_status,"
+    },
+    {
+      "file": "skills/seo-keyword-selection/SKILL.md",
+      "line_no": 40,
+      "content": "New/current Semrush acquisition is only through the authenticated same-origin `sem.3ue.com` collector. No official API or alternative-provider fallback is permitted."
+    },
+    {
+      "file": "skills/seo-keyword-selection/references/source-acquisition.md",
+      "line_no": 16,
+      "content": "- official connector fallback;"
+    },
+    {
+      "file": "tests/test_semrush_source_policy.py",
+      "line_no": 12,
+      "content": "def test_runtime_has_no_official_semrush_api_or_provider_fallback():"
+    },
+    {
+      "file": "tests/test_semrush_source_policy.py",
+      "line_no": 17,
+      "content": "\"ahrefs_fallback\","
+    }
+  ]
+}

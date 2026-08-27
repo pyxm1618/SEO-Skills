@@ -1,0 +1,90 @@
+[
+  {
+    "keyword": "tent a",
+    "volume": 1200,
+    "kd": 35,
+    "cpc": 1.25,
+    "intent": [
+      "commercial"
+    ],
+    "competition_level": "low",
+    "trend": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "metric_source": "Semrush",
+    "metric_database": "us",
+    "metric_stage": "exact",
+    "observed_at": "2026-08-27T03:00:00Z",
+    "relay_origin": "sem.3ue.com",
+    "provenance_ref": "evidence/raw_exact.json"
+  },
+  {
+    "keyword": "tent b",
+    "kd": 35,
+    "cpc": 1.25,
+    "intent": [
+      "commercial"
+    ],
+    "competition_level": "low",
+    "trend": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "metric_source": "Semrush",
+    "metric_database": "us",
+    "metric_stage": "exact",
+    "observed_at": "2026-08-27T03:00:00Z",
+    "relay_origin": "sem.3ue.com",
+    "provenance_ref": "evidence/raw_exact.json"
+  },
+  {
+    "keyword": "tent c",
+    "volume": 1200,
+    "cpc": 1.25,
+    "intent": [
+      "commercial"
+    ],
+    "competition_level": "low",
+    "trend": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "metric_source": "Semrush",
+    "metric_database": "us",
+    "metric_stage": "exact",
+    "observed_at": "2026-08-27T03:00:00Z",
+    "relay_origin": "sem.3ue.com",
+    "provenance_ref": "evidence/raw_exact.json"
+  }
+]

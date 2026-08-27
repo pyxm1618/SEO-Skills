@@ -1,0 +1,51 @@
+{
+  "exit_code": 2,
+  "stdout": "{\n  \"stage\": \"stage6_exact\",\n  \"status\": \"BLOCKED\",\n  \"production\": false,\n  \"candidate_id\": null,\n  \"complete_count\": 0,\n  \"blocked_count\": 1,\n  \"complete\": [],\n  \"blocked\": [\n    {\n      \"row\": {\n        \"keyword\": \"best lightweight tent\",\n        \"volume\": 1200,\n        \"kd\": 35,\n        \"cpc\": -0.1,\n        \"intent\": [\n          \"commercial\"\n        ],\n        \"competition_level\": \"low\",\n        \"trend\": [\n          100,\n          100,\n          100,\n          100,\n          100,\n          100,\n          100,\n          100,\n          100,\n          100,\n          100,\n          100\n        ],\n        \"metric_source\": \"Semrush\",\n        \"metric_database\": \"us\",\n        \"metric_stage\": \"exact\",\n        \"observed_at\": \"2026-08-27T03:00:00Z\",\n        \"relay_origin\": \"sem.3ue.com\",\n        \"provenance_ref\": \"evidence/raw_exact.json\"\n      },\n      \"errors\": [\n        \"cpc:below_min_0\"\n      ]\n    }\n  ]\n}\n",
+  "stderr": "cpc:below_min_0\n",
+  "report": {
+    "stage": "stage6_exact",
+    "status": "BLOCKED",
+    "production": false,
+    "candidate_id": null,
+    "complete_count": 0,
+    "blocked_count": 1,
+    "complete": [],
+    "blocked": [
+      {
+        "row": {
+          "keyword": "best lightweight tent",
+          "volume": 1200,
+          "kd": 35,
+          "cpc": -0.1,
+          "intent": [
+            "commercial"
+          ],
+          "competition_level": "low",
+          "trend": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "metric_source": "Semrush",
+          "metric_database": "us",
+          "metric_stage": "exact",
+          "observed_at": "2026-08-27T03:00:00Z",
+          "relay_origin": "sem.3ue.com",
+          "provenance_ref": "evidence/raw_exact.json"
+        },
+        "errors": [
+          "cpc:below_min_0"
+        ]
+      }
+    ]
+  }
+}

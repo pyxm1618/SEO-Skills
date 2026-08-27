@@ -1,0 +1,8 @@
+{
+  "schema": "seo-stage-validation/v1",
+  "stage": "stage6_exact",
+  "status": "BLOCKED",
+  "candidate_id": null,
+  "report_ref": "acceptance-evidence/evidence-binding/test_c/report.json",
+  "report_sha256": "355ed7871bf8969941d876ece40d27f1fa1dbb56c1d83393c411b400a4f0d4d4"
+}

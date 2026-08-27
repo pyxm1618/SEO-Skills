@@ -1,0 +1,17 @@
+{
+  "run_id": "r5",
+  "status": "IN_PROGRESS",
+  "candidates": {
+    "cand-a": {
+      "stage6_exact": {
+        "status": "BLOCKED"
+      }
+    },
+    "cand-b": {
+      "stage6_exact": {
+        "status": "PASS",
+        "validation_receipt_ref": "acceptance-evidence/hooks/stage_5b/report.receipt.json"
+      }
+    }
+  }
+}
