@@ -15,12 +15,14 @@ def load_collector():
 
 def test_load_request_rejects_stale_historical_capture(tmp_path):
     collector = load_collector()
+    capture = tmp_path / "historical-network-capture.json"
+    capture.write_text(json.dumps({"captured": True}), encoding="utf-8")
     descriptor = {
         "path": "/captured/current-path",
         "method": "POST",
         "body": {},
         "capture_observed_at": "2000-01-01T00:00:00Z",
-        "capture_evidence_ref": "evidence/historical-network-capture.json",
+        "capture_evidence_ref": str(capture),
         "mode": "exact",
         "metric_database": "us",
         "keyword": "wedding calculator",

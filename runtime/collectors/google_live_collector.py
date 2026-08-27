@@ -6,6 +6,7 @@ No HTTP/search API fallback is implemented by design.
 """
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -13,6 +14,15 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
+
+BINDING_PATH = Path(__file__).resolve().parents[1] / "evidence_binding.py"
+
+
+def _binding():
+    spec = importlib.util.spec_from_file_location("seo_evidence_binding_for_google", BINDING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def now():
@@ -87,15 +97,22 @@ def autocomplete(context, seed, country, language, evidence_dir):
             break
     if not values:
         raise RuntimeError("Google visible autocomplete dropdown unavailable or returned 0 suggestions")
+    observed_at = now()
     evidence = screenshot(page, evidence_dir, f"autocomplete-{re.sub(r'[^a-zA-Z0-9]+','-',seed).strip('-')}.png")
+    observation = evidence_json(
+        evidence_dir,
+        f"autocomplete-{re.sub(r'[^a-zA-Z0-9]+','-',seed).strip('-')}.json",
+        {"page_url": page.url, "seed": seed, "suggestions": values, "country": country, "language": language, "observed_at": observed_at},
+    )
     return {
         "seed": seed,
         "suggestions": values,
         "country": country,
         "language": language,
-        "observed_at": now(),
+        "observed_at": observed_at,
         "source": "google_autocomplete",
         "evidence_ref": evidence,
+        "observation_ref": observation,
     }
 
 
@@ -112,14 +129,21 @@ def intitle(context, keyword, market, evidence_dir):
     digits = re.sub(r"\D", "", numbers[0])
     if not digits:
         raise RuntimeError("Google intitle result count could not be parsed")
+    observed_at = now()
     evidence = screenshot(page, evidence_dir, f"intitle-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png")
+    observation = evidence_json(
+        evidence_dir,
+        f"intitle-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.json",
+        {"page_url": page.url, "query": query, "result_stats_text": text, "intitle_results": int(digits), "market": market, "observed_at": observed_at},
+    )
     return {
         "keyword": keyword,
         "intitle_results": int(digits),
         "source": "Google",
         "market": market,
-        "observed_at": now(),
+        "observed_at": observed_at,
         "evidence_ref": evidence,
+        "observation_ref": observation,
     }
 
 
@@ -145,13 +169,20 @@ def serp(context, keyword, market, evidence_dir):
             continue
     if len(rows) < 10:
         raise RuntimeError(f"Google real SERP collector found only {len(rows)} organic results; top 10 contract not met")
+    observed_at = now()
     evidence = screenshot(page, evidence_dir, f"serp-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png")
+    observation = evidence_json(
+        evidence_dir,
+        f"serp-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.json",
+        {"page_url": page.url, "keyword": keyword, "market": market, "observed_at": observed_at, "results": rows},
+    )
     return {
         "keyword": keyword,
         "source": "Google",
         "market": market,
-        "observed_at": now(),
+        "observed_at": observed_at,
         "evidence_ref": evidence,
+        "observation_ref": observation,
         "results": rows,
     }
 
@@ -195,10 +226,7 @@ def parse_trends_timeline(payload):
     for index, row in enumerate(timeline):
         if not isinstance(row, dict) or row.get("time") in (None, "") or "value" not in row:
             raise RuntimeError(f"Google Trends timeline row {index} is incomplete")
-        point = {
-            "time": str(row["time"]),
-            "value": _trend_value(row["value"], index),
-        }
+        point = {"time": str(row["time"]), "value": _trend_value(row["value"], index)}
         if row.get("formattedTime") not in (None, ""):
             point["formatted_time"] = str(row["formattedTime"])
         series.append(point)
@@ -262,6 +290,18 @@ def trends(context, keyword, market, evidence_dir):
     }
 
 
+def _artifacts_for(mode, result):
+    if mode == "trends":
+        return [
+            {"path": result["google_trends_evidence_ref"], "role": "temporal_payload"},
+            {"path": result["google_trends_screenshot_ref"], "role": "screenshot"},
+        ]
+    artifacts = [{"path": result["evidence_ref"], "role": "screenshot"}]
+    if result.get("observation_ref"):
+        artifacts.append({"path": result["observation_ref"], "role": "structured_observation"})
+    return artifacts
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["autocomplete", "intitle", "serp", "trends"])
@@ -291,8 +331,19 @@ def main():
             else:
                 result = trends(context, args.keyword, args.market, args.evidence_dir)
         output = Path(args.output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        evidence_type = {
+            "autocomplete": "google_autocomplete",
+            "intitle": "google_intitle",
+            "serp": "google_serp",
+            "trends": "google_trends",
+        }[args.mode]
+        result = _binding().write_observed_output(
+            output,
+            result,
+            "google_live_collector",
+            evidence_type,
+            _artifacts_for(args.mode, result),
+        )
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as exc:

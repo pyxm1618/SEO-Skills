@@ -2,21 +2,20 @@
 """Codex project hook for SEO production-stage integrity.
 
 Protected production transitions infer their required stage from the command
-itself. SEO_STAGE_REQUIRE remains available as an explicit override/test helper,
-but is not required for enforcement.
+itself. A stage PASS is trusted only when it references a hash-verified
+production validation receipt.
 """
 
+import hashlib
 import json
 import os
 import re
 import sys
 from pathlib import Path
 
-
 REQUIRE_RE = re.compile(r"(?:^|\s)SEO_STAGE_REQUIRE=([A-Za-z0-9_.-]+)")
 CANDIDATE_RE = re.compile(r"(?:^|\s)SEO_CANDIDATE_ID=([^\s]+)")
 
-# Small, explicit map. This is an integrity gate, not a workflow engine.
 PROTECTED_COMMAND_RULES = (
     (re.compile(r"\bstage_validator\.py\b.*--stage(?:=|\s+)discovery_handoff\b"), "discovery_autocomplete"),
     (re.compile(r"\bgoogle_live_collector\.py\b.*\bintitle\b"), "stage6_exact"),
@@ -36,9 +35,7 @@ def _load_stdin():
 
 def _manifest_path():
     override = os.environ.get("SEO_RUN_MANIFEST")
-    if override:
-        return Path(override)
-    return Path(".seo-run/active.json")
+    return Path(override) if override else Path(".seo-run/active.json")
 
 
 def _load_manifest():
@@ -46,11 +43,10 @@ def _load_manifest():
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"SEO run manifest invalid: {exc}", file=sys.stderr)
         raise SystemExit(2)
-    return data
 
 
 def _flatten_strings(value):
@@ -96,27 +92,72 @@ def _stage_record(manifest, stage, candidate_id=None):
     return manifest.get("stages", {}).get(stage)
 
 
+def _sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _verify_validation_receipt(record, stage, candidate_id=None):
+    if not isinstance(record, dict) or record.get("status") != "PASS":
+        return False, "stage status is not PASS"
+    receipt_ref = str(record.get("validation_receipt_ref") or "").strip()
+    if not receipt_ref:
+        return False, "PASS lacks validation receipt"
+    receipt_path = Path(receipt_ref)
+    if not receipt_path.is_file():
+        return False, "validation receipt file is missing"
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False, "validation receipt is invalid JSON"
+    if receipt.get("schema") != "seo-stage-validation/v1":
+        return False, "validation receipt schema mismatch"
+    if receipt.get("stage") != stage or receipt.get("status") != "PASS":
+        return False, "validation receipt stage/status mismatch"
+    if candidate_id is not None and receipt.get("candidate_id") != candidate_id:
+        return False, "validation receipt candidate mismatch"
+    report_ref = str(receipt.get("report_ref") or "").strip()
+    report_path = Path(report_ref)
+    if not report_path.is_file():
+        return False, "validation report file is missing"
+    if _sha256(report_path) != receipt.get("report_sha256"):
+        return False, "validation report hash mismatch"
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False, "validation report is invalid JSON"
+    if report.get("stage") != stage or report.get("status") != "PASS":
+        return False, "validation report stage/status mismatch"
+    if report.get("production") is not True:
+        return False, "validation report was not produced in production mode"
+    if report.get("blocked_count") != 0 or int(report.get("complete_count") or 0) < 1:
+        return False, "validation report is not complete"
+    if candidate_id is not None and report.get("candidate_id") != candidate_id:
+        return False, "validation report candidate mismatch"
+    if report.get("validation_receipt_ref") != str(receipt_path):
+        return False, "validation report is not bound to this receipt"
+    return True, ""
+
+
 def pre_tool_use(payload, manifest):
     stage, candidate_id = _required_transition(payload)
     if not stage:
         return 0
     if manifest is None:
-        print(
-            f"SEO stage gate denied {stage}; active run manifest is missing",
-            file=sys.stderr,
-        )
+        print(f"SEO stage gate denied {stage}; active run manifest is missing", file=sys.stderr)
         return 2
     record = _stage_record(manifest, stage, candidate_id)
     status = record.get("status") if isinstance(record, dict) else record
     if status == "PASS":
-        return 0
+        valid, receipt_reason = _verify_validation_receipt(record, stage, candidate_id)
+        if valid:
+            return 0
+        scope = f" candidate={candidate_id}" if candidate_id else ""
+        print(f"SEO stage gate denied {stage}{scope}; PASS validation receipt invalid: {receipt_reason}", file=sys.stderr)
+        return 2
     reason = record.get("blocked_reason", "") if isinstance(record, dict) else ""
     scope = f" candidate={candidate_id}" if candidate_id else ""
     detail = f": {reason}" if reason else ""
-    print(
-        f"SEO stage gate denied {stage}{scope}; status={status or 'NOT_RUN'}{detail}",
-        file=sys.stderr,
-    )
+    print(f"SEO stage gate denied {stage}{scope}; status={status or 'NOT_RUN'}{detail}", file=sys.stderr)
     return 2
 
 
@@ -142,9 +183,7 @@ def main():
         return 2
     payload = _load_stdin()
     manifest = _load_manifest()
-    if sys.argv[1] == "pre":
-        return pre_tool_use(payload, manifest)
-    return stop(payload, manifest)
+    return pre_tool_use(payload, manifest) if sys.argv[1] == "pre" else stop(payload, manifest)
 
 
 if __name__ == "__main__":

@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
-"""Lightweight production-stage contract validator.
-
-This validates evidence completeness and provenance before production-stage
-transitions. It does not make SEO decisions and does not replace the existing
-evaluator.
-"""
+"""Production-stage contract validator with optional collector-evidence binding."""
 
 import argparse
+import hashlib
+import importlib.util
 import json
 import math
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-
 NOT_APPLICABLE = "not_applicable"
 UNKNOWN = "unknown"
+ROOT = Path(__file__).resolve().parent
+BINDING_PATH = ROOT / "evidence_binding.py"
+PRODUCTION_BINDINGS = {
+    "discovery_autocomplete": "google_autocomplete",
+    "discovery_semrush_ideas": "semrush_ideas",
+    "stage6_exact": "semrush_exact",
+    "intitle_observation": "google_intitle",
+    "serp_review": "google_serp",
+    "finalist_trend": "google_trends",
+}
+
+
+def _binding():
+    spec = importlib.util.spec_from_file_location("seo_evidence_binding", BINDING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def value_state(value):
@@ -94,7 +107,23 @@ def _validate_number_range(field, value, rule):
     return errors
 
 
-def validate_stage(stage, payload, contracts):
+def _validate_production_binding(stage, payload):
+    if stage == "finalist_trend" and payload.get("is_finalist") is not True:
+        return []
+    binding = _binding()
+    try:
+        if stage == "kgr_intitle":
+            binding.verify_kgr_payload(payload)
+        else:
+            evidence_type = PRODUCTION_BINDINGS.get(stage)
+            if evidence_type:
+                binding.verify_payload(payload, evidence_type)
+    except Exception as exc:
+        return [f"evidence:{exc}"]
+    return []
+
+
+def validate_stage(stage, payload, contracts, production=False):
     if stage not in contracts:
         return [f"stage:unknown:{stage}"]
     if not isinstance(payload, dict):
@@ -154,8 +183,7 @@ def validate_stage(stage, payload, contracts):
     for rule in spec.get("conditional_required", []):
         if _condition_matches(payload, rule.get("when", {})):
             for field in rule.get("fields", []):
-                state = value_state(payload.get(field))
-                if state != "value":
+                if value_state(payload.get(field)) != "value":
                     errors.append(f"{field}:conditionally_required")
 
     for rule in spec.get("conditional_equals", []):
@@ -165,10 +193,12 @@ def validate_stage(stage, payload, contracts):
             if payload.get(field) != expected:
                 errors.append(f"{field}:must_equal:{expected}")
 
+    if production and not errors:
+        errors.extend(_validate_production_binding(stage, payload))
     return errors
 
 
-def validate_payload(stage, data, contracts):
+def validate_payload(stage, data, contracts, production=False):
     if isinstance(data, list):
         rows = data
     elif isinstance(data, dict) and isinstance(data.get("rows"), list):
@@ -179,7 +209,7 @@ def validate_payload(stage, data, contracts):
     complete = []
     blocked = []
     for row in rows:
-        errors = validate_stage(stage, row, contracts)
+        errors = validate_stage(stage, row, contracts, production=production)
         if errors:
             blocked.append({"row": row, "errors": errors})
         else:
@@ -195,29 +225,62 @@ def batch_status(complete, blocked):
     return "BLOCKED"
 
 
+def _sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _write_validation_receipt(report_path, report, candidate_id=None):
+    report_path = Path(report_path)
+    receipt_path = report_path.with_suffix(".receipt.json")
+    report["validation_receipt_ref"] = str(receipt_path)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    receipt = {
+        "schema": "seo-stage-validation/v1",
+        "stage": report["stage"],
+        "status": report["status"],
+        "candidate_id": candidate_id,
+        "report_ref": str(report_path),
+        "report_sha256": _sha256(report_path),
+    }
+    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return receipt_path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--contracts", default=str(Path(__file__).with_name("stage_contracts.json")))
     parser.add_argument("--stage", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--report")
+    parser.add_argument("--production", action="store_true", help="require collector-bound evidence for observed stages")
+    parser.add_argument("--candidate-id")
     args = parser.parse_args()
+
+    if args.production and not args.report:
+        print("BLOCKED: --production requires --report so a validation receipt can be issued", file=sys.stderr)
+        return 2
 
     contracts = json.loads(Path(args.contracts).read_text(encoding="utf-8"))
     data = json.loads(Path(args.input).read_text(encoding="utf-8"))
-    complete, blocked = validate_payload(args.stage, data, contracts)
+    complete, blocked = validate_payload(args.stage, data, contracts, production=args.production)
     report = {
         "stage": args.stage,
         "status": batch_status(complete, blocked),
+        "production": bool(args.production),
+        "candidate_id": args.candidate_id,
         "complete_count": len(complete),
         "blocked_count": len(blocked),
         "complete": complete,
         "blocked": blocked,
     }
-    text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
-        Path(args.report).write_text(text + "\n", encoding="utf-8")
-    print(text)
+        report_path = Path(args.report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        if args.production:
+            _write_validation_receipt(report_path, report, args.candidate_id)
+        else:
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     if blocked:
         for item in blocked:
             print(" | ".join(item["errors"]), file=sys.stderr)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import importlib.util
 import json
 import math
 import re
@@ -10,6 +11,14 @@ from pathlib import Path
 NULL_STRINGS = {'', 'unknown', 'null', 'none', 'n/a', 'na', '-'}
 RULES_PATH = Path(__file__).resolve().parents[1] / 'references' / 'thresholds.json'
 RULES = json.loads(RULES_PATH.read_text(encoding='utf-8'))
+BINDING_PATH = Path(__file__).resolve().parents[3] / 'runtime' / 'evidence_binding.py'
+
+
+def _binding():
+    spec = importlib.util.spec_from_file_location('seo_evidence_binding_for_evaluator', BINDING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def is_missing(value):
@@ -174,7 +183,26 @@ def provenance_fields(row, batch_meta):
     metric_database = str(row.get('metric_database') or batch_meta.get('metric_database') or batch_meta.get('database') or '').strip()
     observed_at = str(row.get('observed_at') or batch_meta.get('observed_at') or batch_meta.get('generated_at') or '').strip()
     metric_stage = str(row.get('metric_stage') or batch_meta.get('metric_stage') or '').strip()
-    status = 'verified' if all((metric_source, metric_database, observed_at, metric_stage)) else 'incomplete'
+    if not all((metric_source, metric_database, observed_at, metric_stage)):
+        return metric_source, metric_database, observed_at, metric_stage, 'incomplete'
+
+    combined = dict(batch_meta)
+    combined.update(row)
+    binding = _binding()
+    try:
+        if not is_missing(combined.get('intitle_results')) and combined.get('intitle_evidence_receipt_ref'):
+            binding.verify_kgr_payload(combined)
+            status = 'verified'
+        elif metric_source == 'Semrush' and metric_stage == 'exact' and combined.get('evidence_receipt_ref'):
+            binding.verify_payload(combined, 'semrush_exact')
+            status = 'verified'
+        elif metric_source == 'Semrush' and metric_stage == 'ideas' and combined.get('evidence_receipt_ref'):
+            binding.verify_payload(combined, 'semrush_ideas')
+            status = 'verified'
+        else:
+            status = 'unverified'
+    except Exception:
+        status = 'invalid'
     return metric_source, metric_database, observed_at, metric_stage, status
 
 
@@ -225,8 +253,6 @@ def normalize(row, stage, batch_meta=None):
     evidence_present = not is_missing(row.get('serp_weak_evidence'))
     valid_evidence, evidence_out, evidence_errors = parse_serp_evidence(row.get('serp_weak_evidence'))
     weak_points = len(valid_evidence) if evidence_present and valid_evidence is not None else None
-
-    # The legacy count is accepted only as a sanity-checked import field; it never drives an upgrade.
     if legacy_weak is not None:
         out['reported_serp_weak_points'] = int(legacy_weak)
 
@@ -302,7 +328,7 @@ def summary(rows):
         'status_counts': counts,
         'duplicate_rows': sum(1 for r in rows if r.get('duplicate_warning')),
         'invalid_rows': sum(1 for r in rows if r.get('mechanical_status') == 'invalid_row'),
-        'provenance_incomplete_rows': sum(1 for r in rows if r.get('provenance_status') == 'incomplete'),
+        'provenance_incomplete_rows': sum(1 for r in rows if r.get('provenance_status') != 'verified'),
     }
 
 

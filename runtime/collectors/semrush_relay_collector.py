@@ -8,6 +8,7 @@ normalizers turn only the observed schema into contract rows.
 """
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -15,11 +16,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-
 ALLOWED_HOST = "sem.3ue.com"
 MODES = {"ideas", "exact"}
 DEFAULT_CAPTURE_MAX_AGE_SECONDS = 900
 MAX_FUTURE_SKEW_SECONDS = 60
+BINDING_PATH = Path(__file__).resolve().parents[1] / "evidence_binding.py"
+
+
+def _binding():
+    spec = importlib.util.spec_from_file_location("seo_evidence_binding_for_semrush", BINDING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def now():
@@ -106,6 +114,9 @@ def load_request(path):
     parsed = urlparse(data["path"] if "://" in data["path"] else f"https://{ALLOWED_HOST}{data['path']}")
     if parsed.hostname != ALLOWED_HOST:
         raise RuntimeError(f"relay request host must be {ALLOWED_HOST}")
+    capture_ref = Path(str(data["capture_evidence_ref"]))
+    if not capture_ref.is_file():
+        raise RuntimeError("live relay request capture evidence file is missing")
     _validate_capture_freshness(data)
     return data
 
@@ -269,6 +280,10 @@ def collect(page, descriptor, raw_evidence_ref=None, raw_output_path=None):
             "request_path": request_url,
             "capture_observed_at": descriptor["capture_observed_at"],
             "capture_evidence_ref": descriptor["capture_evidence_ref"],
+            "mode": descriptor["mode"],
+            "metric_database": descriptor["metric_database"],
+            "seed": descriptor.get("seed"),
+            "keyword": descriptor.get("keyword"),
             "response": data,
         }
         raw_path.write_text(json.dumps(raw_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -289,8 +304,17 @@ def main():
         raw_output = Path(args.raw_output) if args.raw_output else output.with_suffix(".raw.json")
         pw, browser, page = connect_same_origin()
         result = collect(page, descriptor, raw_output_path=raw_output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        evidence_type = "semrush_ideas" if descriptor["mode"] == "ideas" else "semrush_exact"
+        result = _binding().write_observed_output(
+            output,
+            result,
+            "semrush_relay_collector",
+            evidence_type,
+            [
+                {"path": raw_output, "role": "relay_raw_response"},
+                {"path": descriptor["capture_evidence_ref"], "role": "current_network_capture"},
+            ],
+        )
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as exc:

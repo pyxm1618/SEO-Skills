@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -8,7 +9,44 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "runtime" / "codex_stage_hook.py"
 
 
+def _bind_pass_records(tmp_path, manifest):
+    def bind(record, stage, candidate_id, label):
+        if not isinstance(record, dict) or record.get("status") != "PASS" or record.get("validation_receipt_ref"):
+            return
+        report_path = tmp_path / f"{label}-{stage}.report.json"
+        receipt_path = report_path.with_suffix(".receipt.json")
+        report = {
+            "stage": stage,
+            "status": "PASS",
+            "production": True,
+            "candidate_id": candidate_id,
+            "complete_count": 1,
+            "blocked_count": 0,
+            "complete": [{"test": True}],
+            "blocked": [],
+            "validation_receipt_ref": str(receipt_path),
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        receipt = {
+            "schema": "seo-stage-validation/v1",
+            "stage": stage,
+            "status": "PASS",
+            "candidate_id": candidate_id,
+            "report_ref": str(report_path),
+            "report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+        }
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        record["validation_receipt_ref"] = str(receipt_path)
+
+    for stage, record in manifest.get("stages", {}).items():
+        bind(record, stage, None, "global")
+    for candidate_id, stages in manifest.get("candidates", {}).items():
+        for stage, record in stages.items():
+            bind(record, stage, candidate_id, candidate_id)
+
+
 def run_hook(tmp_path, mode, payload, manifest):
+    _bind_pass_records(tmp_path, manifest)
     manifest_path = tmp_path / "active.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     env = dict(os.environ, SEO_RUN_MANIFEST=str(manifest_path))
