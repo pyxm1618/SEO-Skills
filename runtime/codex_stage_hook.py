@@ -4,8 +4,9 @@
 Protected production transitions infer their required stage from the command
 itself. A stage PASS is trusted only when it references a hash-verified
 production validation receipt whose underlying collector evidence is still
-valid. COMPLETE is trusted only when explicit completion requirements point to
-valid production stage receipts.
+valid. COMPLETE is trusted only when explicit canonical completion requirements
+cover the minimum stages for the selected route and all referenced production
+stage receipts remain valid.
 """
 
 import hashlib
@@ -39,6 +40,11 @@ STAGE_EVIDENCE_TYPES = {
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
+}
+CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff"})
+ROUTE_MINIMUM_STAGES = {
+    "traditional": frozenset({"discovery_autocomplete", "stage6_exact"}),
+    "emerging": frozenset({"stage6_exact"}),
 }
 
 
@@ -104,7 +110,10 @@ def _protected_requirement(payload):
 
 def _required_transition(payload):
     explicit_stage, candidate_id = _explicit_requirement(payload.get("tool_input"))
-    return explicit_stage or _protected_requirement(payload), candidate_id
+    protected_stage = _protected_requirement(payload)
+    # A user/model supplied marker is diagnostic only for protected commands.
+    # It must never weaken or replace the stage inferred from the command itself.
+    return protected_stage or explicit_stage, candidate_id
 
 
 def _stage_record(manifest, stage, candidate_id=None):
@@ -138,6 +147,8 @@ def _verify_current_evidence(report, stage):
 
 
 def _verify_validation_receipt(record, stage, candidate_id=None):
+    if stage not in CANONICAL_STAGES:
+        return False, f"unknown/non-canonical stage: {stage}"
     if not isinstance(record, dict) or record.get("status") != "PASS":
         return False, "stage status is not PASS"
     receipt_ref = str(record.get("validation_receipt_ref") or "").strip()
@@ -186,6 +197,12 @@ def _verify_completion_requirements(manifest):
     requirements = manifest.get("completion_requirements")
     if not isinstance(requirements, list) or not requirements:
         return False, "COMPLETE lacks explicit completion_requirements"
+    route = str(manifest.get("route") or "").strip().lower()
+    minimum = ROUTE_MINIMUM_STAGES.get(route)
+    if minimum is None:
+        return False, f"COMPLETE has unknown route: {route or 'missing'}"
+
+    declared_stages = set()
     for index, requirement in enumerate(requirements):
         if not isinstance(requirement, dict):
             return False, f"completion requirement {index} is invalid"
@@ -193,11 +210,18 @@ def _verify_completion_requirements(manifest):
         candidate_id = requirement.get("candidate_id")
         if not stage:
             return False, f"completion requirement {index} lacks stage"
+        if stage not in CANONICAL_STAGES:
+            return False, f"completion requirement {index} uses unknown/non-canonical stage: {stage}"
+        declared_stages.add(stage)
         record = _stage_record(manifest, stage, candidate_id)
         valid, reason = _verify_validation_receipt(record, stage, candidate_id)
         if not valid:
             scope = f" candidate={candidate_id}" if candidate_id else ""
             return False, f"required {stage}{scope} is not verified: {reason}"
+
+    missing_minimum = sorted(minimum - declared_stages)
+    if missing_minimum:
+        return False, f"COMPLETE route minimum stages missing: {', '.join(missing_minimum)}"
     return True, ""
 
 
@@ -205,6 +229,9 @@ def pre_tool_use(payload, manifest):
     stage, candidate_id = _required_transition(payload)
     if not stage:
         return 0
+    if stage not in CANONICAL_STAGES:
+        print(f"SEO stage gate denied {stage}; unknown/non-canonical stage", file=sys.stderr)
+        return 2
     if manifest is None:
         print(f"SEO stage gate denied {stage}; active run manifest is missing", file=sys.stderr)
         return 2
