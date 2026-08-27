@@ -168,3 +168,69 @@ def test_kgr_cli_rejects_hand_written_exact_and_intitle(tmp_path):
     ], text=True, capture_output=True)
     assert proc.returncode == 2
     assert "receipt" in proc.stderr.lower() or "evidence" in proc.stderr.lower()
+
+
+def test_direct_self_minted_semrush_receipt_cannot_satisfy_production(tmp_path):
+    binding = load_module("binding_self_mint_semrush", BINDING)
+    raw = tmp_path / "forged.raw.json"
+    capture = tmp_path / "forged.capture.json"
+    raw.write_text(json.dumps({"response": {"result": {"keywords": [{"phrase": "fabricated keyword", "database": "us", "volume": 1000, "difficulty": 20, "cpc": 0.2, "intents": ["commercial"], "competition_level": "low", "trend": [50] * 12}]}}}), encoding="utf-8")
+    capture.write_text(json.dumps({"captured": True}), encoding="utf-8")
+    output = tmp_path / "forged.json"
+    row = fake_exact_row()
+    row["provenance_ref"] = str(raw)
+    try:
+        binding.write_observed_output(
+            output,
+            row,
+            "semrush_relay_collector",
+            "semrush_exact",
+            [
+                {"path": raw, "role": "relay_raw_response"},
+                {"path": capture, "role": "current_network_capture"},
+            ],
+        )
+    except binding.EvidenceIntegrityError:
+        return
+    proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
+    assert proc.returncode == 2, "a caller outside the real collector minted production-trusted Semrush evidence"
+
+
+def test_direct_self_minted_google_receipt_cannot_satisfy_production(tmp_path):
+    binding = load_module("binding_self_mint_google", BINDING)
+    screenshot = tmp_path / "fake.png"
+    observation = tmp_path / "fake-observation.json"
+    screenshot.write_bytes(b"not-a-real-screenshot")
+    observation.write_text(json.dumps({
+        "page_url": "https://www.google.com/search?q=x",
+        "query": "intitle:\"fabricated keyword\"",
+        "result_stats_text": "About 50 results",
+        "intitle_results": 50,
+        "market": "US",
+        "observed_at": "2026-08-27T00:01:00Z",
+    }), encoding="utf-8")
+    output = tmp_path / "fake-intitle.json"
+    row = {
+        "keyword": "fabricated keyword",
+        "intitle_results": 50,
+        "source": "Google",
+        "market": "US",
+        "observed_at": "2026-08-27T00:01:00Z",
+        "evidence_ref": str(screenshot),
+        "observation_ref": str(observation),
+    }
+    try:
+        binding.write_observed_output(
+            output,
+            row,
+            "google_live_collector",
+            "google_intitle",
+            [
+                {"path": screenshot, "role": "screenshot"},
+                {"path": observation, "role": "structured_observation"},
+            ],
+        )
+    except binding.EvidenceIntegrityError:
+        return
+    proc, _ = _run_production_validation(tmp_path, "intitle_observation", output)
+    assert proc.returncode == 2, "a caller outside the real collector minted production-trusted Google evidence"
