@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 ALLOWED_HOST = "sem.3ue.com"
 MODES = {"ideas", "exact"}
+DEFAULT_CAPTURE_MAX_AGE_SECONDS = 900
+MAX_FUTURE_SKEW_SECONDS = 60
 
 
 def now():
@@ -56,6 +58,35 @@ def _keyword(value):
     return " ".join(str(value or "").split()).casefold()
 
 
+def _capture_time(value):
+    text = str(value or "").strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        captured = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise RuntimeError("live relay request capture_observed_at is invalid") from exc
+    if captured.tzinfo is None:
+        captured = captured.replace(tzinfo=timezone.utc)
+    return captured.astimezone(timezone.utc)
+
+
+def _validate_capture_freshness(data):
+    try:
+        max_age = int(os.environ.get("SEO_RELAY_CAPTURE_MAX_AGE_SECONDS", DEFAULT_CAPTURE_MAX_AGE_SECONDS))
+    except ValueError as exc:
+        raise RuntimeError("SEO_RELAY_CAPTURE_MAX_AGE_SECONDS must be an integer") from exc
+    if max_age <= 0:
+        raise RuntimeError("SEO_RELAY_CAPTURE_MAX_AGE_SECONDS must be positive")
+    age_seconds = (datetime.now(timezone.utc) - _capture_time(data["capture_observed_at"])).total_seconds()
+    if age_seconds < -MAX_FUTURE_SKEW_SECONDS:
+        raise RuntimeError("live relay request capture timestamp is implausibly in the future")
+    if age_seconds > max_age:
+        raise RuntimeError(
+            f"live relay request capture is stale ({int(age_seconds)}s old; max {max_age}s); recapture from current session"
+        )
+
+
 def load_request(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     required = [
@@ -75,6 +106,7 @@ def load_request(path):
     parsed = urlparse(data["path"] if "://" in data["path"] else f"https://{ALLOWED_HOST}{data['path']}")
     if parsed.hostname != ALLOWED_HOST:
         raise RuntimeError(f"relay request host must be {ALLOWED_HOST}")
+    _validate_capture_freshness(data)
     return data
 
 
