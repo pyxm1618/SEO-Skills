@@ -37,4 +37,4 @@ jobs:
         run: python3 -m pytest -q
 
       - name: Compile Python sources
-        run: python3 -m compileall -q skills
+        run: python3 -m compileall -q skills runtime
