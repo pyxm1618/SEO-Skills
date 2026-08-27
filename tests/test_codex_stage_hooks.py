@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -7,18 +8,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+FIXTURE_FACTORY = ROOT / "tests" / "evidence_fixture_factory.py"
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _bound_stage_row(tmp_path, stage, label):
     if stage != "stage6_exact":
         return {"test": True}
-    sys.path.insert(0, str(ROOT / "runtime"))
-    import evidence_binding
-
-    artifact = tmp_path / f"{label}-{stage}.raw.json"
-    artifact.write_text(json.dumps({"response": {"test": True}}), encoding="utf-8")
-    output = tmp_path / f"{label}-{stage}.json"
-    payload = {
+    fixtures = load_module(f"codex_hook_fixture_{label}", FIXTURE_FACTORY)
+    _output, bound, _raw, _capture = fixtures.make_semrush_exact(tmp_path, f"{label}-{stage}", {
         "keyword": "wedding calculator",
         "volume": 1000,
         "kd": 20,
@@ -26,20 +30,8 @@ def _bound_stage_row(tmp_path, stage, label):
         "intent": ["commercial"],
         "competition_level": "low",
         "trend": [50] * 12,
-        "metric_source": "Semrush",
-        "metric_database": "us",
-        "metric_stage": "exact",
-        "observed_at": "2026-08-27T03:00:00Z",
-        "relay_origin": "https://sem.3ue.com/",
-        "provenance_ref": str(artifact),
-    }
-    return evidence_binding.write_observed_output(
-        output,
-        payload,
-        "semrush_relay_collector",
-        "semrush_exact",
-        [{"path": str(artifact), "role": "raw_relay_response"}],
-    )
+    })
+    return bound
 
 
 def _bind_pass_records(tmp_path, manifest):

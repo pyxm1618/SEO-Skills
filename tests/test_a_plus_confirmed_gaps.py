@@ -14,6 +14,7 @@ SEMRUSH = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"
 GOOGLE = ROOT / "runtime" / "collectors" / "google_live_collector.py"
 MERGER = ROOT / "runtime" / "kgr_evidence_merge.py"
 EVALUATOR = ROOT / "skills" / "seo-keyword-selection" / "scripts" / "evaluate_candidates.py"
+FIXTURE_FACTORY = ROOT / "tests" / "evidence_fixture_factory.py"
 
 
 def load_module(name, path):
@@ -46,18 +47,9 @@ def exact_row(**overrides):
 def _bound_stage_row(tmp_path, stage, label):
     if stage != "stage6_exact":
         return {"test": True}
-    binding = load_module(f"hook_evidence_binding_{label}", ROOT / "runtime" / "evidence_binding.py")
-    artifact = tmp_path / f"{label}-{stage}.raw.json"
-    artifact.write_text(json.dumps({"response": {"test": True}}), encoding="utf-8")
-    output = tmp_path / f"{label}-{stage}.json"
-    payload = exact_row(provenance_ref=str(artifact))
-    return binding.write_observed_output(
-        output,
-        payload,
-        "semrush_relay_collector",
-        "semrush_exact",
-        [{"path": str(artifact), "role": "raw_relay_response"}],
-    )
+    fixtures = load_module(f"hook_evidence_fixture_{label}", FIXTURE_FACTORY)
+    _output, bound, _raw, _capture = fixtures.make_semrush_exact(tmp_path, f"{label}-{stage}", exact_row())
+    return bound
 
 
 def _bind_pass_records(tmp_path, manifest):

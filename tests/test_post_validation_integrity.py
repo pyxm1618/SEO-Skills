@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import subprocess
@@ -7,6 +8,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "runtime" / "codex_stage_hook.py"
 VALIDATOR = ROOT / "runtime" / "stage_validator.py"
+FIXTURE_FACTORY = ROOT / "tests" / "evidence_fixture_factory.py"
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_hook(tmp_path, mode, payload, manifest):
@@ -23,13 +32,8 @@ def run_hook(tmp_path, mode, payload, manifest):
 
 
 def make_exact_production_validation(tmp_path):
-    sys.path.insert(0, str(ROOT / "runtime"))
-    import evidence_binding
-
-    artifact = tmp_path / "relay.raw.json"
-    artifact.write_text(json.dumps({"response": {"real": True}}), encoding="utf-8")
-    output = tmp_path / "exact.json"
-    payload = {
+    fixtures = load_module("post_validation_fixtures", FIXTURE_FACTORY)
+    output, bound, artifact, _capture = fixtures.make_semrush_exact(tmp_path, "post-validation", {
         "keyword": "wedding calculator",
         "volume": 1000,
         "kd": 20,
@@ -37,20 +41,7 @@ def make_exact_production_validation(tmp_path):
         "intent": ["commercial"],
         "competition_level": "low",
         "trend": [50] * 12,
-        "metric_source": "Semrush",
-        "metric_database": "us",
-        "metric_stage": "exact",
-        "observed_at": "2026-08-27T03:00:00Z",
-        "relay_origin": "https://sem.3ue.com/",
-        "provenance_ref": str(artifact),
-    }
-    bound = evidence_binding.write_observed_output(
-        output,
-        payload,
-        "semrush_relay_collector",
-        "semrush_exact",
-        [{"path": str(artifact), "role": "raw_relay_response"}],
-    )
+    })
     report = tmp_path / "stage6.report.json"
     proc = subprocess.run(
         [

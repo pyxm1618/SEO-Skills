@@ -12,6 +12,7 @@ HOOK = ROOT / "runtime" / "codex_stage_hook.py"
 EVALUATOR = ROOT / "skills" / "seo-keyword-selection" / "scripts" / "evaluate_candidates.py"
 BINDING = ROOT / "runtime" / "evidence_binding.py"
 MERGER = ROOT / "runtime" / "kgr_evidence_merge.py"
+FIXTURE_FACTORY = ROOT / "tests" / "evidence_fixture_factory.py"
 
 
 def load_module(name, path):
@@ -40,12 +41,11 @@ def fake_exact_row():
 
 
 def _bind_output(tmp_path, name, payload, collector, evidence_type):
-    binding = load_module(f"binding_{name}", BINDING)
-    artifact = tmp_path / f"{name}.artifact.json"
-    artifact.write_text(json.dumps({"real_test_artifact": name}), encoding="utf-8")
-    output = tmp_path / f"{name}.json"
-    bound = binding.write_observed_output(output, payload, collector, evidence_type, [artifact])
-    return output, bound, artifact
+    assert collector == "semrush_relay_collector"
+    assert evidence_type == "semrush_exact"
+    fixtures = load_module(f"fixture_{name}", FIXTURE_FACTORY)
+    output, bound, raw, _capture = fixtures.make_semrush_exact(tmp_path, name, payload)
+    return output, bound, raw
 
 
 def _run_production_validation(tmp_path, stage, input_path, candidate_id=None):
@@ -69,7 +69,6 @@ def test_hand_written_observed_fields_cannot_pass_production_validation(tmp_path
 
 def test_collector_bound_exact_passes_production_validation(tmp_path):
     row = fake_exact_row()
-    row["provenance_ref"] = str(tmp_path / "exact.artifact.json")
     output, bound, _ = _bind_output(tmp_path, "exact", row, "semrush_relay_collector", "semrush_exact")
     proc, report_path = _run_production_validation(tmp_path, "stage6_exact", output, candidate_id="cand-1")
     assert proc.returncode == 0
@@ -82,9 +81,7 @@ def test_collector_bound_exact_passes_production_validation(tmp_path):
 
 
 def test_tampering_normalized_output_after_receipt_is_blocked(tmp_path):
-    row = fake_exact_row()
-    row["provenance_ref"] = str(tmp_path / "exact.artifact.json")
-    output, bound, _ = _bind_output(tmp_path, "exact", row, "semrush_relay_collector", "semrush_exact")
+    output, bound, _ = _bind_output(tmp_path, "exact-tamper-normalized", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
     bound["volume"] = 999999
     output.write_text(json.dumps(bound), encoding="utf-8")
     proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
@@ -93,9 +90,7 @@ def test_tampering_normalized_output_after_receipt_is_blocked(tmp_path):
 
 
 def test_tampering_evidence_artifact_after_receipt_is_blocked(tmp_path):
-    row = fake_exact_row()
-    row["provenance_ref"] = str(tmp_path / "exact.artifact.json")
-    output, _, artifact = _bind_output(tmp_path, "exact", row, "semrush_relay_collector", "semrush_exact")
+    output, _, artifact = _bind_output(tmp_path, "exact-tamper-raw", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
     artifact.write_text("tampered", encoding="utf-8")
     proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
     assert proc.returncode == 2
@@ -111,9 +106,7 @@ def test_evaluator_does_not_call_hand_written_metadata_verified():
 
 def test_evaluator_calls_bound_exact_verified(tmp_path):
     evaluator = load_module("evaluate_candidates_verified", EVALUATOR)
-    row = fake_exact_row()
-    row["provenance_ref"] = str(tmp_path / "exact.artifact.json")
-    _, bound, _ = _bind_output(tmp_path, "exact", row, "semrush_relay_collector", "semrush_exact")
+    _, bound, _ = _bind_output(tmp_path, "exact-evaluator", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
     evaluated = evaluator.normalize(bound, "exact")
     assert evaluated["provenance_status"] == "verified"
 
@@ -133,9 +126,7 @@ def test_hook_does_not_trust_bare_manifest_pass(tmp_path):
 
 
 def test_hook_accepts_hash_verified_production_validation_receipt(tmp_path):
-    row = fake_exact_row()
-    row["provenance_ref"] = str(tmp_path / "exact.artifact.json")
-    output, _, _ = _bind_output(tmp_path, "exact", row, "semrush_relay_collector", "semrush_exact")
+    output, _, _ = _bind_output(tmp_path, "exact-hook", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
     proc, report_path = _run_production_validation(tmp_path, "stage6_exact", output)
     assert proc.returncode == 0
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -234,3 +225,19 @@ def test_direct_self_minted_google_receipt_cannot_satisfy_production(tmp_path):
         return
     proc, _ = _run_production_validation(tmp_path, "intitle_observation", output)
     assert proc.returncode == 2, "a caller outside the real collector minted production-trusted Google evidence"
+
+
+def test_receipt_cannot_hide_semrush_raw_mismatch_by_refreshing_hash(tmp_path):
+    output, _bound, raw = _bind_output(tmp_path, "exact-replay", fake_exact_row(), "semrush_relay_collector", "semrush_exact")
+    receipt_path = output.with_suffix(".receipt.json")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    raw_data = json.loads(raw.read_text(encoding="utf-8"))
+    raw_data["response"]["result"]["keywords"][0]["volume"] = 999999
+    raw.write_text(json.dumps(raw_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    for artifact in receipt["artifacts"]:
+        if Path(artifact["path"]).resolve() == raw.resolve():
+            artifact["sha256"] = hashlib.sha256(raw.read_bytes()).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    proc, _ = _run_production_validation(tmp_path, "stage6_exact", output)
+    assert proc.returncode == 2
+    assert "replay" in proc.stderr.lower() or "evidence" in proc.stderr.lower()
