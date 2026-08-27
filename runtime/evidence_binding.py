@@ -3,8 +3,8 @@
 
 This is an execution-integrity mechanism for normal Codex/agent workflows, not
 an adversarial cryptographic signature. Production receipts can only be minted
-from the expected collector module, must carry that collector's artifact set,
-and are re-derived from the recorded raw/structured evidence during validation.
+from the expected collector CLI module, must carry that collector's artifact
+set, and are re-derived from recorded raw/structured evidence during validation.
 """
 
 import hashlib
@@ -89,9 +89,11 @@ def _assert_real_collector_caller(evidence_type):
     frame = inspect.currentframe()
     caller = frame.f_back.f_back if frame and frame.f_back else None
     caller_path = Path(caller.f_code.co_filename).resolve() if caller is not None else None
-    if caller_path != expected:
+    caller_module = str(caller.f_globals.get("__name__") or "") if caller is not None else ""
+    if caller_path != expected or caller_module != "__main__":
         raise EvidenceIntegrityError(
-            f"production evidence receipts may only be minted by {expected.name}; caller={caller_path}"
+            f"production evidence receipts may only be minted by direct CLI execution of {expected.name}; "
+            f"caller={caller_path} module={caller_module or 'unknown'}"
         )
     return expected
 
