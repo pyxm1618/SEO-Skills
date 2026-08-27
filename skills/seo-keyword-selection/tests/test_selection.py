@@ -250,13 +250,13 @@ def test_invalid_serp_evidence_does_not_count(tmp_path):
 def test_provenance_status_is_explicit_and_does_not_block_math(tmp_path):
     rows = [
         {'keyword':'incomplete','volume':10000,'difficulty':20,'cpc':1,'intitle_results':1000},
-        {'keyword':'verified','volume':10000,'difficulty':20,'cpc':1,'intitle_results':1000,
+        {'keyword':'metadata-only','volume':10000,'difficulty':20,'cpc':1,'intitle_results':1000,
          'metric_source':'Semrush','metric_database':'us','observed_at':'2026-08-22T07:59:51Z','metric_stage':'exact'},
     ]
     d = by_keyword(run_eval(tmp_path, rows, 'final'))
     assert d['incomplete']['provenance_status'] == 'incomplete'
     assert d['incomplete']['kgr'] == 0.1
-    assert d['verified']['provenance_status'] == 'verified'
+    assert d['metadata-only']['provenance_status'] == 'unverified'
 
 
 def test_duplicate_keywords_are_preserved_and_flagged(tmp_path):
@@ -291,7 +291,7 @@ def test_top_level_batch_metadata_can_fill_provenance(tmp_path):
     assert r['observed_at'] == '2026-08-22T07:59:51Z'
     assert r['metric_source'] == 'Semrush'
     assert r['metric_stage'] == 'exact'
-    assert r['provenance_status'] == 'verified'
+    assert r['provenance_status'] == 'unverified'
 
 
 def test_csv_output_serializes_structured_evidence_as_json(tmp_path):
