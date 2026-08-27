@@ -167,6 +167,14 @@ def _verify_validation_receipt(record, stage, candidate_id=None):
         return False, "validation receipt stage/status mismatch"
     if candidate_id is not None and receipt.get("candidate_id") != candidate_id:
         return False, "validation receipt candidate mismatch"
+    issuance = receipt.get("issuance")
+    if not isinstance(issuance, dict):
+        return False, "validation receipt issuance proof missing; untrusted synthetic receipt"
+    try:
+        _binding()._verify_issuance_proof(receipt)
+    except Exception as exc:
+        return False, f"validation receipt issuance proof invalid: {exc}"
+
     report_ref = str(receipt.get("report_ref") or "").strip()
     report_path = Path(report_ref)
     if not report_path.is_file():
@@ -193,35 +201,110 @@ def _verify_validation_receipt(record, stage, candidate_id=None):
     return True, ""
 
 
-def _verify_completion_requirements(manifest):
-    requirements = manifest.get("completion_requirements")
-    if not isinstance(requirements, list) or not requirements:
-        return False, "COMPLETE lacks explicit completion_requirements"
+def _infer_canonical_required_stages(manifest):
     route = str(manifest.get("route") or "").strip().lower()
-    minimum = ROUTE_MINIMUM_STAGES.get(route)
-    if minimum is None:
-        return False, f"COMPLETE has unknown route: {route or 'missing'}"
+    if route not in {"traditional", "emerging"}:
+        return None, f"COMPLETE has unknown or missing route: {route or 'missing'}"
 
-    declared_stages = set()
-    for index, requirement in enumerate(requirements):
-        if not isinstance(requirement, dict):
-            return False, f"completion requirement {index} is invalid"
-        stage = str(requirement.get("stage") or "").strip()
-        candidate_id = requirement.get("candidate_id")
-        if not stage:
-            return False, f"completion requirement {index} lacks stage"
-        if stage not in CANONICAL_STAGES:
-            return False, f"completion requirement {index} uses unknown/non-canonical stage: {stage}"
-        declared_stages.add(stage)
-        record = _stage_record(manifest, stage, candidate_id)
-        valid, reason = _verify_validation_receipt(record, stage, candidate_id)
-        if not valid:
-            scope = f" candidate={candidate_id}" if candidate_id else ""
-            return False, f"required {stage}{scope} is not verified: {reason}"
+    # Base canonical pipeline per route
+    if route == "traditional":
+        base_stages = [
+            "discovery_autocomplete",
+            "discovery_handoff",
+            "stage6_exact",
+            "intitle_observation",
+            "kgr_intitle",
+            "serp_review",
+        ]
+    else:  # emerging
+        base_stages = [
+            "stage6_exact",
+            "intitle_observation",
+            "kgr_intitle",
+            "serp_review",
+            "finalist_trend",
+        ]
 
-    missing_minimum = sorted(minimum - declared_stages)
-    if missing_minimum:
-        return False, f"COMPLETE route minimum stages missing: {', '.join(missing_minimum)}"
+    # Check if any finalist exists across run or candidates
+    has_finalist = False
+    if manifest.get("is_finalist") is True:
+        has_finalist = True
+    for cand_info in manifest.get("candidates", {}).values():
+        if isinstance(cand_info, dict) and cand_info.get("is_finalist") is True:
+            has_finalist = True
+            break
+
+    # If traditional has a finalist, finalist_trend is mandatory
+    required = list(base_stages)
+    if route == "traditional" and has_finalist and "finalist_trend" not in required:
+        required.append("finalist_trend")
+
+    return required, ""
+
+
+def _verify_completion_requirements(manifest):
+    route = str(manifest.get("route") or "").strip().lower()
+    required_stages, err = _infer_canonical_required_stages(manifest)
+    if err:
+        return False, err
+
+    # Phase 1: Check all required stages exist in manifest before deep validation.
+    # This ensures the error message names the missing stage, not a validation detail.
+    candidates = manifest.get("candidates")
+    has_candidates = isinstance(candidates, dict) and bool(candidates)
+
+    def _resolve_record(stage, cand_id=None):
+        if cand_id:
+            return _stage_record(manifest, stage, cand_id) or _stage_record(manifest, stage)
+        return _stage_record(manifest, stage)
+
+    if has_candidates:
+        for cand_id, cand_data in candidates.items():
+            if not isinstance(cand_data, dict):
+                continue
+            cand_finalist = cand_data.get("is_finalist") is True
+            for stage in required_stages:
+                if stage == "finalist_trend" and not cand_finalist and route == "traditional":
+                    continue
+                if stage in {"discovery_autocomplete", "discovery_handoff"}:
+                    record = _resolve_record(stage)
+                else:
+                    record = _resolve_record(stage, cand_id)
+                if not isinstance(record, dict) or record.get("status") != "PASS":
+                    return False, f"system required stage {stage} is missing or not PASS"
+    else:
+        for stage in required_stages:
+            record = _resolve_record(stage)
+            if not isinstance(record, dict) or record.get("status") != "PASS":
+                return False, f"system required stage {stage} is missing or not PASS"
+
+    # Phase 2: Deep-verify all required stage validation receipts.
+    if has_candidates:
+        for cand_id, cand_data in candidates.items():
+            if not isinstance(cand_data, dict):
+                continue
+            cand_finalist = cand_data.get("is_finalist") is True
+            for stage in required_stages:
+                if stage == "finalist_trend" and not cand_finalist and route == "traditional":
+                    continue
+                if stage in {"discovery_autocomplete", "discovery_handoff"}:
+                    record = _resolve_record(stage)
+                    valid, reason = _verify_validation_receipt(record, stage)
+                    if not valid:
+                        return False, f"system required stage {stage} is not verified: {reason}"
+                else:
+                    record = _resolve_record(stage, cand_id)
+                    actual_cand = cand_id if _stage_record(manifest, stage, cand_id) else None
+                    valid, reason = _verify_validation_receipt(record, stage, actual_cand)
+                    if not valid:
+                        return False, f"system required stage {stage} for candidate={cand_id} is not verified: {reason}"
+    else:
+        for stage in required_stages:
+            record = _resolve_record(stage)
+            valid, reason = _verify_validation_receipt(record, stage)
+            if not valid:
+                return False, f"system required stage {stage} is not verified: {reason}"
+
     return True, ""
 
 

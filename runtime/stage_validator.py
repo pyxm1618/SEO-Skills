@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from datetime import datetime, timezone
+
 NOT_APPLICABLE = "not_applicable"
 UNKNOWN = "unknown"
 ROOT = Path(__file__).resolve().parent
@@ -234,13 +236,17 @@ def _write_validation_receipt(report_path, report, candidate_id=None):
     receipt_path = report_path.with_suffix(".receipt.json")
     report["validation_receipt_ref"] = str(receipt_path)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    report_sha = _sha256(report_path)
+    issued_at = report.get("generated_at") or datetime.now(timezone.utc).isoformat()
+    issuance = _binding()._mint_issuance_proof("stage_validator", report["stage"], report_sha, str(issued_at))
     receipt = {
         "schema": "seo-stage-validation/v1",
         "stage": report["stage"],
         "status": report["status"],
         "candidate_id": candidate_id,
         "report_ref": str(report_path),
-        "report_sha256": _sha256(report_path),
+        "report_sha256": report_sha,
+        "issuance": issuance,
     }
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return receipt_path

@@ -8,13 +8,17 @@ set, and are re-derived from recorded raw/structured evidence during validation.
 """
 
 import hashlib
+import hmac
 import importlib.util
 import inspect
 import json
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 SCHEMA = "seo-observed-evidence/v2"
+ISSUANCE_SCHEMA = "seo-issuance-proof/v1"
 ROOT = Path(__file__).resolve().parent
 COLLECTOR_FILES = {
     "semrush_ideas": ROOT / "collectors" / "semrush_relay_collector.py",
@@ -68,6 +72,77 @@ def _json_read(path, label):
     if not isinstance(value, dict):
         raise EvidenceIntegrityError(f"{label} must be a JSON object")
     return value
+
+
+def _get_issuance_secret():
+    secret = os.environ.get("SEO_ISSUANCE_SECRET")
+    if secret:
+        return secret.encode("utf-8")
+    manifest_override = os.environ.get("SEO_RUN_MANIFEST")
+    secret_file = (
+        Path(manifest_override).parent / ".issuance_secret"
+        if manifest_override
+        else Path(".seo-run/.issuance_secret")
+    )
+    if secret_file.is_file():
+        try:
+            content = secret_file.read_bytes().strip()
+            if content:
+                return content
+        except OSError:
+            pass
+    return None
+
+
+def _ensure_issuance_secret():
+    secret = _get_issuance_secret()
+    if secret:
+        return secret
+    manifest_override = os.environ.get("SEO_RUN_MANIFEST")
+    secret_file = (
+        Path(manifest_override).parent / ".issuance_secret"
+        if manifest_override
+        else Path(".seo-run/.issuance_secret")
+    )
+    secret_file.parent.mkdir(parents=True, exist_ok=True)
+    generated = hashlib.sha256(os.urandom(32) + str(Path(__file__).resolve()).encode("utf-8")).hexdigest().encode("utf-8")
+    secret_file.write_bytes(generated + b"\n")
+    return generated
+
+
+def _mint_issuance_proof(collector, evidence_type, normalized_sha256, issued_at):
+    secret = _ensure_issuance_secret()
+    msg = f"{collector}:{evidence_type}:{normalized_sha256}:{issued_at}".encode("utf-8")
+    token = hmac.new(secret, msg, hashlib.sha256).hexdigest()
+    return {
+        "schema": ISSUANCE_SCHEMA,
+        "issued_at": str(issued_at),
+        "issuer": collector,
+        "token": token,
+    }
+
+
+def _verify_issuance_proof(receipt):
+    issuance = receipt.get("issuance")
+    if not isinstance(issuance, dict):
+        raise EvidenceIntegrityError("evidence receipt issuance proof missing; untrusted synthetic receipt rejected")
+    if issuance.get("schema") != ISSUANCE_SCHEMA:
+        raise EvidenceIntegrityError(f"evidence receipt issuance proof schema mismatch: {issuance.get('schema')}")
+    expected_issuer = receipt.get("collector") if receipt.get("schema") == SCHEMA else "stage_validator"
+    if issuance.get("issuer") != expected_issuer:
+        raise EvidenceIntegrityError(
+            f"evidence receipt issuance proof issuer mismatch: expected {expected_issuer}, got {issuance.get('issuer')}"
+        )
+    secret = _get_issuance_secret()
+    if not secret:
+        raise EvidenceIntegrityError("evidence receipt issuance proof cannot be verified; run-scoped issuance secret missing")
+    if receipt.get("schema") == SCHEMA:
+        msg = f"{issuance.get('issuer')}:{receipt.get('evidence_type')}:{receipt.get('normalized_sha256')}:{issuance.get('issued_at')}".encode("utf-8")
+    else:
+        msg = f"{issuance.get('issuer')}:{receipt.get('stage')}:{receipt.get('report_sha256')}:{issuance.get('issued_at')}".encode("utf-8")
+    expected_token = hmac.new(secret, msg, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(str(issuance.get("token") or ""), expected_token):
+        raise EvidenceIntegrityError("evidence receipt issuance proof token invalid; forged receipt rejected")
 
 
 def _load_module(path, name):
@@ -297,6 +372,9 @@ def write_observed_output(output_path, payload, collector, evidence_type, artifa
     role_paths = {item["role"]: Path(item["path"]) for item in artifact_records}
     _verify_collector_semantics(evidence_type, bound, role_paths)
 
+    issued_at = payload.get("observed_at") or datetime.now(timezone.utc).isoformat()
+    issuance_proof = _mint_issuance_proof(collector, evidence_type, sha256_file(output_path), str(issued_at))
+
     receipt = {
         "schema": SCHEMA,
         "collector": collector,
@@ -305,6 +383,7 @@ def write_observed_output(output_path, payload, collector, evidence_type, artifa
         "normalized_ref": str(output_path),
         "normalized_sha256": sha256_file(output_path),
         "artifacts": artifact_records,
+        "issuance": issuance_proof,
     }
     _json_write(receipt_path, receipt)
     return bound
@@ -329,6 +408,8 @@ def verify_receipt_ref(receipt_ref, expected_type):
     collector_path = _expected_collector_path(expected_type)
     if receipt.get("collector_source_sha256") != sha256_file(collector_path):
         raise EvidenceIntegrityError("evidence receipt collector source hash mismatch")
+
+    _verify_issuance_proof(receipt)
 
     normalized_ref = Path(str(receipt.get("normalized_ref") or ""))
     if not normalized_ref.is_file():

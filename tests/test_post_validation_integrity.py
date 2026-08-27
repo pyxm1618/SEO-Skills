@@ -45,13 +45,19 @@ def make_structural_validation_receipt(tmp_path, stage="stage6_exact"):
         "validation_receipt_ref": str(receipt),
     }
     report.write_text(json.dumps(report_data), encoding="utf-8")
+    report_sha = hashlib.sha256(report.read_bytes()).hexdigest()
+    hook = load_hook("make_receipt_hook")
+    binding = hook._binding()
+    issued_at = "2026-08-27T00:00:00Z"
+    issuance = binding._mint_issuance_proof("stage_validator", stage, report_sha, issued_at)
     receipt.write_text(json.dumps({
         "schema": "seo-stage-validation/v1",
         "stage": stage,
         "status": "PASS",
         "candidate_id": None,
         "report_ref": str(report),
-        "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest(),
+        "report_sha256": report_sha,
+        "issuance": issuance,
     }), encoding="utf-8")
     return {"status": "PASS", "validation_receipt_ref": str(receipt)}
 
@@ -85,8 +91,13 @@ def test_complete_control_flow_allows_valid_route_requirements_when_verifier_pas
         "run_id": "r1",
         "route": "emerging",
         "status": "COMPLETE",
-        "completion_requirements": [{"stage": "stage6_exact"}],
-        "stages": {"stage6_exact": {"status": "PASS"}},
+        "stages": {
+            "stage6_exact": {"status": "PASS"},
+            "intitle_observation": {"status": "PASS"},
+            "kgr_intitle": {"status": "PASS"},
+            "serp_review": {"status": "PASS"},
+            "finalist_trend": {"status": "PASS"},
+        },
     }
     payload = {"hook_event_name": "Stop", "stop_hook_active": False, "last_assistant_message": "done"}
     assert hook.stop(payload, manifest) == 0

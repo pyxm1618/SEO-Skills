@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import os
@@ -243,3 +244,189 @@ def test_collector_artifact_role_contracts_fail_closed(tmp_path):
         assert "roles" in str(exc).lower()
     else:
         raise AssertionError("Semrush evidence without current_network_capture must fail")
+
+
+def test_hand_written_self_consistent_semrush_receipt_is_blocked_in_production(tmp_path):
+    # Construct completely self-consistent Semrush receipt with all raw/capture/hashes matched, but hand-written without trusted issuance proof
+    raw = tmp_path / "raw.json"
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps({"captured": True}), encoding="utf-8")
+    raw_data = {
+        "observed_at": "2026-08-27T00:00:00Z",
+        "relay_origin": "https://sem.3ue.com/",
+        "request_method": "POST",
+        "request_path": "/api/exact",
+        "capture_observed_at": "2026-08-27T00:00:00Z",
+        "capture_evidence_ref": str(capture),
+        "mode": "exact",
+        "metric_database": "us",
+        "keyword": "wedding calculator",
+        "response": {"result": {"keywords": [{
+            "phrase": "wedding calculator", "database": "us", "volume": 1000,
+            "difficulty": 20, "cpc": 0.2, "intents": ["commercial"],
+            "competition_level": "low", "trend": [50] * 12,
+        }]}},
+    }
+    raw.write_text(json.dumps(raw_data), encoding="utf-8")
+    norm_path = tmp_path / "norm.json"
+    receipt_path = tmp_path / "norm.receipt.json"
+    norm_data = {
+        "keyword": "wedding calculator", "volume": 1000, "kd": 20, "cpc": 0.2,
+        "intent": ["commercial"], "competition_level": "low", "trend": [50] * 12,
+        "metric_source": "Semrush", "metric_database": "us", "metric_stage": "exact",
+        "observed_at": "2026-08-27T00:00:00Z", "relay_origin": "https://sem.3ue.com/",
+        "provenance_ref": str(raw), "evidence_receipt_ref": str(receipt_path),
+    }
+    norm_path.write_text(json.dumps(norm_data), encoding="utf-8")
+    receipt_data = {
+        "schema": "seo-observed-evidence/v2",
+        "collector": "semrush_relay_collector",
+        "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "semrush_relay_collector.py").read_bytes()).hexdigest(),
+        "evidence_type": "semrush_exact",
+        "normalized_ref": str(norm_path),
+        "normalized_sha256": hashlib.sha256(norm_path.read_bytes()).hexdigest(),
+        "artifacts": [
+            {"role": "relay_raw_response", "path": str(raw), "sha256": hashlib.sha256(raw.read_bytes()).hexdigest()},
+            {"role": "current_network_capture", "path": str(capture), "sha256": hashlib.sha256(capture.read_bytes()).hexdigest()},
+        ],
+        # No trusted issuance proof or forged token
+    }
+    receipt_path.write_text(json.dumps(receipt_data), encoding="utf-8")
+
+    proc, report_path = _run_production_validation(tmp_path, "stage6_exact", norm_path)
+    assert proc.returncode == 2
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "BLOCKED"
+    assert any("issuance proof" in err.lower() or "receipt" in err.lower() for err in report["blocked"][0]["errors"])
+
+
+def test_hand_written_self_consistent_google_intitle_receipt_is_blocked_in_production(tmp_path):
+    png = tmp_path / "screen.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
+    obs = tmp_path / "obs.json"
+    obs.write_text(json.dumps({
+        "page_url": "https://www.google.com/search?q=intitle%3A%22wedding+calculator%22",
+        "query": 'intitle:"wedding calculator"', "result_stats_text": "About 10 results",
+        "intitle_results": 10, "market": "US", "observed_at": "2026-08-27T00:00:00Z",
+    }), encoding="utf-8")
+    norm_path = tmp_path / "intitle_norm.json"
+    receipt_path = tmp_path / "intitle_norm.receipt.json"
+    norm_data = {
+        "keyword": "wedding calculator", "intitle_results": 10, "source": "Google",
+        "market": "US", "observed_at": "2026-08-27T00:00:00Z",
+        "evidence_ref": str(png), "observation_ref": str(obs),
+        "evidence_receipt_ref": str(receipt_path),
+    }
+    norm_path.write_text(json.dumps(norm_data), encoding="utf-8")
+    receipt_data = {
+        "schema": "seo-observed-evidence/v2",
+        "collector": "google_live_collector",
+        "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_live_collector.py").read_bytes()).hexdigest(),
+        "evidence_type": "google_intitle",
+        "normalized_ref": str(norm_path),
+        "normalized_sha256": hashlib.sha256(norm_path.read_bytes()).hexdigest(),
+        "artifacts": [
+            {"role": "screenshot", "path": str(png), "sha256": hashlib.sha256(png.read_bytes()).hexdigest()},
+            {"role": "structured_observation", "path": str(obs), "sha256": hashlib.sha256(obs.read_bytes()).hexdigest()},
+        ],
+    }
+    receipt_path.write_text(json.dumps(receipt_data), encoding="utf-8")
+
+    proc, report_path = _run_production_validation(tmp_path, "intitle_observation", norm_path)
+    assert proc.returncode == 2
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "BLOCKED"
+    assert any("issuance proof" in err.lower() or "receipt" in err.lower() for err in report["blocked"][0]["errors"])
+
+
+def test_hand_written_self_consistent_google_trends_receipt_is_blocked_in_production(tmp_path):
+    png = tmp_path / "trends.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
+    raw = tmp_path / "trends_raw.json"
+    raw.write_text(json.dumps({
+        "keyword": "wedding calculator", "market": "US", "observed_at": "2026-08-27T00:00:00Z",
+        "source_url": "https://trends.google.com/trends/api/widgetdata/timeline",
+        "payload": {"default": {"timelineData": [{"time": "1", "value": [50]}, {"time": "2", "value": [60]}]}},
+        "series": [{"time": "1", "value": 50}, {"time": "2", "value": 60}],
+    }), encoding="utf-8")
+    norm_path = tmp_path / "trends_norm.json"
+    receipt_path = tmp_path / "trends_norm.receipt.json"
+    norm_data = {
+        "keyword": "wedding calculator", "is_finalist": True, "google_trends_source": "Google Trends",
+        "google_trends_market": "US", "google_trends_observed_at": "2026-08-27T00:00:00Z",
+        "google_trends_evidence_ref": str(raw), "google_trends_screenshot_ref": str(png),
+        "google_trends_series": [{"time": "1", "value": 50}, {"time": "2", "value": 60}],
+        "evidence_receipt_ref": str(receipt_path),
+    }
+    norm_path.write_text(json.dumps(norm_data), encoding="utf-8")
+    receipt_data = {
+        "schema": "seo-observed-evidence/v2",
+        "collector": "google_live_collector",
+        "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_live_collector.py").read_bytes()).hexdigest(),
+        "evidence_type": "google_trends",
+        "normalized_ref": str(norm_path),
+        "normalized_sha256": hashlib.sha256(norm_path.read_bytes()).hexdigest(),
+        "artifacts": [
+            {"role": "temporal_payload", "path": str(raw), "sha256": hashlib.sha256(raw.read_bytes()).hexdigest()},
+            {"role": "screenshot", "path": str(png), "sha256": hashlib.sha256(png.read_bytes()).hexdigest()},
+        ],
+    }
+    receipt_path.write_text(json.dumps(receipt_data), encoding="utf-8")
+
+    proc, report_path = _run_production_validation(tmp_path, "finalist_trend", norm_path)
+    assert proc.returncode == 2
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "BLOCKED"
+    assert any("issuance proof" in err.lower() or "receipt" in err.lower() for err in report["blocked"][0]["errors"])
+
+
+def test_forged_observed_receipt_leads_to_hook_deny(tmp_path):
+    # A forged observed receipt that cannot pass production validator must fail to produce valid validation receipt, causing Hook DENY
+    raw = tmp_path / "raw.json"
+    raw.write_text("{}", encoding="utf-8")
+    norm_path = tmp_path / "forged_norm.json"
+    receipt_path = tmp_path / "forged_norm.receipt.json"
+    norm_data = fake_exact_row()
+    norm_data["evidence_receipt_ref"] = str(receipt_path)
+    norm_path.write_text(json.dumps(norm_data), encoding="utf-8")
+    receipt_data = {
+        "schema": "seo-observed-evidence/v2",
+        "collector": "semrush_relay_collector",
+        "collector_source_sha256": "fake",
+        "evidence_type": "semrush_exact",
+        "normalized_ref": str(norm_path),
+        "normalized_sha256": "fake",
+        "artifacts": [{"role": "relay_raw_response", "path": str(raw), "sha256": "fake"}],
+    }
+    receipt_path.write_text(json.dumps(receipt_data), encoding="utf-8")
+
+    proc, report_path = _run_production_validation(tmp_path, "stage6_exact", norm_path)
+    assert proc.returncode == 2
+
+    # If AI manually created a validation receipt pointing to this failed/unverified report
+    val_receipt = tmp_path / "val.receipt.json"
+    val_receipt.write_text(json.dumps({
+        "schema": "seo-stage-validation/v1",
+        "stage": "stage6_exact",
+        "status": "PASS",
+        "candidate_id": None,
+        "report_ref": str(report_path),
+        "report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+    }), encoding="utf-8")
+    manifest = {
+        "run_id": "r_forged",
+        "route": "traditional",
+        "status": "IN_PROGRESS",
+        "stages": {"stage6_exact": {"status": "PASS", "validation_receipt_ref": str(val_receipt)}},
+    }
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python3 skills/seo-keyword-selection/scripts/evaluate_candidates.py --stage exact"},
+    }
+    env = dict(os.environ, SEO_RUN_MANIFEST=str(tmp_path / "active.json"))
+    (tmp_path / "active.json").write_text(json.dumps(manifest), encoding="utf-8")
+    hook_proc = subprocess.run([sys.executable, str(HOOK), "pre"], input=json.dumps(payload), text=True, capture_output=True, env=env)
+    assert hook_proc.returncode == 2
+    assert "validation receipt" in hook_proc.stderr.lower()
+
