@@ -62,9 +62,11 @@ A bare run-level `status=BLOCKED` is never sufficient. A terminal blocked run re
 - non-empty `run_id`;
 - canonical `blocked_stage`;
 - non-empty `blocked_reason`;
-- route, when present, must be `traditional` or `emerging`.
+- route, when present, must be `traditional` or `emerging`;
+- the same canonical stage must exist in the run's `stages` map with `status=BLOCKED`;
+- that stage record must contain the same non-empty `blocked_reason`.
 
-This preserves the run-level bypass repair without requiring an external OS signer.
+This preserves the run-level bypass repair without requiring an external OS signer: a run cannot stop merely by inventing top-level blocker fields; it must first record the blocker on the stage that actually failed.
 
 ## Live acceptance requirement
 
