@@ -1,16 +1,16 @@
-# FINAL ACCEPTANCE REPORT (V4)
+# FINAL ACCEPTANCE REPORT (V4 Live Re-Audit)
 
-## Target
+## Target SHA
 `82b0e61a5cd76eb04bb32115c64e500e37ae51c3`
 
 ## Target SHA locked
 `YES`
 
 ## Thresholds unchanged
-`YES` (blob hash `77ad84a7c9523c1254e40228308355e12f022a0f`)
+`YES` (blob SHA `77ad84a7c9523c1254e40228308355e12f022a0f`)
 
 ## Automated
-`PASS`
+`PASS` (191 tests passed, 0 failed, 0 errors)
 
 ## Full pytest
 `191 passed`
@@ -19,19 +19,58 @@
 `PASS`
 
 ## Adversarial
-`PARTIAL` (Code-level & Mechanism: `PASS` 17/18, Live Tamper: `BLOCKED` 1/18 due to absent broker, `FAIL`: 0, `INVALID`: 0)
+`PARTIAL` (17 PASS, 1 BLOCKED, 0 FAIL, 0 INVALID)
 
 ## Invalid adversarial cases remaining
 `NONE`
 
-## Broker
+## Broker Live
 `BLOCKED`
 
-## Google Live
+## Direct Agent broker sign attack
 `BLOCKED`
 
-## Semrush Relay Live
+## Legitimate Collector issuance
 `BLOCKED`
+
+## Legitimate Validator issuance
+`BLOCKED`
+
+## Forged proof
+`BLOCKED`
+
+## Tampered proof
+`BLOCKED`
+
+## P1-H Post-validation tampering
+`BLOCKED`
+
+## Google Autocomplete Live
+`BLOCKED`
+
+## Google intitle Live
+`BLOCKED`
+
+## Google SERP Live
+`BLOCKED`
+
+## Google Trends Live
+`BLOCKED`
+
+## Semrush authenticated relay
+`BLOCKED`
+
+## Semrush Ideas Live
+`BLOCKED`
+
+## Semrush Exact Live
+`BLOCKED`
+
+## Official API used
+`NO`
+
+## Alternative provider used
+`NO`
 
 ## KGR Live
 `BLOCKED`
@@ -39,7 +78,10 @@
 ## Codex Hook Mechanism
 `PASS`
 
-## Codex Host Integration
+## Codex PreToolUse Host
+`BLOCKED`
+
+## Codex Stop Host
 `BLOCKED`
 
 ## Traditional E2E
@@ -52,63 +94,23 @@
 `FIXED`
 
 ## P0
-`NONE`
+`0`
 
 ## P1
-`NONE`
+`0`
 
 ## Overall
 `PARTIALLY VERIFIED`
 
 ## Merge recommendation
-`MERGE` (Code & integrity boundaries fully verified; live items fail-closed due to environment setup outside repository).
+`DO NOT MERGE`
 
 ---
 
-# 15 Specific Questions Answered
+## 判定纪律与说明
 
-1. **Bare run-level BLOCKED 能不能绕过 Stop？**
-   `NO` (Denied at Stop hook: `Active SEO production run cannot be BLOCKED: BLOCKED run requires blocked_stage`)
-
-2. **普通 run blocker 没 attestation 能不能结束？**
-   `NO` (Denied at Stop hook: requires external `run_blocked` attestation)
-
-3. **修改 run blocker reason 后旧 attestation 是否仍有效？**
-   `NO` (Denied at Stop hook: attestation claims strictly bound to `blocked_reason`)
-
-4. **修改 blocked_stage 后旧 attestation 是否仍有效？**
-   `NO` (Denied at Stop hook: attestation claims strictly bound to `blocked_stage`)
-
-5. **broker 不存在时是否被错误记成 broker security PASS？**
-   `NO` (Strictly recorded as `BLOCKED`)
-
-6. **完整 fake Semrush evidence 是否能通过 Production？**
-   `NO` (Passes non-production schema, blocked at production issuance/authenticity gate)
-
-7. **完整 fake intitle evidence 是否能通过 Production？**
-   `NO` (Passes non-production schema, blocked at production issuance/authenticity gate)
-
-8. **完整 fake Trends evidence 是否能通过 Production？**
-   `NO` (Passes non-production schema, blocked at production issuance/authenticity gate)
-
-9. **is_finalist=false 能否逃掉 trusted finalist disposition？**
-   `NO` (Blocked specifically at candidate finalist disposition gate)
-
-10. **Exact 合法 early elimination 是否真的能通过 Stop？**
-    `YES` (Eliminated candidates with `principle_eliminate_kd`/`volume` cleanly complete lifecycle without KGR/SERP)
-
-11. **Mixed BLOCKED + COMPLETE batch 是否真的能通过 Stop？**
-    `YES` (Attested BLOCKED candidate and valid COMPLETE candidate complete without interference)
-
-12. **Candidate B 能否使用 global/candidate A receipt？**
-    `NO` (Candidate-specific stage enforcement strictly rejects global or cross-candidate receipts)
-
-13. **Traditional 能否自行声明 Emerging？**
-    `NO` (Emerging route requires trusted external `emerging_route` attestation)
-
-14. **Agent 能否直接取得 issuance signing authority？**
-    `BLOCKED` (Fail-closed: local mint caller restricted, external broker required)
-
-15. **Agent 能否把真实 broker 当 signing oracle？**
-    `BLOCKED` (Host broker absent; cannot be tested against live host oracle)
+根据 V4 验收判定纪律：
+- 代码与机制级验证（191 自动化测试、compileall、thresholds blob、17 项机制级攻击防御、P1 Run-level BLOCKED 修复）全部 **PASS**，未发现任何代码级 P0/P1 缺陷。
+- 外部 Host 基础设施（OS-level root-owned Issuance Broker、Chrome CDP 调试端点、已桥接的 Semrush 认证会话、Codex Host 运行时）在当前执行环境下缺失，因此所有依赖外部 live 系统的验收项严格标记为 **BLOCKED**，坚决不进行任何 Mock 或降级伪造。
+- 按照严谨验收纪律，当存在必要 Live 项为 `BLOCKED` 时，综合判定为 **PARTIALLY VERIFIED**，合并建议为 **DO NOT MERGE**。
 

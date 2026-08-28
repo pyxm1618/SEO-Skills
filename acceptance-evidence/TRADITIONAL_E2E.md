@@ -1,4 +1,4 @@
-# Traditional Route E2E Acceptance Report (V4)
+# Traditional Route E2E Acceptance Report (V4 Live Re-Audit)
 
 ## 1. Traditional Lifecycle Path
 
@@ -23,5 +23,5 @@ $$\text{Google Autocomplete} \rightarrow \text{Discovery Handoff} \rightarrow \t
 
 ## 3. Verdict
 
-- **Traditional E2E Live**: `BLOCKED`
+- **Traditional E2E**: `BLOCKED`
 

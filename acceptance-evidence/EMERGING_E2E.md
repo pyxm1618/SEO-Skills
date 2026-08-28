@@ -1,4 +1,4 @@
-# Emerging Route E2E Acceptance Report (V4)
+# Emerging Route E2E Acceptance Report (V4 Live Re-Audit)
 
 ## 1. Emerging Lifecycle Path
 
@@ -21,5 +21,5 @@ $$\text{Trusted emerging\_route Attestation} \rightarrow \text{Semrush Exact} \r
 
 ## 3. Verdict
 
-- **Emerging E2E Live**: `BLOCKED`
+- **Emerging E2E**: `BLOCKED`
 

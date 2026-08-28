@@ -1,13 +1,10 @@
-# Codex Stage Hook Acceptance Report (V4)
+# Codex Stage Hook Acceptance Report (V4 Live Re-Audit)
 
 ## 1. Mechanism-Level Verification
 
 Direct execution of `runtime/codex_stage_hook.py` via Python CLI:
 - `pre`: Verified command inference, protected transition enforcement, candidate ID scoping, validation receipt verification, fail-closed handling. (**PASS**)
 - `stop`: Verified run completion requirements, candidate lifecycle tracking, deterministic early elimination after Exact, mixed batch resolution, bare BLOCKED rejection, external attestation enforcement. (**PASS**)
-
-### Subprocess / Module Test Coverage
-All unit regressions in `tests/test_codex_stage_hooks.py` (9/9) and `tests/test_integrity_boundary_regressions.py` (7/7) passed without error.
 
 ---
 
@@ -22,5 +19,7 @@ Host configuration check:
 ## 3. Verdict
 
 - **Codex Hook Mechanism**: `PASS`
+- **Codex PreToolUse Host**: `BLOCKED`
+- **Codex Stop Host**: `BLOCKED`
 - **Codex Host Integration**: `BLOCKED`
 
