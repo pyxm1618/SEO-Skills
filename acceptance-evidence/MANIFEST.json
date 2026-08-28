@@ -1,0 +1,70 @@
+{
+  "ADVERSARIAL_V4.md": {
+    "size": 15383,
+    "sha256": "6d4543380ba956321f719aaace77ef6b84bf8dbaecf96765510566ae96025226"
+  },
+  "AUTOMATED_TESTS.md": {
+    "size": 1938,
+    "sha256": "31938b80f75eb8de4a4a586802835924f7a1fe1ec7605f4748379eff1de719fe"
+  },
+  "BROKER_LIVE.md": {
+    "size": 1365,
+    "sha256": "5d5649edb62c0571667da37dc23abd6daecb656352fd1d6a85fdb28ed3cf0e44"
+  },
+  "CODEX_HOOK_LIVE.md": {
+    "size": 1118,
+    "sha256": "4d4be9f73030a6546187b06e228def9e0d2d2125f6e1c7184de5ecf581e9c1ed"
+  },
+  "EMERGING_E2E.md": {
+    "size": 935,
+    "sha256": "61c8935fc11b623a185533f2a691ab0b66d2ad8b2a8cad2a3930fff485d51c8a"
+  },
+  "FINAL_ACCEPTANCE_REPORT.md": {
+    "size": 3241,
+    "sha256": "38d663a7a712a0d3657bcb6cf43be4e172c7abc7480a0dd5f687a3a86ac7f70b"
+  },
+  "GOOGLE_LIVE.md": {
+    "size": 1205,
+    "sha256": "d472bfe298b6ee6f81eecf3d6dde5eb5b1666f92080823a346d1f6770e123816"
+  },
+  "KGR_LIVE.md": {
+    "size": 723,
+    "sha256": "c55408249d64f2d24f9150f85959e56f4bbaed66129ee5c6708ce6e65f649ba0"
+  },
+  "SEMRUSH_LIVE.md": {
+    "size": 1099,
+    "sha256": "05b1208b8399770661f85a706ec4be9b66e729703d23fcc06dbd609949139347"
+  },
+  "TARGET_AND_ENVIRONMENT.md": {
+    "size": 2529,
+    "sha256": "ce21247d358a447200480a445d7441483869a3bc9439052c7e55e174e63a3ac7"
+  },
+  "TRADITIONAL_E2E.md": {
+    "size": 1141,
+    "sha256": "d75c2d0d61664aa4883d827b2bb0579a1b8615aa7013e2446e50e5f923678bdf"
+  },
+  "logs/emerging.log": {
+    "size": 99,
+    "sha256": "01e654414d93146020a076ee18c40366c79964e2158a39bb8fc29afe2c2b8378"
+  },
+  "logs/full.log": {
+    "size": 260,
+    "sha256": "c912cf4786c9601e8cdb67272ec5562c3c25e553735b27334c8f17d791108878"
+  },
+  "logs/root.log": {
+    "size": 99,
+    "sha256": "986474540e4969fafff196954625789e3f451324881f20cc2bc289f3f12beee7"
+  },
+  "logs/selection.log": {
+    "size": 99,
+    "sha256": "ef44ddf3b3742b621b0e6fbd6c731c8b4869029cc5aba6d3d703166d4b87ce6a"
+  },
+  "p1_attack_runner_v4.py": {
+    "size": 44839,
+    "sha256": "27c53215d76d2cb7e783db865c98202dfeeaf36970b399a9feae8b5e6a217159"
+  },
+  "reports/adversarial_v4_results.json": {
+    "size": 16294,
+    "sha256": "67301ea0f2cb48f679046a5c7a616849d79cb0f3a2776c8fa94b4bf27ca0966b"
+  }
+}
