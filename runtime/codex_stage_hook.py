@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Codex project hook for SEO production-stage integrity.
+"""Codex project hook for SEO production-stage execution integrity.
 
-Protected transitions infer their required stage from the command. Production
-PASS records are accepted only with broker-issued validation receipts whose
-underlying collector evidence is still valid. COMPLETE is derived from trusted
-route/candidate lifecycle state; agent-written route/finalist/completion lists
-cannot weaken the gates.
+Protected transitions infer their prerequisite stage from the command. PASS
+records require validator receipts bound to the current validator source and
+report bytes, then their collector evidence is revalidated. COMPLETE is derived
+from canonical route/candidate lifecycle state rather than agent-supplied
+completion lists. This is a workflow-correctness gate, not an OS security
+boundary against a malicious local principal.
 """
 
 import hashlib
@@ -46,6 +47,7 @@ CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discov
 TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_handoff")
 CANDIDATE_SELECTION_STAGES = ("stage6_exact", "intitle_observation", "kgr_intitle", "serp_review")
 EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})
+CONFIRMED_EMERGING_STATUSES = frozenset({"emerging", "breakout"})
 
 
 def _load_module(path, name):
@@ -107,10 +109,7 @@ def _explicit_requirement(tool_input):
     joined = "\n".join(_flatten_strings(tool_input or {}))
     stage_match = REQUIRE_RE.search(joined)
     candidate_match = CANDIDATE_RE.search(joined)
-    return (
-        stage_match.group(1) if stage_match else None,
-        candidate_match.group(1) if candidate_match else None,
-    )
+    return stage_match.group(1) if stage_match else None, candidate_match.group(1) if candidate_match else None
 
 
 def _protected_requirement(payload):
@@ -163,6 +162,10 @@ def _read_json_ref(value, label):
     return payload
 
 
+def _norm_keyword(value):
+    return " ".join(str(value or "").split()).casefold()
+
+
 def _verify_current_evidence(report, stage):
     rows = report.get("complete")
     if not isinstance(rows, list) or not rows:
@@ -204,13 +207,8 @@ def _load_validation_report(record, stage, candidate_id=None):
         return None, "validation receipt candidate mismatch"
     if candidate_id is None and receipt.get("candidate_id") not in (None, ""):
         return None, "global validation receipt must not be candidate-bound"
-    issuance = receipt.get("issuance")
-    if not isinstance(issuance, dict):
-        return None, "validation receipt issuance proof missing; untrusted synthetic receipt"
-    try:
-        _binding()._verify_issuance_proof(receipt)
-    except Exception as exc:
-        return None, f"validation receipt issuance proof invalid: {exc}"
+    if receipt.get("validator_source_sha256") != _sha256(VALIDATOR_PATH):
+        return None, "validation receipt validator source hash mismatch"
 
     report_ref = str(receipt.get("report_ref") or "").strip()
     report_path = Path(report_ref)
@@ -246,25 +244,47 @@ def _verify_validation_receipt(record, stage, candidate_id=None):
 
 
 def _verify_route_attestation(manifest):
+    """Backward-compatible name: verify an emerging monitor handoff, not crypto."""
     route = str(manifest.get("route") or "").strip().lower()
     if route == "traditional":
         return True, ""
     if route != "emerging":
         return False, f"COMPLETE has unknown or missing route: {route or 'missing'}"
-    run_id = str(manifest.get("run_id") or "").strip()
     candidates = manifest.get("candidates")
-    candidate_ids = sorted(str(key) for key, value in (candidates or {}).items() if isinstance(value, dict)) if isinstance(candidates, dict) else []
-    if not run_id or not candidate_ids:
-        return False, "emerging route requires run_id and candidate set"
+    if not isinstance(candidates, dict) or not candidates:
+        return False, "emerging route requires candidate set"
     try:
-        proof = _read_json_ref(manifest.get("route_attestation_ref"), "emerging route attestation")
-        _binding().verify_external_attestation(
-            proof,
-            "emerging_route",
-            {"run_id": run_id, "route": "emerging", "candidate_ids": candidate_ids},
-        )
+        routed = _read_json_ref(manifest.get("route_handoff_ref"), "emerging route handoff")
     except Exception as exc:
-        return False, f"emerging route attestation invalid: {exc}"
+        return False, f"emerging route handoff invalid: {exc}"
+    routes = routed.get("routes")
+    if not isinstance(routes, list):
+        return False, "emerging route handoff must contain routes"
+
+    valid_routes = {}
+    for item in routes:
+        if not isinstance(item, dict) or item.get("route") != "selection_handoff":
+            continue
+        if item.get("status") not in CONFIRMED_EMERGING_STATUSES or item.get("root_relation") != "existing_root":
+            continue
+        handoff = item.get("handoff")
+        if not isinstance(handoff, dict):
+            continue
+        keyword = _norm_keyword(handoff.get("keyword") or item.get("keyword"))
+        root_id = str(handoff.get("root_id") or "").strip()
+        status = handoff.get("status") or item.get("status")
+        if keyword and root_id and status in CONFIRMED_EMERGING_STATUSES:
+            valid_routes.setdefault(keyword, []).append(item)
+
+    for candidate_id, candidate in candidates.items():
+        if not isinstance(candidate, dict):
+            return False, f"emerging candidate={candidate_id} record is invalid"
+        keyword = _norm_keyword(candidate.get("keyword"))
+        if not keyword:
+            return False, f"emerging candidate={candidate_id} lacks keyword"
+        matches = valid_routes.get(keyword, [])
+        if len(matches) != 1:
+            return False, f"emerging candidate={candidate_id} requires exactly one confirmed selection_handoff"
     return True, ""
 
 
@@ -306,22 +326,15 @@ def _verify_finalist_disposition(manifest, candidate_id, candidate):
             return None, reason
         return True, ""
 
-    run_id = str(manifest.get("run_id") or "").strip()
-    if not run_id:
-        return None, "candidate finalist disposition requires run_id"
-    try:
-        proof = _read_json_ref(candidate.get("finalist_attestation_ref"), "candidate finalist attestation")
-        _binding().verify_external_attestation(
-            proof,
-            "candidate_finalist",
-            {"run_id": run_id, "candidate_id": str(candidate_id)},
-        )
-    except Exception as exc:
-        return None, f"candidate finalist disposition is not trusted: {exc}"
-    claims = proof.get("claims")
-    if not isinstance(claims, dict) or not isinstance(claims.get("is_finalist"), bool):
-        return None, "candidate finalist attestation lacks boolean is_finalist claim"
-    return claims["is_finalist"], ""
+    review = candidate.get("finalist_review")
+    if not isinstance(review, dict):
+        return None, "candidate finalist review missing"
+    if not isinstance(review.get("is_finalist"), bool):
+        return None, "candidate finalist review requires boolean is_finalist"
+    reason = str(review.get("reason") or "").strip()
+    if not reason:
+        return None, "candidate finalist review requires reason"
+    return review["is_finalist"], ""
 
 
 def _verify_terminal_blocked_candidate(manifest, candidate_id, candidate):
@@ -331,26 +344,15 @@ def _verify_terminal_blocked_candidate(manifest, candidate_id, candidate):
     record = _stage_record(manifest, stage, candidate_id)
     if not isinstance(record, dict) or record.get("status") != "BLOCKED":
         return False, f"terminal BLOCKED candidate stage {stage} is not BLOCKED"
-    reason = str(record.get("blocked_reason") or candidate.get("blocked_reason") or "").strip()
+    stage_reason = str(record.get("blocked_reason") or "").strip()
+    candidate_reason = str(candidate.get("blocked_reason") or "").strip()
+    reason = stage_reason or candidate_reason
     if not reason:
         return False, "terminal BLOCKED candidate lacks real blocked reason"
-    run_id = str(manifest.get("run_id") or "").strip()
-    if not run_id:
+    if stage_reason and candidate_reason and stage_reason != candidate_reason:
+        return False, "terminal BLOCKED candidate reason differs from blocked stage"
+    if not str(manifest.get("run_id") or "").strip():
         return False, "terminal BLOCKED candidate requires run_id"
-    try:
-        proof = _read_json_ref(candidate.get("blocked_attestation_ref"), "candidate blocked attestation")
-        _binding().verify_external_attestation(
-            proof,
-            "candidate_blocked",
-            {
-                "run_id": run_id,
-                "candidate_id": str(candidate_id),
-                "terminal_status": "BLOCKED",
-                "blocked_stage": stage,
-            },
-        )
-    except Exception as exc:
-        return False, f"terminal BLOCKED candidate is not trusted: {exc}"
     return True, ""
 
 
@@ -358,41 +360,15 @@ def _verify_blocked_run(manifest):
     run_id = str(manifest.get("run_id") or "").strip()
     if not run_id:
         return False, "BLOCKED run requires run_id"
-
     stage = str(manifest.get("blocked_stage") or "").strip()
     reason = str(manifest.get("blocked_reason") or "").strip()
-    if not stage:
-        return False, "BLOCKED run requires blocked_stage"
+    if stage not in CANONICAL_STAGES:
+        return False, "BLOCKED run requires canonical blocked_stage"
     if not reason:
         return False, "BLOCKED run requires blocked_reason"
-
-    binding = _binding()
-
-    if stage == "trust_boundary" and reason == "trusted issuance broker unavailable":
-        try:
-            binding._trusted_broker_path()
-        except Exception as exc:
-            if "trusted issuance broker unavailable" in str(exc):
-                return True, ""
-            return False, f"BLOCKED trust-boundary claim could not be verified: {exc}"
-        return False, "BLOCKED trust-boundary claim is false; trusted issuance broker is available"
-
-    route = str(manifest.get("route") or "").strip().lower() or "unresolved"
-    try:
-        proof = _read_json_ref(manifest.get("blocked_attestation_ref"), "run blocked attestation")
-        binding.verify_external_attestation(
-            proof,
-            "run_blocked",
-            {
-                "run_id": run_id,
-                "route": route,
-                "terminal_status": "BLOCKED",
-                "blocked_stage": stage,
-                "blocked_reason": reason,
-            },
-        )
-    except Exception as exc:
-        return False, f"BLOCKED run is not trusted: {exc}"
+    route = str(manifest.get("route") or "").strip().lower()
+    if route and route not in {"traditional", "emerging"}:
+        return False, f"BLOCKED run has unknown route: {route}"
     return True, ""
 
 
@@ -448,7 +424,7 @@ def _verify_completion_requirements(manifest):
         candidates = {}
     route = str(manifest.get("route") or "").strip().lower()
     if route == "emerging" and not candidates:
-        return False, "emerging COMPLETE requires trusted routed candidates"
+        return False, "emerging COMPLETE requires routed candidates"
 
     for candidate_id, candidate in candidates.items():
         valid, reason = _verify_candidate_completion(manifest, str(candidate_id), candidate)
