@@ -199,7 +199,12 @@ def validate_stage(stage, payload, contracts, production=False):
 
 
 def validate_payload(stage, data, contracts, production=False):
-    if isinstance(data, list):
+    # Semrush Ideas is a stage-level envelope whose own contract requires the
+    # top-level seed/rows/observed_at/source fields. Its rows are evidence data,
+    # not independent stage payloads. Other list-shaped inputs remain batches.
+    if stage == "discovery_semrush_ideas" and isinstance(data, dict):
+        rows = [data]
+    elif isinstance(data, list):
         rows = data
     elif isinstance(data, dict) and isinstance(data.get("rows"), list):
         rows = data["rows"]
