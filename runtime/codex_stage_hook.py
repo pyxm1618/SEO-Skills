@@ -354,6 +354,48 @@ def _verify_terminal_blocked_candidate(manifest, candidate_id, candidate):
     return True, ""
 
 
+def _verify_blocked_run(manifest):
+    run_id = str(manifest.get("run_id") or "").strip()
+    if not run_id:
+        return False, "BLOCKED run requires run_id"
+
+    stage = str(manifest.get("blocked_stage") or "").strip()
+    reason = str(manifest.get("blocked_reason") or "").strip()
+    if not stage:
+        return False, "BLOCKED run requires blocked_stage"
+    if not reason:
+        return False, "BLOCKED run requires blocked_reason"
+
+    binding = _binding()
+
+    if stage == "trust_boundary" and reason == "trusted issuance broker unavailable":
+        try:
+            binding._trusted_broker_path()
+        except Exception as exc:
+            if "trusted issuance broker unavailable" in str(exc):
+                return True, ""
+            return False, f"BLOCKED trust-boundary claim could not be verified: {exc}"
+        return False, "BLOCKED trust-boundary claim is false; trusted issuance broker is available"
+
+    route = str(manifest.get("route") or "").strip().lower() or "unresolved"
+    try:
+        proof = _read_json_ref(manifest.get("blocked_attestation_ref"), "run blocked attestation")
+        binding.verify_external_attestation(
+            proof,
+            "run_blocked",
+            {
+                "run_id": run_id,
+                "route": route,
+                "terminal_status": "BLOCKED",
+                "blocked_stage": stage,
+                "blocked_reason": reason,
+            },
+        )
+    except Exception as exc:
+        return False, f"BLOCKED run is not trusted: {exc}"
+    return True, ""
+
+
 def _verify_candidate_completion(manifest, candidate_id, candidate):
     if not isinstance(candidate, dict):
         return False, f"candidate={candidate_id} record is invalid"
@@ -448,7 +490,14 @@ def stop(payload, manifest):
         return 0
     status = str(manifest.get("status") or "IN_PROGRESS")
     if status == "BLOCKED":
-        return 0
+        valid, reason = _verify_blocked_run(manifest)
+        if valid:
+            return 0
+        print(
+            f"Active SEO production run {manifest.get('run_id', 'unknown')} cannot be BLOCKED: {reason}",
+            file=sys.stderr,
+        )
+        return 2
     if status == "COMPLETE":
         valid, reason = _verify_completion_requirements(manifest)
         if valid:
