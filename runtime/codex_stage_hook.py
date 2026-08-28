@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-BINDING_PATH = ROOT / "evidence_binding.py"
 VALIDATOR_PATH = ROOT / "stage_validator.py"
 EVALUATOR_PATH = ROOT.parent / "skills" / "seo-keyword-selection" / "scripts" / "evaluate_candidates.py"
 REQUIRE_RE = re.compile(r"(?:^|\s)SEO_STAGE_REQUIRE=([A-Za-z0-9_.-]+)")
@@ -45,7 +44,6 @@ STAGE_EVIDENCE_TYPES = {
 }
 CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff"})
 TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_handoff")
-CANDIDATE_SELECTION_STAGES = ("stage6_exact", "intitle_observation", "kgr_intitle", "serp_review")
 EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})
 CONFIRMED_EMERGING_STATUSES = frozenset({"emerging", "breakout"})
 
@@ -55,10 +53,6 @@ def _load_module(path, name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def _binding():
-    return _load_module(BINDING_PATH, "seo_evidence_binding_hook")
 
 
 def _validator():
@@ -369,6 +363,14 @@ def _verify_blocked_run(manifest):
     route = str(manifest.get("route") or "").strip().lower()
     if route and route not in {"traditional", "emerging"}:
         return False, f"BLOCKED run has unknown route: {route}"
+    record = _stage_record(manifest, stage)
+    if not isinstance(record, dict) or record.get("status") != "BLOCKED":
+        return False, f"BLOCKED run stage {stage} is not recorded as BLOCKED"
+    stage_reason = str(record.get("blocked_reason") or "").strip()
+    if not stage_reason:
+        return False, f"BLOCKED run stage {stage} lacks blocked_reason"
+    if stage_reason != reason:
+        return False, f"BLOCKED run reason differs from stage {stage} blocker"
     return True, ""
 
 
