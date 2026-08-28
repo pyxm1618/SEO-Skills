@@ -1,3 +1,4 @@
+# RED tests for returning A+ to workflow-correctness scope.
 import hashlib
 import importlib.util
 import json
