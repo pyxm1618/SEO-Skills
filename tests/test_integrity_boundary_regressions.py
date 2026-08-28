@@ -1,4 +1,6 @@
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,59 +19,66 @@ def load_hook(name="integrity_boundary_hook"):
     return load_module(name, HOOK)
 
 
-def test_external_helper_cannot_mint_issuance_or_create_workspace_secret(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("SEO_ISSUANCE_SECRET", raising=False)
-    binding = load_module("boundary_no_local_mint", BINDING)
+def test_runtime_has_no_os_broker_dependency():
+    binding = load_module("boundary_scoped_binding", BINDING)
+    assert not hasattr(binding, "_trusted_broker_path")
+    assert not hasattr(binding, "_broker_request")
+    assert not hasattr(binding, "_mint_issuance_proof")
+    assert not hasattr(binding, "verify_external_attestation")
+
+
+def test_generic_helper_still_cannot_write_collector_receipt(tmp_path):
+    binding = load_module("boundary_direct_writer", BINDING)
+    raw = tmp_path / "raw.json"
+    capture = tmp_path / "capture.json"
+    raw.write_text("{}", encoding="utf-8")
+    capture.write_text("{}", encoding="utf-8")
     try:
-        binding._mint_issuance_proof(
-            "semrush_relay_collector", "semrush_exact", "a" * 64, "2026-08-27T00:00:00Z"
+        binding.write_observed_output(
+            tmp_path / "out.json",
+            {"keyword": "example"},
+            "semrush_relay_collector",
+            "semrush_exact",
+            [
+                {"path": raw, "role": "relay_raw_response"},
+                {"path": capture, "role": "current_network_capture"},
+            ],
         )
-    except Exception:
-        pass
+    except binding.EvidenceIntegrityError as exc:
+        assert "collector" in str(exc).lower() or "direct cli" in str(exc).lower()
     else:
-        raise AssertionError("ordinary helper code must not be able to mint a trusted issuance proof")
-    assert not (tmp_path / ".seo-run" / ".issuance_secret").exists()
+        raise AssertionError("ordinary helper code must not write production collector receipts")
 
 
-def test_attacker_controlled_env_secret_cannot_mint_trusted_issuance(monkeypatch):
-    monkeypatch.setenv("SEO_ISSUANCE_SECRET", "attacker-controlled-secret")
-    binding = load_module("boundary_env_secret", BINDING)
+def test_artifact_hash_tampering_is_rejected(tmp_path):
+    binding = load_module("boundary_artifact_hash", BINDING)
+    raw = tmp_path / "raw.json"
+    capture = tmp_path / "capture.json"
+    raw.write_text(json.dumps({"original": True}), encoding="utf-8")
+    capture.write_text(json.dumps({"capture": True}), encoding="utf-8")
+    records = [
+        {"role": "relay_raw_response", "path": str(raw), "sha256": hashlib.sha256(raw.read_bytes()).hexdigest()},
+        {"role": "current_network_capture", "path": str(capture), "sha256": hashlib.sha256(capture.read_bytes()).hexdigest()},
+    ]
+    raw.write_text(json.dumps({"tampered": True}), encoding="utf-8")
     try:
-        binding._mint_issuance_proof(
-            "stage_validator", "stage6_exact", "b" * 64, "2026-08-27T00:00:00Z"
-        )
-    except Exception:
-        return
-    raise AssertionError("an agent-controlled environment variable must not grant signing authority")
+        binding._roles_to_paths(records, "semrush_exact")
+    except binding.EvidenceIntegrityError as exc:
+        assert "hash mismatch" in str(exc).lower()
+    else:
+        raise AssertionError("post-capture artifact tampering must be rejected")
 
 
-def test_agent_readable_workspace_secret_cannot_mint_trusted_issuance(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("SEO_ISSUANCE_SECRET", raising=False)
-    secret_dir = tmp_path / ".seo-run"
-    secret_dir.mkdir()
-    (secret_dir / ".issuance_secret").write_text("agent-readable-secret\n", encoding="utf-8")
-    binding = load_module("boundary_workspace_secret", BINDING)
-    try:
-        binding._mint_issuance_proof(
-            "google_live_collector", "google_intitle", "c" * 64, "2026-08-27T00:00:00Z"
-        )
-    except Exception:
-        return
-    raise AssertionError("an agent-readable workspace file must not grant signing authority")
-
-
-def test_emerging_route_cannot_be_self_declared_without_trusted_route_attestation():
-    hook = load_hook("route_attestation_required")
+def test_emerging_route_cannot_be_self_declared_without_monitor_handoff():
+    hook = load_hook("route_handoff_required")
     stages, error = hook._infer_canonical_required_stages({
         "run_id": "r-emerging",
         "route": "emerging",
         "status": "COMPLETE",
-        "candidates": {"cand_1": {}},
+        "candidates": {"cand_1": {"keyword": "new demand"}},
     })
     assert stages is None
-    assert "attest" in error.lower() or "handoff" in error.lower() or "route" in error.lower()
+    assert "handoff" in error.lower() or "route" in error.lower()
 
 
 def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch):
@@ -96,7 +105,7 @@ def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch
     }
     valid, reason = hook._verify_completion_requirements(manifest)
     assert valid is False
-    assert "finalist" in reason.lower() or "trend" in reason.lower() or "disposition" in reason.lower()
+    assert "finalist" in reason.lower() or "review" in reason.lower() or "disposition" in reason.lower()
 
 
 def test_candidate_specific_stages_must_not_fallback_to_global_receipts(monkeypatch):
