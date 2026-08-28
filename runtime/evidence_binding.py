@@ -1,30 +1,21 @@
 #!/usr/bin/env python3
 """Bind observed SEO rows to evidence emitted by the real project collectors.
 
-Production evidence is structurally replayed from raw/structured collector
-artifacts and must also carry an issuance proof from an OS-level trusted broker.
-The repository never stores or generates the broker's signing secret. When the
-broker is not installed, production issuance and verification fail closed.
+The production trust target is execution integrity for normal agent workflows:
+collector identity, current source artifacts, hashes, and deterministic semantic
+replay must all agree. This module intentionally does not claim cryptographic
+separation from a malicious local principal that can rewrite repository files.
 """
 
 import hashlib
 import importlib.util
 import inspect
 import json
-import os
-import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 SCHEMA = "seo-observed-evidence/v2"
-ISSUANCE_SCHEMA = "seo-issuance-broker/v1"
-ATTESTATION_SCHEMA = "seo-external-attestation/v1"
 ROOT = Path(__file__).resolve().parent
-TRUSTED_BROKER_CANDIDATES = (
-    Path("/usr/local/libexec/seo-issuance-broker"),
-    Path("/opt/openai/libexec/seo-issuance-broker"),
-)
 COLLECTOR_FILES = {
     "semrush_ideas": ROOT / "collectors" / "semrush_relay_collector.py",
     "semrush_exact": ROOT / "collectors" / "semrush_relay_collector.py",
@@ -79,136 +70,6 @@ def _json_read(path, label):
     return value
 
 
-def _trusted_broker_path():
-    """Return a fixed, root-owned, non-writable broker executable or fail closed."""
-    for candidate in TRUSTED_BROKER_CANDIDATES:
-        try:
-            if not candidate.is_file() or candidate.is_symlink():
-                continue
-            resolved = candidate.resolve(strict=True)
-            stat = resolved.stat()
-        except OSError:
-            continue
-        if stat.st_uid != 0:
-            continue
-        if stat.st_mode & 0o022:
-            continue
-        if not os.access(resolved, os.X_OK):
-            continue
-        return resolved
-    raise EvidenceIntegrityError(
-        "trusted issuance broker unavailable; install a root-owned non-writable "
-        "seo-issuance-broker at /usr/local/libexec or /opt/openai/libexec"
-    )
-
-
-def _broker_request(action, payload):
-    broker = _trusted_broker_path()
-    try:
-        proc = subprocess.run(
-            [str(broker), action],
-            input=json.dumps(payload, ensure_ascii=False),
-            text=True,
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise EvidenceIntegrityError(f"trusted issuance broker execution failed: {exc}") from exc
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "broker denied request").strip()
-        raise EvidenceIntegrityError(f"trusted issuance broker denied {action}: {detail}")
-    try:
-        response = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise EvidenceIntegrityError("trusted issuance broker returned invalid JSON") from exc
-    if not isinstance(response, dict) or response.get("ok") is not True:
-        raise EvidenceIntegrityError("trusted issuance broker did not confirm request")
-    return response
-
-
-def _assert_issuance_mint_caller(issuer, kind):
-    """Prevent repository helpers from becoming a generic signing oracle.
-
-    The external broker MUST independently enforce the same parent-process
-    policy. This local check is defense in depth; the actual secret remains
-    outside the agent security principal.
-    """
-    frame = inspect.currentframe()
-    caller = frame.f_back.f_back if frame and frame.f_back else None
-    caller_path = Path(caller.f_code.co_filename).resolve() if caller is not None else None
-    caller_module = str(caller.f_globals.get("__name__") or "") if caller is not None else ""
-    caller_name = str(caller.f_code.co_name or "") if caller is not None else ""
-
-    if issuer in set(EXPECTED_COLLECTORS.values()):
-        if caller_path != Path(__file__).resolve() or caller_name != "write_observed_output":
-            raise EvidenceIntegrityError("collector issuance may only be requested by write_observed_output")
-        return
-    if issuer == "stage_validator":
-        expected = (ROOT / "stage_validator.py").resolve()
-        if caller_path != expected or caller_module != "__main__" or caller_name != "_write_validation_receipt":
-            raise EvidenceIntegrityError("validation issuance may only be requested by direct stage_validator CLI execution")
-        return
-    raise EvidenceIntegrityError(f"unsupported issuance issuer: {issuer} kind={kind}")
-
-
-def _mint_issuance_proof(issuer, kind, subject_sha256, issued_at):
-    _assert_issuance_mint_caller(issuer, kind)
-    expected = {
-        "issuer": str(issuer),
-        "kind": str(kind),
-        "subject_sha256": str(subject_sha256),
-        "issued_at": str(issued_at),
-    }
-    response = _broker_request("sign", expected)
-    proof = response.get("proof")
-    if not isinstance(proof, dict) or proof.get("schema") != ISSUANCE_SCHEMA:
-        raise EvidenceIntegrityError("trusted issuance broker returned invalid issuance proof")
-    for field, value in expected.items():
-        if proof.get(field) != value:
-            raise EvidenceIntegrityError(f"trusted issuance broker proof {field} mismatch")
-    return proof
-
-
-def _verify_issuance_proof(receipt):
-    issuance = receipt.get("issuance")
-    if not isinstance(issuance, dict):
-        raise EvidenceIntegrityError("evidence receipt issuance proof missing; untrusted synthetic receipt rejected")
-    if issuance.get("schema") != ISSUANCE_SCHEMA:
-        raise EvidenceIntegrityError("evidence receipt issuance proof schema mismatch")
-    if receipt.get("schema") == SCHEMA:
-        expected = {
-            "issuer": receipt.get("collector"),
-            "kind": receipt.get("evidence_type"),
-            "subject_sha256": receipt.get("normalized_sha256"),
-            "issued_at": issuance.get("issued_at"),
-        }
-    else:
-        expected = {
-            "issuer": "stage_validator",
-            "kind": receipt.get("stage"),
-            "subject_sha256": receipt.get("report_sha256"),
-            "issued_at": issuance.get("issued_at"),
-        }
-    response = _broker_request("verify", {"proof": issuance, "expected": expected})
-    if response.get("verified") is not True:
-        raise EvidenceIntegrityError("trusted issuance broker rejected issuance proof")
-    return True
-
-
-def verify_external_attestation(proof, kind, expected_claims):
-    """Verify host/human workflow claims that must not be self-asserted by the agent."""
-    if not isinstance(proof, dict) or proof.get("schema") != ATTESTATION_SCHEMA:
-        raise EvidenceIntegrityError(f"trusted {kind} attestation missing or invalid")
-    response = _broker_request(
-        "verify-attestation",
-        {"proof": proof, "expected": {"kind": str(kind), "claims": dict(expected_claims)}},
-    )
-    if response.get("verified") is not True:
-        raise EvidenceIntegrityError(f"trusted {kind} attestation rejected")
-    return True
-
-
 def _load_module(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -224,6 +85,7 @@ def _expected_collector_path(evidence_type):
 
 
 def _assert_real_collector_caller(evidence_type):
+    """Keep ordinary agents on the project collector CLI instead of helper minting."""
     expected = _expected_collector_path(evidence_type)
     frame = inspect.currentframe()
     caller = frame.f_back.f_back if frame and frame.f_back else None
@@ -231,7 +93,7 @@ def _assert_real_collector_caller(evidence_type):
     caller_module = str(caller.f_globals.get("__name__") or "") if caller is not None else ""
     if caller_path != expected or caller_module != "__main__":
         raise EvidenceIntegrityError(
-            f"production evidence receipts may only be minted by direct CLI execution of {expected.name}; "
+            f"production evidence receipts may only be written by direct CLI execution of {expected.name}; "
             f"caller={caller_path} module={caller_module or 'unknown'}"
         )
     return expected
@@ -341,9 +203,7 @@ def _verify_semrush_semantics(evidence_type, normalized, role_paths):
     }
     collector = _load_module(_expected_collector_path(evidence_type), f"evidence_replay_{mode}")
     try:
-        replayed = collector._normalize(
-            raw["response"], descriptor, str(raw["observed_at"]), str(raw_path)
-        )
+        replayed = collector._normalize(raw["response"], descriptor, str(raw["observed_at"]), str(raw_path))
     except Exception as exc:
         raise EvidenceIntegrityError(f"Semrush raw evidence cannot be deterministically normalized: {exc}") from exc
     if replayed != _without_receipt(normalized):
@@ -436,9 +296,6 @@ def write_observed_output(output_path, payload, collector, evidence_type, artifa
     role_paths = {item["role"]: Path(item["path"]) for item in artifact_records}
     _verify_collector_semantics(evidence_type, bound, role_paths)
 
-    issued_at = payload.get("observed_at") or datetime.now(timezone.utc).isoformat()
-    issuance_proof = _mint_issuance_proof(collector, evidence_type, sha256_file(output_path), str(issued_at))
-
     receipt = {
         "schema": SCHEMA,
         "collector": collector,
@@ -447,7 +304,6 @@ def write_observed_output(output_path, payload, collector, evidence_type, artifa
         "normalized_ref": str(output_path),
         "normalized_sha256": sha256_file(output_path),
         "artifacts": artifact_records,
-        "issuance": issuance_proof,
     }
     _json_write(receipt_path, receipt)
     return bound
@@ -472,8 +328,6 @@ def verify_receipt_ref(receipt_ref, expected_type):
     collector_path = _expected_collector_path(expected_type)
     if receipt.get("collector_source_sha256") != sha256_file(collector_path):
         raise EvidenceIntegrityError("evidence receipt collector source hash mismatch")
-
-    _verify_issuance_proof(receipt)
 
     normalized_ref = Path(str(receipt.get("normalized_ref") or ""))
     if not normalized_ref.is_file():
@@ -521,7 +375,9 @@ def _num(value):
 def verify_kgr_payload(payload):
     if not isinstance(payload, dict):
         raise EvidenceIntegrityError("KGR payload must be an object")
-    exact = verify_receipt_ref(payload.get("exact_evidence_receipt_ref") or payload.get("evidence_receipt_ref"), "semrush_exact")
+    exact = verify_receipt_ref(
+        payload.get("exact_evidence_receipt_ref") or payload.get("evidence_receipt_ref"), "semrush_exact"
+    )
     intitle = verify_receipt_ref(payload.get("intitle_evidence_receipt_ref"), "google_intitle")
     if _norm_keyword(exact.get("keyword")) != _norm_keyword(payload.get("keyword")):
         raise EvidenceIntegrityError("KGR exact keyword differs from collector evidence")
