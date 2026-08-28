@@ -150,13 +150,17 @@ def test_explicit_finalist_review_false_does_not_require_external_attestation(mo
 
 def test_structured_run_blocker_does_not_require_broker_attestation():
     hook = load_module("scope_blocked_hook", HOOK)
+    blocked_reason = "Semrush relay unavailable after authenticated collector attempt"
     valid, reason = hook._verify_blocked_run(
         {
             "run_id": "r-blocked",
             "route": "traditional",
             "status": "BLOCKED",
             "blocked_stage": "stage6_exact",
-            "blocked_reason": "Semrush relay unavailable after authenticated collector attempt",
+            "blocked_reason": blocked_reason,
+            "stages": {
+                "stage6_exact": {"status": "BLOCKED", "blocked_reason": blocked_reason}
+            },
         }
     )
     assert valid is True, reason
