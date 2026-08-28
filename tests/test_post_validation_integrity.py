@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+VALIDATOR = ROOT / "runtime" / "stage_validator.py"
 
 
 def load_hook(name):
@@ -50,27 +51,32 @@ def make_structural_validation_receipt(tmp_path, stage="stage6_exact"):
         "stage": stage,
         "status": "PASS",
         "candidate_id": None,
+        "validator_source_sha256": hashlib.sha256(VALIDATOR.read_bytes()).hexdigest(),
         "report_ref": str(report),
         "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest(),
-        "issuance": {"schema": "synthetic-unit-only"},
     }), encoding="utf-8")
     return {"status": "PASS", "validation_receipt_ref": str(receipt)}
-
-
-class UnitBinding:
-    @staticmethod
-    def _verify_issuance_proof(_receipt):
-        return True
 
 
 def test_validation_receipt_path_rechecks_current_underlying_evidence(monkeypatch, tmp_path):
     hook = load_hook("post_validation_recheck_unit")
     record = make_structural_validation_receipt(tmp_path)
-    monkeypatch.setattr(hook, "_binding", lambda: UnitBinding())
     monkeypatch.setattr(hook, "_verify_current_evidence", lambda report, stage: (False, "underlying evidence invalid: tampered"))
     valid, reason = hook._verify_validation_receipt(record, "stage6_exact")
     assert valid is False
     assert "underlying evidence" in reason.lower()
+
+
+def test_validation_receipt_rejects_wrong_validator_source_hash(tmp_path):
+    hook = load_hook("post_validation_source_hash")
+    record = make_structural_validation_receipt(tmp_path)
+    receipt_path = Path(record["validation_receipt_ref"])
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["validator_source_sha256"] = "0" * 64
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    valid, reason = hook._verify_validation_receipt(record, "stage6_exact")
+    assert valid is False
+    assert "validator source hash" in reason.lower()
 
 
 def test_stop_rejects_bare_complete_status(tmp_path):
