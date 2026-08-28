@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production-stage contract validator with collector-evidence and external broker binding."""
+"""Production-stage contract validator with collector-evidence binding."""
 
 import argparse
 import hashlib
@@ -7,7 +7,6 @@ import importlib.util
 import json
 import math
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -231,26 +230,19 @@ def _sha256(path):
 
 
 def _write_validation_receipt(report_path, report, candidate_id=None):
+    """Bind a PASS report to this validator source and its exact report bytes."""
     report_path = Path(report_path)
     receipt_path = report_path.with_suffix(".receipt.json")
     report["validation_receipt_ref"] = str(receipt_path)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    report_sha = _sha256(report_path)
-    issued_at = report.get("generated_at") or datetime.now(timezone.utc).isoformat()
-    issuance = _binding()._mint_issuance_proof(
-        "stage_validator",
-        report["stage"],
-        report_sha,
-        str(issued_at),
-    )
     receipt = {
         "schema": "seo-stage-validation/v1",
         "stage": report["stage"],
         "status": report["status"],
         "candidate_id": candidate_id,
+        "validator_source_sha256": _sha256(Path(__file__).resolve()),
         "report_ref": str(report_path),
-        "report_sha256": report_sha,
-        "issuance": issuance,
+        "report_sha256": _sha256(report_path),
     }
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return receipt_path
@@ -284,7 +276,7 @@ def main():
         "blocked": blocked,
     }
 
-    issuance_error = None
+    receipt_error = None
     if args.report:
         report_path = Path(args.report)
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -292,21 +284,15 @@ def main():
             try:
                 _write_validation_receipt(report_path, report, args.candidate_id)
             except Exception as exc:
-                issuance_error = str(exc)
+                receipt_error = str(exc)
                 if not report_path.is_file():
-                    report_path.write_text(
-                        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                        encoding="utf-8",
-                    )
+                    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         else:
-            report_path.write_text(
-                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    if issuance_error:
-        print(f"BLOCKED: {issuance_error}", file=sys.stderr)
+    if receipt_error:
+        print(f"BLOCKED: {receipt_error}", file=sys.stderr)
         return 2
     if blocked:
         for item in blocked:
