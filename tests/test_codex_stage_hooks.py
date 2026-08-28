@@ -96,10 +96,138 @@ def test_stop_blocks_incomplete_active_run(tmp_path):
     assert "IN_PROGRESS" in result.stderr
 
 
-def test_stop_allows_blocked_run_to_end(tmp_path):
+def test_stop_rejects_bare_unattested_blocked_run(tmp_path):
     manifest = {"run_id": "r1", "route": "traditional", "status": "BLOCKED", "stages": {}}
     payload = {"hook_event_name": "Stop", "stop_hook_active": False, "last_assistant_message": "blocked"}
-    assert run_hook(tmp_path, "stop", payload, manifest).returncode == 0
+    result = run_hook(tmp_path, "stop", payload, manifest)
+    assert result.returncode == 2
+    assert "BLOCKED" in result.stderr
+
+
+def test_stop_allows_self_verified_missing_broker_blocker(monkeypatch):
+    hook = load_hook("blocked_run_missing_broker")
+
+    class MissingBrokerBinding:
+        @staticmethod
+        def _trusted_broker_path():
+            raise RuntimeError("trusted issuance broker unavailable")
+
+        @staticmethod
+        def verify_external_attestation(*_args, **_kwargs):
+            raise AssertionError("missing-broker bootstrap must not require broker attestation")
+
+    monkeypatch.setattr(hook, "_binding", lambda: MissingBrokerBinding())
+    manifest = {
+        "run_id": "r1",
+        "route": "traditional",
+        "status": "BLOCKED",
+        "blocked_stage": "trust_boundary",
+        "blocked_reason": "trusted issuance broker unavailable",
+    }
+    payload = {"hook_event_name": "Stop", "stop_hook_active": False}
+    assert hook.stop(payload, manifest) == 0
+
+
+def test_stop_rejects_non_bootstrap_blocker_without_attestation(monkeypatch):
+    hook = load_hook("blocked_run_attestation_required")
+
+    class TrustedBrokerBinding:
+        @staticmethod
+        def _trusted_broker_path():
+            return Path("/trusted/seo-issuance-broker")
+
+        @staticmethod
+        def verify_external_attestation(*_args, **_kwargs):
+            raise RuntimeError("run blocked attestation missing")
+
+    monkeypatch.setattr(hook, "_binding", lambda: TrustedBrokerBinding())
+    manifest = {
+        "run_id": "r1",
+        "route": "traditional",
+        "status": "BLOCKED",
+        "blocked_stage": "stage6_exact",
+        "blocked_reason": "relay unavailable",
+    }
+    payload = {"hook_event_name": "Stop", "stop_hook_active": False}
+    assert hook.stop(payload, manifest) == 2
+
+
+def test_stop_allows_attested_run_blocker_and_binds_claims(monkeypatch):
+    hook = load_hook("blocked_run_attested")
+    seen = {}
+    proof = {"schema": "seo-external-attestation/v1", "claims": {"opaque": True}}
+
+    class TrustedBrokerBinding:
+        @staticmethod
+        def _trusted_broker_path():
+            return Path("/trusted/seo-issuance-broker")
+
+        @staticmethod
+        def verify_external_attestation(actual_proof, kind, expected_claims):
+            seen["proof"] = actual_proof
+            seen["kind"] = kind
+            seen["claims"] = expected_claims
+            return True
+
+    monkeypatch.setattr(hook, "_binding", lambda: TrustedBrokerBinding())
+    manifest = {
+        "run_id": "r1",
+        "route": "traditional",
+        "status": "BLOCKED",
+        "blocked_stage": "stage6_exact",
+        "blocked_reason": "relay unavailable",
+        "blocked_attestation_ref": proof,
+    }
+    payload = {"hook_event_name": "Stop", "stop_hook_active": False}
+    assert hook.stop(payload, manifest) == 0
+    assert seen == {
+        "proof": proof,
+        "kind": "run_blocked",
+        "claims": {
+            "run_id": "r1",
+            "route": "traditional",
+            "terminal_status": "BLOCKED",
+            "blocked_stage": "stage6_exact",
+            "blocked_reason": "relay unavailable",
+        },
+    }
+
+
+def test_stop_rejects_tampered_run_blocker_claims(monkeypatch):
+    hook = load_hook("blocked_run_tampered")
+    proof = {
+        "schema": "seo-external-attestation/v1",
+        "claims": {
+            "run_id": "r1",
+            "route": "traditional",
+            "terminal_status": "BLOCKED",
+            "blocked_stage": "stage6_exact",
+            "blocked_reason": "original blocker",
+        },
+    }
+
+    class TrustedBrokerBinding:
+        @staticmethod
+        def _trusted_broker_path():
+            return Path("/trusted/seo-issuance-broker")
+
+        @staticmethod
+        def verify_external_attestation(actual_proof, kind, expected_claims):
+            if actual_proof.get("claims") != expected_claims:
+                raise RuntimeError("run blocked attestation rejected")
+            return True
+
+    monkeypatch.setattr(hook, "_binding", lambda: TrustedBrokerBinding())
+    manifest = {
+        "run_id": "r1",
+        "route": "traditional",
+        "status": "BLOCKED",
+        "blocked_stage": "stage6_exact",
+        "blocked_reason": "tampered blocker",
+        "blocked_attestation_ref": proof,
+    }
+    payload = {"hook_event_name": "Stop", "stop_hook_active": False}
+    assert hook.stop(payload, manifest) == 2
 
 
 def test_stop_hook_active_prevents_recursive_block(tmp_path):
