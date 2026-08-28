@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Codex project hook for SEO production-stage integrity.
 
-Protected production transitions infer their required stage from the command
-itself. A stage PASS is trusted only when it references a hash-verified
-production validation receipt whose underlying collector evidence is still
-valid. COMPLETE is trusted only when explicit canonical completion requirements
-cover the minimum stages for the selected route and all referenced production
-stage receipts remain valid.
+Protected transitions infer their required stage from the command. Production
+PASS records are accepted only with broker-issued validation receipts whose
+underlying collector evidence is still valid. COMPLETE is derived from trusted
+route/candidate lifecycle state; agent-written route/finalist/completion lists
+cannot weaken the gates.
 """
 
 import hashlib
@@ -19,6 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 BINDING_PATH = ROOT / "evidence_binding.py"
+VALIDATOR_PATH = ROOT / "stage_validator.py"
+EVALUATOR_PATH = ROOT.parent / "skills" / "seo-keyword-selection" / "scripts" / "evaluate_candidates.py"
 REQUIRE_RE = re.compile(r"(?:^|\s)SEO_STAGE_REQUIRE=([A-Za-z0-9_.-]+)")
 CANDIDATE_RE = re.compile(r"(?:^|\s)SEO_CANDIDATE_ID=([^\s]+)")
 
@@ -42,17 +43,28 @@ STAGE_EVIDENCE_TYPES = {
     "finalist_trend": "google_trends",
 }
 CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff"})
-ROUTE_MINIMUM_STAGES = {
-    "traditional": frozenset({"discovery_autocomplete", "stage6_exact"}),
-    "emerging": frozenset({"stage6_exact"}),
-}
+TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_handoff")
+CANDIDATE_SELECTION_STAGES = ("stage6_exact", "intitle_observation", "kgr_intitle", "serp_review")
+EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})
 
 
-def _binding():
-    spec = importlib.util.spec_from_file_location("seo_evidence_binding_hook", BINDING_PATH)
+def _load_module(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _binding():
+    return _load_module(BINDING_PATH, "seo_evidence_binding_hook")
+
+
+def _validator():
+    return _load_module(VALIDATOR_PATH, "seo_stage_validator_hook")
+
+
+def _evaluator():
+    return _load_module(EVALUATOR_PATH, "seo_candidate_evaluator_hook")
 
 
 def _load_stdin():
@@ -70,10 +82,14 @@ def _load_manifest():
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"SEO run manifest invalid: {exc}", file=sys.stderr)
         raise SystemExit(2)
+    if not isinstance(value, dict):
+        print("SEO run manifest invalid: root must be an object", file=sys.stderr)
+        raise SystemExit(2)
+    return value
 
 
 def _flatten_strings(value):
@@ -111,200 +127,291 @@ def _protected_requirement(payload):
 def _required_transition(payload):
     explicit_stage, candidate_id = _explicit_requirement(payload.get("tool_input"))
     protected_stage = _protected_requirement(payload)
-    # A user/model supplied marker is diagnostic only for protected commands.
-    # It must never weaken or replace the stage inferred from the command itself.
     return protected_stage or explicit_stage, candidate_id
 
 
 def _stage_record(manifest, stage, candidate_id=None):
     if candidate_id:
-        return manifest.get("candidates", {}).get(candidate_id, {}).get(stage)
-    return manifest.get("stages", {}).get(stage)
+        candidates = manifest.get("candidates")
+        if not isinstance(candidates, dict):
+            return None
+        candidate = candidates.get(candidate_id)
+        return candidate.get(stage) if isinstance(candidate, dict) else None
+    stages = manifest.get("stages")
+    return stages.get(stage) if isinstance(stages, dict) else None
 
 
 def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _read_json_ref(value, label):
+    if isinstance(value, dict):
+        return value
+    ref = str(value or "").strip()
+    if not ref:
+        raise ValueError(f"{label} missing")
+    path = Path(ref)
+    if not path.is_file():
+        raise ValueError(f"{label} file missing")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be an object")
+    return payload
+
+
 def _verify_current_evidence(report, stage):
     rows = report.get("complete")
     if not isinstance(rows, list) or not rows:
         return False, "validation report contains no complete rows"
-    binding = _binding()
+    if report.get("candidate_id") is not None and len(rows) != 1:
+        return False, "candidate-bound validation report must contain exactly one complete row"
+    validator = _validator()
     try:
+        contracts = json.loads((ROOT / "stage_contracts.json").read_text(encoding="utf-8"))
         for row in rows:
-            if stage == "kgr_intitle":
-                binding.verify_kgr_payload(row)
-                continue
-            if stage == "finalist_trend" and row.get("is_finalist") is not True:
-                continue
-            evidence_type = STAGE_EVIDENCE_TYPES.get(stage)
-            if evidence_type:
-                binding.verify_payload(row, evidence_type)
+            errors = validator.validate_stage(stage, row, contracts, production=True)
+            if errors:
+                return False, "underlying evidence invalid: " + " | ".join(errors)
     except Exception as exc:
         return False, f"underlying evidence invalid: {exc}"
     return True, ""
 
 
-def _verify_validation_receipt(record, stage, candidate_id=None):
+def _load_validation_report(record, stage, candidate_id=None):
     if stage not in CANONICAL_STAGES:
-        return False, f"unknown/non-canonical stage: {stage}"
+        return None, f"unknown/non-canonical stage: {stage}"
     if not isinstance(record, dict) or record.get("status") != "PASS":
-        return False, "stage status is not PASS"
+        return None, "stage status is not PASS"
     receipt_ref = str(record.get("validation_receipt_ref") or "").strip()
     if not receipt_ref:
-        return False, "PASS lacks validation receipt"
+        return None, "PASS lacks validation receipt"
     receipt_path = Path(receipt_ref)
     if not receipt_path.is_file():
-        return False, "validation receipt file is missing"
+        return None, "validation receipt file is missing"
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return False, "validation receipt is invalid JSON"
+        return None, "validation receipt is invalid JSON"
     if receipt.get("schema") != "seo-stage-validation/v1":
-        return False, "validation receipt schema mismatch"
+        return None, "validation receipt schema mismatch"
     if receipt.get("stage") != stage or receipt.get("status") != "PASS":
-        return False, "validation receipt stage/status mismatch"
+        return None, "validation receipt stage/status mismatch"
     if candidate_id is not None and receipt.get("candidate_id") != candidate_id:
-        return False, "validation receipt candidate mismatch"
+        return None, "validation receipt candidate mismatch"
+    if candidate_id is None and receipt.get("candidate_id") not in (None, ""):
+        return None, "global validation receipt must not be candidate-bound"
     issuance = receipt.get("issuance")
     if not isinstance(issuance, dict):
-        return False, "validation receipt issuance proof missing; untrusted synthetic receipt"
+        return None, "validation receipt issuance proof missing; untrusted synthetic receipt"
     try:
         _binding()._verify_issuance_proof(receipt)
     except Exception as exc:
-        return False, f"validation receipt issuance proof invalid: {exc}"
+        return None, f"validation receipt issuance proof invalid: {exc}"
 
     report_ref = str(receipt.get("report_ref") or "").strip()
     report_path = Path(report_ref)
     if not report_path.is_file():
-        return False, "validation report file is missing"
+        return None, "validation report file is missing"
     if _sha256(report_path) != receipt.get("report_sha256"):
-        return False, "validation report hash mismatch"
+        return None, "validation report hash mismatch"
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return False, "validation report is invalid JSON"
+        return None, "validation report is invalid JSON"
     if report.get("stage") != stage or report.get("status") != "PASS":
-        return False, "validation report stage/status mismatch"
+        return None, "validation report stage/status mismatch"
     if report.get("production") is not True:
-        return False, "validation report was not produced in production mode"
+        return None, "validation report was not produced in production mode"
     if report.get("blocked_count") != 0 or int(report.get("complete_count") or 0) < 1:
-        return False, "validation report is not complete"
+        return None, "validation report is not complete"
     if candidate_id is not None and report.get("candidate_id") != candidate_id:
-        return False, "validation report candidate mismatch"
+        return None, "validation report candidate mismatch"
+    if candidate_id is None and report.get("candidate_id") not in (None, ""):
+        return None, "global validation report must not be candidate-bound"
     if report.get("validation_receipt_ref") != str(receipt_path):
-        return False, "validation report is not bound to this receipt"
+        return None, "validation report is not bound to this receipt"
     valid, reason = _verify_current_evidence(report, stage)
     if not valid:
-        return False, reason
+        return None, reason
+    return report, ""
+
+
+def _verify_validation_receipt(record, stage, candidate_id=None):
+    report, reason = _load_validation_report(record, stage, candidate_id)
+    return report is not None, reason
+
+
+def _verify_route_attestation(manifest):
+    route = str(manifest.get("route") or "").strip().lower()
+    if route == "traditional":
+        return True, ""
+    if route != "emerging":
+        return False, f"COMPLETE has unknown or missing route: {route or 'missing'}"
+    run_id = str(manifest.get("run_id") or "").strip()
+    candidates = manifest.get("candidates")
+    candidate_ids = sorted(str(key) for key, value in (candidates or {}).items() if isinstance(value, dict)) if isinstance(candidates, dict) else []
+    if not run_id or not candidate_ids:
+        return False, "emerging route requires run_id and candidate set"
+    try:
+        proof = _read_json_ref(manifest.get("route_attestation_ref"), "emerging route attestation")
+        _binding().verify_external_attestation(
+            proof,
+            "emerging_route",
+            {"run_id": run_id, "route": "emerging", "candidate_ids": candidate_ids},
+        )
+    except Exception as exc:
+        return False, f"emerging route attestation invalid: {exc}"
     return True, ""
 
 
 def _infer_canonical_required_stages(manifest):
     route = str(manifest.get("route") or "").strip().lower()
-    if route not in {"traditional", "emerging"}:
-        return None, f"COMPLETE has unknown or missing route: {route or 'missing'}"
-
-    # Base canonical pipeline per route
     if route == "traditional":
-        base_stages = [
-            "discovery_autocomplete",
-            "discovery_handoff",
-            "stage6_exact",
-            "intitle_observation",
-            "kgr_intitle",
-            "serp_review",
-        ]
-    else:  # emerging
-        base_stages = [
-            "stage6_exact",
-            "intitle_observation",
-            "kgr_intitle",
-            "serp_review",
-            "finalist_trend",
-        ]
+        return list(TRADITIONAL_SHARED_STAGES), ""
+    if route == "emerging":
+        valid, reason = _verify_route_attestation(manifest)
+        if not valid:
+            return None, reason
+        return [], ""
+    return None, f"COMPLETE has unknown or missing route: {route or 'missing'}"
 
-    # Check if any finalist exists across run or candidates
-    has_finalist = False
-    if manifest.get("is_finalist") is True:
-        has_finalist = True
-    for cand_info in manifest.get("candidates", {}).values():
-        if isinstance(cand_info, dict) and cand_info.get("is_finalist") is True:
-            has_finalist = True
-            break
 
-    # If traditional has a finalist, finalist_trend is mandatory
-    required = list(base_stages)
-    if route == "traditional" and has_finalist and "finalist_trend" not in required:
-        required.append("finalist_trend")
+def _verified_exact_disposition(manifest, candidate_id):
+    record = _stage_record(manifest, "stage6_exact", candidate_id)
+    report, reason = _load_validation_report(record, "stage6_exact", candidate_id)
+    if report is None:
+        return None, reason
+    rows = report.get("complete") or []
+    if len(rows) != 1:
+        return None, "candidate Exact validation must contain exactly one row"
+    try:
+        evaluated = _evaluator().normalize(rows[0], "exact")
+    except Exception as exc:
+        return None, f"candidate Exact disposition cannot be derived: {exc}"
+    status = str(evaluated.get("mechanical_status") or "").strip()
+    if not status:
+        return None, "candidate Exact disposition is missing"
+    return status, ""
 
-    return required, ""
+
+def _verify_finalist_disposition(manifest, candidate_id, candidate):
+    trend = _stage_record(manifest, "finalist_trend", candidate_id)
+    if isinstance(trend, dict) and trend.get("status") == "PASS":
+        valid, reason = _verify_validation_receipt(trend, "finalist_trend", candidate_id)
+        if not valid:
+            return None, reason
+        return True, ""
+
+    run_id = str(manifest.get("run_id") or "").strip()
+    if not run_id:
+        return None, "candidate finalist disposition requires run_id"
+    try:
+        proof = _read_json_ref(candidate.get("finalist_attestation_ref"), "candidate finalist attestation")
+        _binding().verify_external_attestation(
+            proof,
+            "candidate_finalist",
+            {"run_id": run_id, "candidate_id": str(candidate_id)},
+        )
+    except Exception as exc:
+        return None, f"candidate finalist disposition is not trusted: {exc}"
+    claims = proof.get("claims")
+    if not isinstance(claims, dict) or not isinstance(claims.get("is_finalist"), bool):
+        return None, "candidate finalist attestation lacks boolean is_finalist claim"
+    return claims["is_finalist"], ""
+
+
+def _verify_terminal_blocked_candidate(manifest, candidate_id, candidate):
+    stage = str(candidate.get("blocked_stage") or "").strip()
+    if stage not in CANONICAL_STAGES:
+        return False, "terminal BLOCKED candidate lacks canonical blocked_stage"
+    record = _stage_record(manifest, stage, candidate_id)
+    if not isinstance(record, dict) or record.get("status") != "BLOCKED":
+        return False, f"terminal BLOCKED candidate stage {stage} is not BLOCKED"
+    reason = str(record.get("blocked_reason") or candidate.get("blocked_reason") or "").strip()
+    if not reason:
+        return False, "terminal BLOCKED candidate lacks real blocked reason"
+    run_id = str(manifest.get("run_id") or "").strip()
+    if not run_id:
+        return False, "terminal BLOCKED candidate requires run_id"
+    try:
+        proof = _read_json_ref(candidate.get("blocked_attestation_ref"), "candidate blocked attestation")
+        _binding().verify_external_attestation(
+            proof,
+            "candidate_blocked",
+            {
+                "run_id": run_id,
+                "candidate_id": str(candidate_id),
+                "terminal_status": "BLOCKED",
+                "blocked_stage": stage,
+            },
+        )
+    except Exception as exc:
+        return False, f"terminal BLOCKED candidate is not trusted: {exc}"
+    return True, ""
+
+
+def _verify_candidate_completion(manifest, candidate_id, candidate):
+    if not isinstance(candidate, dict):
+        return False, f"candidate={candidate_id} record is invalid"
+
+    if str(candidate.get("terminal_status") or "").upper() == "BLOCKED":
+        return _verify_terminal_blocked_candidate(manifest, candidate_id, candidate)
+
+    exact_status, reason = _verified_exact_disposition(manifest, candidate_id)
+    if exact_status is None:
+        return False, f"candidate={candidate_id} stage6_exact is not verified: {reason}"
+    if exact_status in EXACT_TERMINAL_STATUSES:
+        return True, ""
+
+    for stage in ("intitle_observation", "kgr_intitle", "serp_review"):
+        record = _stage_record(manifest, stage, candidate_id)
+        if not isinstance(record, dict) or record.get("status") != "PASS":
+            return False, f"system required stage {stage} for candidate={candidate_id} is missing or not PASS"
+        valid, stage_reason = _verify_validation_receipt(record, stage, candidate_id)
+        if not valid:
+            return False, f"system required stage {stage} for candidate={candidate_id} is not verified: {stage_reason}"
+
+    is_finalist, reason = _verify_finalist_disposition(manifest, candidate_id, candidate)
+    if is_finalist is None:
+        return False, f"candidate={candidate_id} finalist disposition is not verified: {reason}"
+    if is_finalist:
+        trend = _stage_record(manifest, "finalist_trend", candidate_id)
+        if not isinstance(trend, dict) or trend.get("status") != "PASS":
+            return False, f"system required stage finalist_trend for candidate={candidate_id} is missing or not PASS"
+        valid, stage_reason = _verify_validation_receipt(trend, "finalist_trend", candidate_id)
+        if not valid:
+            return False, f"system required stage finalist_trend for candidate={candidate_id} is not verified: {stage_reason}"
+    return True, ""
 
 
 def _verify_completion_requirements(manifest):
-    route = str(manifest.get("route") or "").strip().lower()
-    required_stages, err = _infer_canonical_required_stages(manifest)
-    if err:
-        return False, err
+    shared_stages, error = _infer_canonical_required_stages(manifest)
+    if error:
+        return False, error
 
-    # Phase 1: Check all required stages exist in manifest before deep validation.
-    # This ensures the error message names the missing stage, not a validation detail.
+    for stage in shared_stages:
+        record = _stage_record(manifest, stage)
+        if not isinstance(record, dict) or record.get("status") != "PASS":
+            return False, f"system required stage {stage} is missing or not PASS"
+        valid, reason = _verify_validation_receipt(record, stage)
+        if not valid:
+            return False, f"system required stage {stage} is not verified: {reason}"
+
     candidates = manifest.get("candidates")
-    has_candidates = isinstance(candidates, dict) and bool(candidates)
+    if not isinstance(candidates, dict):
+        candidates = {}
+    route = str(manifest.get("route") or "").strip().lower()
+    if route == "emerging" and not candidates:
+        return False, "emerging COMPLETE requires trusted routed candidates"
 
-    def _resolve_record(stage, cand_id=None):
-        if cand_id:
-            return _stage_record(manifest, stage, cand_id) or _stage_record(manifest, stage)
-        return _stage_record(manifest, stage)
-
-    if has_candidates:
-        for cand_id, cand_data in candidates.items():
-            if not isinstance(cand_data, dict):
-                continue
-            cand_finalist = cand_data.get("is_finalist") is True
-            for stage in required_stages:
-                if stage == "finalist_trend" and not cand_finalist and route == "traditional":
-                    continue
-                if stage in {"discovery_autocomplete", "discovery_handoff"}:
-                    record = _resolve_record(stage)
-                else:
-                    record = _resolve_record(stage, cand_id)
-                if not isinstance(record, dict) or record.get("status") != "PASS":
-                    return False, f"system required stage {stage} is missing or not PASS"
-    else:
-        for stage in required_stages:
-            record = _resolve_record(stage)
-            if not isinstance(record, dict) or record.get("status") != "PASS":
-                return False, f"system required stage {stage} is missing or not PASS"
-
-    # Phase 2: Deep-verify all required stage validation receipts.
-    if has_candidates:
-        for cand_id, cand_data in candidates.items():
-            if not isinstance(cand_data, dict):
-                continue
-            cand_finalist = cand_data.get("is_finalist") is True
-            for stage in required_stages:
-                if stage == "finalist_trend" and not cand_finalist and route == "traditional":
-                    continue
-                if stage in {"discovery_autocomplete", "discovery_handoff"}:
-                    record = _resolve_record(stage)
-                    valid, reason = _verify_validation_receipt(record, stage)
-                    if not valid:
-                        return False, f"system required stage {stage} is not verified: {reason}"
-                else:
-                    record = _resolve_record(stage, cand_id)
-                    actual_cand = cand_id if _stage_record(manifest, stage, cand_id) else None
-                    valid, reason = _verify_validation_receipt(record, stage, actual_cand)
-                    if not valid:
-                        return False, f"system required stage {stage} for candidate={cand_id} is not verified: {reason}"
-    else:
-        for stage in required_stages:
-            record = _resolve_record(stage)
-            valid, reason = _verify_validation_receipt(record, stage)
-            if not valid:
-                return False, f"system required stage {stage} is not verified: {reason}"
-
+    for candidate_id, candidate in candidates.items():
+        valid, reason = _verify_candidate_completion(manifest, str(candidate_id), candidate)
+        if not valid:
+            return False, reason
     return True, ""
 
 

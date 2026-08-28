@@ -1,5 +1,4 @@
 import importlib.util
-import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,22 +21,15 @@ def test_external_helper_cannot_mint_issuance_or_create_workspace_secret(tmp_pat
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SEO_ISSUANCE_SECRET", raising=False)
     binding = load_module("boundary_no_local_mint", BINDING)
-
     try:
         binding._mint_issuance_proof(
-            "semrush_relay_collector",
-            "semrush_exact",
-            "a" * 64,
-            "2026-08-27T00:00:00Z",
+            "semrush_relay_collector", "semrush_exact", "a" * 64, "2026-08-27T00:00:00Z"
         )
     except Exception:
         pass
     else:
         raise AssertionError("ordinary helper code must not be able to mint a trusted issuance proof")
-
-    assert not (tmp_path / ".seo-run" / ".issuance_secret").exists(), (
-        "production trust material must never be generated in the agent-writable workspace"
-    )
+    assert not (tmp_path / ".seo-run" / ".issuance_secret").exists()
 
 
 def test_attacker_controlled_env_secret_cannot_mint_trusted_issuance(monkeypatch):
@@ -45,10 +37,7 @@ def test_attacker_controlled_env_secret_cannot_mint_trusted_issuance(monkeypatch
     binding = load_module("boundary_env_secret", BINDING)
     try:
         binding._mint_issuance_proof(
-            "stage_validator",
-            "stage6_exact",
-            "b" * 64,
-            "2026-08-27T00:00:00Z",
+            "stage_validator", "stage6_exact", "b" * 64, "2026-08-27T00:00:00Z"
         )
     except Exception:
         return
@@ -64,10 +53,7 @@ def test_agent_readable_workspace_secret_cannot_mint_trusted_issuance(tmp_path, 
     binding = load_module("boundary_workspace_secret", BINDING)
     try:
         binding._mint_issuance_proof(
-            "google_live_collector",
-            "google_intitle",
-            "c" * 64,
-            "2026-08-27T00:00:00Z",
+            "google_live_collector", "google_intitle", "c" * 64, "2026-08-27T00:00:00Z"
         )
     except Exception:
         return
@@ -77,6 +63,7 @@ def test_agent_readable_workspace_secret_cannot_mint_trusted_issuance(tmp_path, 
 def test_emerging_route_cannot_be_self_declared_without_trusted_route_attestation():
     hook = load_hook("route_attestation_required")
     stages, error = hook._infer_canonical_required_stages({
+        "run_id": "r-emerging",
         "route": "emerging",
         "status": "COMPLETE",
         "candidates": {"cand_1": {}},
@@ -88,7 +75,9 @@ def test_emerging_route_cannot_be_self_declared_without_trusted_route_attestatio
 def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch):
     hook = load_hook("finalist_self_report_rejected")
     monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    monkeypatch.setattr(hook, "_verified_exact_disposition", lambda *args, **kwargs: ("do_candidate", ""))
     manifest = {
+        "run_id": "r-traditional",
         "route": "traditional",
         "status": "COMPLETE",
         "stages": {
@@ -114,6 +103,7 @@ def test_candidate_specific_stages_must_not_fallback_to_global_receipts(monkeypa
     hook = load_hook("candidate_global_fallback_rejected")
     monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
     manifest = {
+        "run_id": "r-candidates",
         "route": "traditional",
         "status": "COMPLETE",
         "stages": {
@@ -124,10 +114,7 @@ def test_candidate_specific_stages_must_not_fallback_to_global_receipts(monkeypa
             "kgr_intitle": {"status": "PASS", "validation_receipt_ref": "global-kgr"},
             "serp_review": {"status": "PASS", "validation_receipt_ref": "global-serp"},
         },
-        "candidates": {
-            "cand_a": {"is_finalist": False},
-            "cand_b": {"is_finalist": False},
-        },
+        "candidates": {"cand_a": {}, "cand_b": {}},
     }
     valid, reason = hook._verify_completion_requirements(manifest)
     assert valid is False
@@ -137,9 +124,11 @@ def test_candidate_specific_stages_must_not_fallback_to_global_receipts(monkeypa
 def test_verified_blocked_candidate_does_not_prevent_completed_batch(monkeypatch):
     hook = load_hook("blocked_candidate_terminal")
     monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
-    # The repaired hook may use a dedicated helper for terminal BLOCKED receipts.
-    monkeypatch.setattr(hook, "_verify_terminal_blocked_candidate", lambda *args, **kwargs: (True, ""), raising=False)
+    monkeypatch.setattr(hook, "_verify_terminal_blocked_candidate", lambda *args, **kwargs: (True, ""))
+    monkeypatch.setattr(hook, "_verified_exact_disposition", lambda *args, **kwargs: ("do_candidate", ""))
+    monkeypatch.setattr(hook, "_verify_finalist_disposition", lambda *args, **kwargs: (True, ""))
     manifest = {
+        "run_id": "r-mixed",
         "route": "traditional",
         "status": "COMPLETE",
         "stages": {
@@ -150,7 +139,7 @@ def test_verified_blocked_candidate_does_not_prevent_completed_batch(monkeypatch
             "blocked": {
                 "terminal_status": "BLOCKED",
                 "blocked_stage": "stage6_exact",
-                "stage6_exact": {"status": "BLOCKED", "validation_receipt_ref": "blocked-receipt"},
+                "stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay unavailable"},
             },
             "good": {
                 "terminal_status": "COMPLETE",
@@ -170,12 +159,10 @@ def test_deterministic_exact_elimination_skips_kgr_and_serp(monkeypatch):
     hook = load_hook("exact_elimination_terminal")
     monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
     monkeypatch.setattr(
-        hook,
-        "_verified_exact_disposition",
-        lambda *args, **kwargs: ("principle_eliminate_kd", ""),
-        raising=False,
+        hook, "_verified_exact_disposition", lambda *args, **kwargs: ("principle_eliminate_kd", "")
     )
     manifest = {
+        "run_id": "r-eliminated",
         "route": "traditional",
         "status": "COMPLETE",
         "stages": {
@@ -183,9 +170,7 @@ def test_deterministic_exact_elimination_skips_kgr_and_serp(monkeypatch):
             "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
         },
         "candidates": {
-            "eliminated": {
-                "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
-            }
+            "eliminated": {"stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"}}
         },
     }
     valid, reason = hook._verify_completion_requirements(manifest)

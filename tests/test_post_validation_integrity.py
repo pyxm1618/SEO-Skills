@@ -45,26 +45,28 @@ def make_structural_validation_receipt(tmp_path, stage="stage6_exact"):
         "validation_receipt_ref": str(receipt),
     }
     report.write_text(json.dumps(report_data), encoding="utf-8")
-    report_sha = hashlib.sha256(report.read_bytes()).hexdigest()
-    hook = load_hook("make_receipt_hook")
-    binding = hook._binding()
-    issued_at = "2026-08-27T00:00:00Z"
-    issuance = binding._mint_issuance_proof("stage_validator", stage, report_sha, issued_at)
     receipt.write_text(json.dumps({
         "schema": "seo-stage-validation/v1",
         "stage": stage,
         "status": "PASS",
         "candidate_id": None,
         "report_ref": str(report),
-        "report_sha256": report_sha,
-        "issuance": issuance,
+        "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest(),
+        "issuance": {"schema": "synthetic-unit-only"},
     }), encoding="utf-8")
     return {"status": "PASS", "validation_receipt_ref": str(receipt)}
+
+
+class UnitBinding:
+    @staticmethod
+    def _verify_issuance_proof(_receipt):
+        return True
 
 
 def test_validation_receipt_path_rechecks_current_underlying_evidence(monkeypatch, tmp_path):
     hook = load_hook("post_validation_recheck_unit")
     record = make_structural_validation_receipt(tmp_path)
+    monkeypatch.setattr(hook, "_binding", lambda: UnitBinding())
     monkeypatch.setattr(hook, "_verify_current_evidence", lambda report, stage: (False, "underlying evidence invalid: tampered"))
     valid, reason = hook._verify_validation_receipt(record, "stage6_exact")
     assert valid is False
@@ -81,23 +83,30 @@ def test_stop_rejects_bare_complete_status(tmp_path):
     payload = {"hook_event_name": "Stop", "stop_hook_active": False, "last_assistant_message": "done"}
     proc = run_hook(tmp_path, "stop", payload, manifest)
     assert proc.returncode == 2
-    assert "complete" in proc.stderr.lower() or "require" in proc.stderr.lower()
+    assert "complete" in proc.stderr.lower() or "required" in proc.stderr.lower()
 
 
-def test_complete_control_flow_allows_valid_route_requirements_when_verifier_passes(monkeypatch):
+def test_complete_control_flow_allows_valid_candidate_lifecycle_when_verifiers_pass(monkeypatch):
     hook = load_hook("complete_control_flow_unit")
-    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda record, stage, candidate_id=None: (True, ""))
+    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    monkeypatch.setattr(hook, "_verified_exact_disposition", lambda *args, **kwargs: ("do_candidate", ""))
+    monkeypatch.setattr(hook, "_verify_finalist_disposition", lambda *args, **kwargs: (False, ""))
     manifest = {
         "run_id": "r1",
-        "route": "emerging",
+        "route": "traditional",
         "status": "COMPLETE",
         "stages": {
-            "stage6_exact": {"status": "PASS"},
-            "intitle_observation": {"status": "PASS"},
-            "kgr_intitle": {"status": "PASS"},
-            "serp_review": {"status": "PASS"},
-            "finalist_trend": {"status": "PASS"},
+            "discovery_autocomplete": {"status": "PASS"},
+            "discovery_handoff": {"status": "PASS"},
+        },
+        "candidates": {
+            "candidate-1": {
+                "stage6_exact": {"status": "PASS"},
+                "intitle_observation": {"status": "PASS"},
+                "kgr_intitle": {"status": "PASS"},
+                "serp_review": {"status": "PASS"},
+            }
         },
     }
-    payload = {"hook_event_name": "Stop", "stop_hook_active": False, "last_assistant_message": "done"}
-    assert hook.stop(payload, manifest) == 0
+    valid, reason = hook._verify_completion_requirements(manifest)
+    assert valid is True, reason

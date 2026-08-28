@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production-stage contract validator with optional collector-evidence binding."""
+"""Production-stage contract validator with collector-evidence and external broker binding."""
 
 import argparse
 import hashlib
@@ -7,10 +7,9 @@ import importlib.util
 import json
 import math
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-
-from datetime import datetime, timezone
 
 NOT_APPLICABLE = "not_applicable"
 UNKNOWN = "unknown"
@@ -238,7 +237,12 @@ def _write_validation_receipt(report_path, report, candidate_id=None):
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     report_sha = _sha256(report_path)
     issued_at = report.get("generated_at") or datetime.now(timezone.utc).isoformat()
-    issuance = _binding()._mint_issuance_proof("stage_validator", report["stage"], report_sha, str(issued_at))
+    issuance = _binding()._mint_issuance_proof(
+        "stage_validator",
+        report["stage"],
+        report_sha,
+        str(issued_at),
+    )
     receipt = {
         "schema": "seo-stage-validation/v1",
         "stage": report["stage"],
@@ -279,14 +283,31 @@ def main():
         "complete": complete,
         "blocked": blocked,
     }
+
+    issuance_error = None
     if args.report:
         report_path = Path(args.report)
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        if args.production:
-            _write_validation_receipt(report_path, report, args.candidate_id)
+        if args.production and not blocked:
+            try:
+                _write_validation_receipt(report_path, report, args.candidate_id)
+            except Exception as exc:
+                issuance_error = str(exc)
+                if not report_path.is_file():
+                    report_path.write_text(
+                        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
         else:
-            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            report_path.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    if issuance_error:
+        print(f"BLOCKED: {issuance_error}", file=sys.stderr)
+        return 2
     if blocked:
         for item in blocked:
             print(" | ".join(item["errors"]), file=sys.stderr)
