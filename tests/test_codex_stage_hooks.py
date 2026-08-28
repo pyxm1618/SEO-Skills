@@ -104,17 +104,47 @@ def test_stop_rejects_bare_blocked_run(tmp_path):
     assert "BLOCKED" in result.stderr
 
 
-def test_stop_allows_structured_canonical_blocker():
+def test_stop_allows_structured_canonical_blocker_with_matching_stage_record():
     hook = load_hook("blocked_run_structured")
+    reason = "Semrush relay unavailable after collector attempt"
+    manifest = {
+        "run_id": "r1",
+        "route": "traditional",
+        "status": "BLOCKED",
+        "blocked_stage": "stage6_exact",
+        "blocked_reason": reason,
+        "stages": {"stage6_exact": {"status": "BLOCKED", "blocked_reason": reason}},
+    }
+    payload = {"hook_event_name": "Stop", "stop_hook_active": False}
+    assert hook.stop(payload, manifest) == 0
+
+
+def test_stop_rejects_structured_blocker_without_matching_stage_record():
+    hook = load_hook("blocked_run_missing_record")
     manifest = {
         "run_id": "r1",
         "route": "traditional",
         "status": "BLOCKED",
         "blocked_stage": "stage6_exact",
         "blocked_reason": "Semrush relay unavailable after collector attempt",
+        "stages": {},
     }
     payload = {"hook_event_name": "Stop", "stop_hook_active": False}
-    assert hook.stop(payload, manifest) == 0
+    assert hook.stop(payload, manifest) == 2
+
+
+def test_stop_rejects_run_blocker_reason_that_differs_from_stage_record():
+    hook = load_hook("blocked_run_reason_mismatch")
+    manifest = {
+        "run_id": "r1",
+        "route": "traditional",
+        "status": "BLOCKED",
+        "blocked_stage": "stage6_exact",
+        "blocked_reason": "invented reason",
+        "stages": {"stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay unavailable"}},
+    }
+    payload = {"hook_event_name": "Stop", "stop_hook_active": False}
+    assert hook.stop(payload, manifest) == 2
 
 
 def test_stop_rejects_noncanonical_blocker_stage():
@@ -138,6 +168,7 @@ def test_stop_rejects_blocker_without_reason():
         "status": "BLOCKED",
         "blocked_stage": "stage6_exact",
         "blocked_reason": "",
+        "stages": {"stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay unavailable"}},
     }
     payload = {"hook_event_name": "Stop", "stop_hook_active": False}
     assert hook.stop(payload, manifest) == 2
@@ -151,6 +182,7 @@ def test_stop_rejects_blocker_with_unknown_route():
         "status": "BLOCKED",
         "blocked_stage": "stage6_exact",
         "blocked_reason": "relay unavailable",
+        "stages": {"stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay unavailable"}},
     }
     payload = {"hook_event_name": "Stop", "stop_hook_active": False}
     assert hook.stop(payload, manifest) == 2
