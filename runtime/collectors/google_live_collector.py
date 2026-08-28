@@ -122,10 +122,13 @@ def intitle(context, keyword, market, evidence_dir):
     page.goto(f"https://www.google.com/search?q={quote_plus(query)}&gl={quote_plus(market)}", wait_until="domcontentloaded")
     assert_google(page)
     stats = page.locator("#result-stats")
-    text = stats.inner_text().strip() if stats.count() and stats.first.is_visible() else ""
+    # Google can keep #result-stats in the DOM while Playwright reports the node
+    # as not visible. The text is still part of the current loaded result page and
+    # is recorded together with screenshot + structured observation evidence.
+    text = stats.first.inner_text().strip() if stats.count() else ""
     numbers = re.findall(r"\d[\d,\.\s]*", text)
     if not numbers:
-        raise RuntimeError("Google visible intitle result count unavailable")
+        raise RuntimeError("Google intitle result count unavailable")
     digits = re.sub(r"\D", "", numbers[0])
     if not digits:
         raise RuntimeError("Google intitle result count could not be parsed")
@@ -153,16 +156,26 @@ def serp(context, keyword, market, evidence_dir):
     assert_google(page)
     rows = []
     seen = set()
-    for anchor in page.locator("#search a").all():
+    # Walk result headings first. Google has used both <a><h3> and <h3><a>
+    # shapes, so resolve either an ancestor link or a child link from each h3.
+    for h3 in page.locator("#search h3").all():
         try:
-            h3 = anchor.locator("h3")
-            if not h3.count() or not h3.first.is_visible():
+            if not h3.is_visible():
                 continue
+            anchor = h3.locator("xpath=ancestor::a[1]")
+            if not anchor.count():
+                anchor = h3.locator("a")
+            if not anchor.count():
+                continue
+            anchor = anchor.first
             url = anchor.get_attribute("href") or ""
             if not url.startswith("http") or url in seen:
                 continue
+            title = h3.inner_text().strip()
+            if not title:
+                continue
             seen.add(url)
-            rows.append({"rank": len(rows) + 1, "url": url, "title": h3.first.inner_text().strip()})
+            rows.append({"rank": len(rows) + 1, "url": url, "title": title})
             if len(rows) == 10:
                 break
         except Exception:
