@@ -1,0 +1,78 @@
+{
+  "AUTOMATED_TESTS.md": {
+    "sha256": "eb3720c95fd2b2611070a93b0840a302a566ece6b6c7f0f133c0e6efd4e403a2",
+    "bytes": 2245
+  },
+  "BROKER_LIVE.md": {
+    "sha256": "a0d951cfa07fc0e8de46e7c88bb9b4afd419f7d1ef72fa1d7c4faaa32eca7278",
+    "bytes": 1732
+  },
+  "CODEX_HOOK_LIVE.md": {
+    "sha256": "7290f8b44d6263e8c93bba2b49ae98da333cf54a3105e03b41a47d64b53461c6",
+    "bytes": 2137
+  },
+  "EMERGING_E2E.md": {
+    "sha256": "b544ae86af752a575045c20a0b787872e2637ec76d0045e9b320d747e33ca896",
+    "bytes": 1232
+  },
+  "FINAL_ACCEPTANCE_REPORT.md": {
+    "sha256": "ba1c3221ffcb6142a41e26211b6d225d10e249b23ac3b8163a76679bcf9d24bc",
+    "bytes": 4319
+  },
+  "GOOGLE_LIVE.md": {
+    "sha256": "fcfc121a9f2e03d1c947965044cd5596be530bb9c9ad99961392795b82f7f38f",
+    "bytes": 1884
+  },
+  "KGR_LIVE.md": {
+    "sha256": "c282fa053d683d8e0d74ba88404e120ba37f68ac3234267f97b5f4c9bde3a143",
+    "bytes": 1340
+  },
+  "P1_ATTACKS.md": {
+    "sha256": "65beb04320e05af785ea1103a5e6c7dc92ff387e46dfce65f1922bd87082866f",
+    "bytes": 4070
+  },
+  "SEMRUSH_LIVE.md": {
+    "sha256": "f5a1c8b5845afedd416ec1a2d4ad97a80d6ace5182c8152d5ab8474b28fd438b",
+    "bytes": 1531
+  },
+  "STATIC_AUDIT.md": {
+    "sha256": "69dac376c65c6ab05ff058117a2cbf07aa0eb7cf667d0e37022a4ef2e4e490cc",
+    "bytes": 6407
+  },
+  "TARGET_AND_ENVIRONMENT.md": {
+    "sha256": "8558993414fd456e6142af5cc117ad377f275f75b6e1c1b1a4be12d6d17ba364",
+    "bytes": 1450
+  },
+  "TRADITIONAL_E2E.md": {
+    "sha256": "2ccc71860d9a4883f43658fe11ad590bbcbf627c23ba89f51e1f21e140f08f56",
+    "bytes": 1679
+  },
+  "logs/emerging-tests.log": {
+    "sha256": "fda8aa8d99d59301cdedb81a033ec31bd1cdbae87884b091613ed35eefeae5d9",
+    "bytes": 99
+  },
+  "logs/full-tests.log": {
+    "sha256": "47b23376bd5d6fd15f502a288eaa02df5d4b90a05345670c40211d994edb8ea4",
+    "bytes": 260
+  },
+  "logs/p1_attacks.log": {
+    "sha256": "dec7e91ef6653568ec856cabc0b6741b079e94d3335b250a9e0cab39c122456c",
+    "bytes": 3136
+  },
+  "logs/pytest-verbose.log": {
+    "sha256": "5eb2fc3f17c2ca6dff5fa690931daf2049f0b2174dc43b85cc8786301ed29c68",
+    "bytes": 23149
+  },
+  "logs/root-tests.log": {
+    "sha256": "a9b1d5a6a6233273948e645884c47b82b96e82eacc84530910d7dd1a67a27297",
+    "bytes": 99
+  },
+  "logs/selection-tests.log": {
+    "sha256": "a12c274ccab8ba8da72c9e6826862df1aadc014ae633c88568e147d1cbb0c180",
+    "bytes": 99
+  },
+  "p1_attack_runner.py": {
+    "sha256": "69e0f2167553cdf8fa856b2aa50ea83cf0432c6b2fd6c1b15edb88d85531b644",
+    "bytes": 24495
+  }
+}

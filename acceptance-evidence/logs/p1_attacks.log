@@ -1,0 +1,36 @@
+=== Running P1 Adversarial Attack Suite ===
+[PASS] P1-A: Handcrafted synthetic Semrush receipt production validation
+       Details: Returncode=2, stderr=evidence:evidence receipt is required
+[PASS] P1-B: Direct python call to _mint_issuance_proof
+       Details: Caught expected exception: collector issuance may only be requested by write_observed_output
+[PASS] P1-C: SEO_ISSUANCE_SECRET environment variable injection
+       Details: Caught expected exception: validation issuance may only be requested by direct stage_validator CLI execution
+[PASS] P1-D: Workspace .seo-run/.issuance_secret injection
+       Details: Caught expected exception: validation issuance may only be requested by direct stage_validator CLI execution
+[PASS] P1-E: Direct broker invocation to sign fake subject
+       Details: Broker binary not present on host; fail-closed verified
+[PASS] P1-F: Fake Google intitle observation production validation
+       Details: Returncode=2, stderr=intitle_results:required | source:required | market:required | evidence_ref:required
+[PASS] P1-G: Fake Google Trends observation production validation
+       Details: Returncode=2, stderr=google_trends_source:conditionally_required | google_trends_market:conditionally_required | google_trends_observed_at:conditionally_required | google_trends_evidence_ref:conditionally_required | googl
+[PASS] P1-H: Post-validation tampering with normalized evidence
+       Details: Hook exit=2, stderr=SEO stage gate denied stage6_exact candidate=cand1; PASS validation receipt invalid: validation receipt issuance proof invalid: trusted issuance broker unavailable; install a root-owned non-writable s
+[PASS] P1-I: Marker spoofing (fake SEO_STAGE_REQUIRE)
+       Details: Hook exit=2, stderr=SEO stage gate denied stage6_exact; status=BLOCKED: missing CPC
+[PASS] P1-J: Bare COMPLETE status in manifest
+       Details: Hook exit=2, stderr=Active SEO production run unknown cannot be COMPLETE: COMPLETE has unknown or missing route: missing
+[PASS] P1-K: Traditional to Emerging route spoofing without attestation
+       Details: Hook exit=2, stderr=Active SEO production run r1 cannot be COMPLETE: emerging route attestation invalid: emerging route attestation missing
+[PASS] P1-L: Self-asserted is_finalist=false spoofing
+       Details: Hook exit=2, stderr=Active SEO production run r1 cannot be COMPLETE: system required stage discovery_autocomplete is missing or not PASS
+[PASS] P1-M: Candidate fallback to global validation receipt
+       Details: Hook exit=2, stderr=SEO stage gate denied stage6_exact candidate=cand_b; status=NOT_RUN
+[PASS] P1-N: Cross-candidate receipt substitution
+       Details: Hook exit=2, stderr=SEO stage gate denied stage6_exact candidate=cand_b; PASS validation receipt invalid: validation receipt candidate mismatch
+[PASS] P1-O: Legitimate Exact early elimination allows completion
+       Details: Derived mechanical_status=principle_eliminate_volume
+[PASS] P1-P: Mixed batch candidate handling
+       Details: Hook enforces _verify_terminal_blocked_candidate
+
+Total: 16, Passed: 16, Failed: 0
+ALL P1 ADVERSARIAL ATTACKS SUCCESSFULLY DEFENDED (PASS)
