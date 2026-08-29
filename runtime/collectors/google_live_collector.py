@@ -13,7 +13,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus, urljoin, urlparse
 
 BINDING_PATH = Path(__file__).resolve().parents[1] / "evidence_binding.py"
 
@@ -48,9 +48,15 @@ def connect():
     return pw, browser, browser.contexts[0]
 
 
+def _google_url(value):
+    parsed = urlparse(str(value or ""))
+    return parsed.scheme in {"http", "https"} and parsed.hostname in {"google.com", "www.google.com"}
+
+
 def assert_google(page):
-    host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
-    if not host.endswith("google.com"):
+    parsed = urlparse(page.url)
+    host = (parsed.hostname or "").lower()
+    if not _google_url(page.url):
         raise RuntimeError(f"wrong Google origin: {host}")
     text = page.locator("body").inner_text(timeout=5000).lower()
     if "unusual traffic" in text or "captcha" in text:
@@ -125,6 +131,8 @@ def intitle(context, keyword, market, evidence_dir):
     # Google can keep #result-stats in the DOM while Playwright reports the node
     # as not visible. The text is still part of the current loaded result page and
     # is recorded together with screenshot + structured observation evidence.
+    if not stats.count():
+        page.wait_for_selector("#result-stats", state="attached", timeout=10000)
     text = stats.first.inner_text().strip() if stats.count() else ""
     numbers = re.findall(r"\d[\d,\.\s]*", text)
     if not numbers:
@@ -150,15 +158,15 @@ def intitle(context, keyword, market, evidence_dir):
     }
 
 
-def serp(context, keyword, market, evidence_dir):
-    page = context.new_page()
-    page.goto(f"https://www.google.com/search?q={quote_plus(keyword)}&gl={quote_plus(market)}&num=10", wait_until="domcontentloaded")
-    assert_google(page)
+def _organic_rows(page, seen):
     rows = []
-    seen = set()
+    try:
+        headings = page.locator("#search h3").all()
+    except Exception:
+        return rows
     # Walk result headings first. Google has used both <a><h3> and <h3><a>
     # shapes, so resolve either an ancestor link or a child link from each h3.
-    for h3 in page.locator("#search h3").all():
+    for h3 in headings:
         try:
             if not h3.is_visible():
                 continue
@@ -168,34 +176,137 @@ def serp(context, keyword, market, evidence_dir):
             if not anchor.count():
                 continue
             anchor = anchor.first
-            url = anchor.get_attribute("href") or ""
-            if not url.startswith("http") or url in seen:
+            url = _resolve_result_url(page, anchor.get_attribute("href") or "")
+            if not url or url in seen:
                 continue
             title = h3.inner_text().strip()
             if not title:
                 continue
             seen.add(url)
-            rows.append({"rank": len(rows) + 1, "url": url, "title": title})
-            if len(rows) == 10:
-                break
+            rows.append({"url": url, "title": title})
         except Exception:
             continue
+    return rows
+
+
+def _google_or_http_url(value):
+    parsed = urlparse(str(value or ""))
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _resolve_result_url(page, href):
+    if _google_or_http_url(href):
+        return href
+    resolved = urljoin(page.url, href)
+    if not _google_url(resolved):
+        return ""
+    request_context = getattr(getattr(page, "context", None), "request", None)
+    if request_context is None:
+        return ""
+    try:
+        response = request_context.get(resolved, timeout=10000, fail_on_status_code=False)
+        try:
+            final_url = response.url
+        finally:
+            response.dispose()
+    except Exception:
+        return ""
+    if not _google_or_http_url(final_url) or _google_url(final_url):
+        return ""
+    return final_url
+
+
+def _wait_for_serp_headings(page):
+    headings = page.locator("#search h3")
+    if not headings.all():
+        page.wait_for_selector("#search h3", state="attached", timeout=10000)
+
+
+def _next_page_url(page):
+    selectors = ("a#pnnext", "a[aria-label='Next']", "a[aria-label*='Next']", "#search a", "a")
+    for selector in selectors:
+        try:
+            anchors = page.locator(selector).all()
+        except Exception:
+            continue
+        for anchor in anchors:
+            try:
+                if not anchor.is_visible():
+                    continue
+                href = anchor.get_attribute("href") or ""
+                if not href:
+                    continue
+                label = " ".join(
+                    filter(
+                        None,
+                        [
+                            str(anchor.get_attribute("aria-label") or "").strip(),
+                            str(anchor.inner_text() or "").strip(),
+                        ],
+                    )
+                ).casefold()
+                if selector not in {"a#pnnext", "a[aria-label='Next']", "a[aria-label*='Next']"} and "next" not in label and "下一页" not in label:
+                    continue
+                next_url = urljoin(page.url, href)
+                if not _google_url(next_url):
+                    raise RuntimeError(f"Google next page link leaves google.com: {next_url}")
+                return next_url
+            except RuntimeError:
+                raise
+            except Exception:
+                continue
+    return None
+
+
+def serp(context, keyword, market, evidence_dir):
+    page = context.new_page()
+    page.goto(f"https://www.google.com/search?q={quote_plus(keyword)}&gl={quote_plus(market)}&num=10", wait_until="domcontentloaded")
+    assert_google(page)
+    _wait_for_serp_headings(page)
+    rows = []
+    seen = set()
+    page_urls = [page.url]
+    first_page_screenshot = screenshot(
+        page, evidence_dir, f"serp-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png"
+    )
+    max_pages = 5
+    while len(rows) < 10 and len(page_urls) <= max_pages:
+        for item in _organic_rows(page, seen):
+            rows.append({"rank": len(rows) + 1, **item})
+            if len(rows) == 10:
+                break
+        if len(rows) == 10:
+            break
+        next_url = _next_page_url(page)
+        if not next_url or next_url in page_urls:
+            break
+        page.goto(next_url, wait_until="domcontentloaded")
+        assert_google(page)
+        _wait_for_serp_headings(page)
+        page_urls.append(page.url)
     if len(rows) < 10:
         raise RuntimeError(f"Google real SERP collector found only {len(rows)} organic results; top 10 contract not met")
     observed_at = now()
-    evidence = screenshot(page, evidence_dir, f"serp-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png")
     observation = evidence_json(
         evidence_dir,
         f"serp-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.json",
-        {"page_url": page.url, "keyword": keyword, "market": market, "observed_at": observed_at, "results": rows},
+        {
+            "page_url": page_urls[-1],
+            "page_urls": page_urls,
+            "keyword": keyword,
+            "market": market,
+            "observed_at": observed_at,
+            "results": rows,
+        },
     )
     return {
         "keyword": keyword,
         "source": "Google",
         "market": market,
         "observed_at": observed_at,
-        "evidence_ref": evidence,
+        "evidence_ref": first_page_screenshot,
         "observation_ref": observation,
+        "page_urls": page_urls,
         "results": rows,
     }
 

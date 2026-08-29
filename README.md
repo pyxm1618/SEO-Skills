@@ -59,6 +59,18 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 - 当前 Semrush acquisition 只允许项目 `sem.3ue.com` authenticated same-origin relay；失败时不切换 official API、Ahrefs 或其他 provider。
 - Google Autocomplete、intitle、SERP、Google Trends 必须是当前真实 Google evidence；拿不到就 BLOCKED。
 
+## 真实采集浏览器
+
+需要真实 Google 与 `sem.3ue.com` 采集时，启动项目专用的可见 Chrome：
+
+```bash
+eval "$(python3 runtime/start_live_browser.py --port 9223)"
+```
+
+它只监听 `127.0.0.1`，使用持久目录 `.seo-run/browser-profile/`，不使用 `--headless`，也不会读取、复制或修改正常 Chrome 的 profile。目标端口被未知进程占用时会直接停止，不会抢占或杀进程。如果专用窗口显示 Semrush 登录页，请只在该窗口内完成登录，不要把密码、验证码、Cookie 或 Token 发给 Agent；登录完成后再运行 collector。
+
+通常只需登录一次。锁屏不会清除登录；重启电脑后要重新启动专用 Chrome，但通常无需重新登录。正在采集时不要让机器睡眠。会话过期、主动退出、删除 `.seo-run/browser-profile/` 或清除浏览数据后，需要重新登录。
+
 ## 生产运行最短闭环
 
 生产执行的第一步必须创建 active manifest；合成测试请把 `SEO_RUN_MANIFEST` 指向 `mktemp` 目录，禁止触碰已有 `.seo-run/active.json`：

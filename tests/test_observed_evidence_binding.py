@@ -428,3 +428,96 @@ def test_forged_observed_receipt_leads_to_hook_deny(tmp_path):
     hook_proc = subprocess.run([sys.executable, str(HOOK), "pre"], input=json.dumps(payload), text=True, capture_output=True, env=env)
     assert hook_proc.returncode == 2
     assert "validation receipt" in hook_proc.stderr.lower()
+
+
+def _write_serp_receipt_fixture(tmp_path, results=None):
+    png = tmp_path / "serp.png"
+    png.write_bytes(_valid_png_bytes())
+    page_urls = [
+        "https://www.google.com/search?q=wedding+calculator&num=10",
+        "https://www.google.com/search?q=wedding+calculator&start=10",
+    ]
+    observed_at = "2026-08-27T00:00:00Z"
+    results = results or [
+        {"rank": index, "url": f"https://result{index}.example/", "title": f"Result {index}"}
+        for index in range(1, 11)
+    ]
+    obs = tmp_path / "serp-observation.json"
+    obs.write_text(
+        json.dumps(
+            {
+                "page_url": page_urls[-1],
+                "page_urls": page_urls,
+                "keyword": "wedding calculator",
+                "market": "US",
+                "observed_at": observed_at,
+                "results": results,
+            }
+        ),
+        encoding="utf-8",
+    )
+    norm_path = tmp_path / "serp.json"
+    receipt_path = tmp_path / "serp.receipt.json"
+    norm_path.write_text(
+        json.dumps(
+            {
+                "keyword": "wedding calculator",
+                "source": "Google",
+                "market": "US",
+                "observed_at": observed_at,
+                "evidence_ref": str(png),
+                "observation_ref": str(obs),
+                "page_urls": page_urls,
+                "results": results,
+                "evidence_receipt_ref": str(receipt_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema": "seo-observed-evidence/v2",
+                "collector": "google_live_collector",
+                "collector_source_sha256": hashlib.sha256(
+                    (ROOT / "runtime" / "collectors" / "google_live_collector.py").read_bytes()
+                ).hexdigest(),
+                "evidence_type": "google_serp",
+                "normalized_ref": str(norm_path),
+                "normalized_sha256": hashlib.sha256(norm_path.read_bytes()).hexdigest(),
+                "artifacts": [
+                    {"role": "screenshot", "path": str(png), "sha256": hashlib.sha256(png.read_bytes()).hexdigest()},
+                    {"role": "structured_observation", "path": str(obs), "sha256": hashlib.sha256(obs.read_bytes()).hexdigest()},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return norm_path, receipt_path
+
+
+def test_google_serp_production_binding_requires_ten_contiguous_unique_http_results(tmp_path):
+    invalid_results = [
+        {"rank": index, "url": f"https://result{index}.example/", "title": f"Result {index}"}
+        for index in range(1, 10)
+    ] + [{"rank": 9, "url": "https://result10.example/", "title": "Result 10"}]
+    norm_path, _ = _write_serp_receipt_fixture(tmp_path, invalid_results)
+
+    proc, report_path = _run_production_validation(tmp_path, "serp_review", norm_path)
+
+    assert proc.returncode == 2
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert any("rank" in error.lower() or "ten" in error.lower() for error in report["blocked"][0]["errors"])
+
+
+def test_tampered_google_serp_receipt_fails_production_validation(tmp_path):
+    norm_path, receipt_path = _write_serp_receipt_fixture(tmp_path)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["normalized_sha256"] = "0" * 64
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    proc, report_path = _run_production_validation(tmp_path, "serp_review", norm_path)
+
+    assert proc.returncode == 2
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert "evidence" in report["blocked"][0]["errors"][0].lower()
