@@ -76,9 +76,27 @@ runtime/
   kgr_evidence_merge.py
 .codex/
   hooks.json
+.claude/
+  settings.json
+  skills/          # 指向 skills/ 的软链，供 Claude Code 自动发现
 ```
 
 唯一 canonical `root-library.csv` 位于 `keyword-root-library` 中，其他 Skill 只通过 handoff / `root_id` 使用它，不复制该资产。
+
+## 在 Claude Code 中启用
+
+Skill 与 runtime 是宿主无关的，但**门禁配置不通用**：Codex 读 `.codex/hooks.json`，Claude Code 只读 `.claude/settings.json`。两份必须保持一致，`tests/test_claude_hooks_config.py` 守住这一点。
+
+仓库已内置 `.claude/`，clone 后无需额外配置：
+
+- `.claude/settings.json` 注册三个门禁事件：`PreToolUse`（拦截前置 stage 未满足的受保护命令）、`Stop`、`SubagentStop`。
+- `.claude/skills/` 是指向 `skills/` 的软链，供 Claude Code 自动发现 5 个 Skill；canonical 资产仍只存在于 `skills/` 下。
+
+三点必须知道：
+
+1. **`SubagentStop` 不能省。** Claude Code 的 `Stop` 只在主代理结束时触发。若 SEO 流程跑在子代理里，缺了 `SubagentStop` 就会完全绕过完整性门禁——保护看起来在，实际没上电。
+2. **hooks 在会话启动时快照。** 首次 clone 或修改 `.claude/settings.json` 后需重启 Claude Code 会话，并在提示时确认信任这些 hook。未被信任的 hook 不会执行。
+3. **`.seo-run/active.json` 是运行期状态，不是配置。** 它存在且 `status=IN_PROGRESS` 时 `Stop` 门禁会拦截回合结束，这是设计意图。run 必须收敛到 `COMPLETE`，或收敛到带真实 blocker 的 `BLOCKED`；遗留的调试态 manifest 会拦住这个仓库里所有后续工作。
 
 ## 开发 / 验证
 
