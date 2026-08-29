@@ -31,14 +31,22 @@ The Stop/PreToolUse hook reloads the report and reruns production evidence valid
 
 Traditional runs require their verified discovery stages.
 
-An Emerging run may skip traditional discovery only when `route_handoff_ref` points to a structured output compatible with `emerging-keyword-monitor/scripts/route_candidates.py`. Every routed candidate must have exactly one confirmed `selection_handoff` with:
+An Emerging run may skip traditional discovery only when `emerging_pipeline_receipt_ref` points to a `seo-emerging-pipeline/v1` receipt produced by `runtime/emerging_pipeline.py`. The receipt binds:
+
+- the original observation input path and SHA256 plus the fixed `as_of` time;
+- the current `emerging_pipeline.py`, all four monitor scripts, and `references/thresholds.json` SHA256 values;
+- the validated, aggregated, classified, and routed output paths and SHA256 values.
+
+The Hook reloads every file, checks every hash, replays `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py` with the recorded `as_of`, and compares every saved JSON output with the replay. `route_handoff_ref` must point to that receipt's routed output. A bare routes JSON, even with a plausible handoff shape, is not an attestation.
+
+Every routed `selection_handoff` candidate must have exactly one manifest candidate with:
 
 - status `emerging` or `breakout`;
 - `root_relation=existing_root`;
 - a non-empty `root_id`;
 - matching candidate keyword.
 
-A bare `route=emerging` is insufficient.
+Only `net_new`, `breakout`, `emerging_variant`, and `unknown` are canonical `signal_type` values; a confirmed handoff must carry a non-`unknown` canonical value. A complete pipeline that honestly produces `no_handoff` is valid monitor evidence and must remain `no_handoff`; it does not require a fabricated candidate. A bare `route=emerging` or a direct `status=emerging` input is insufficient.
 
 ## Candidate lifecycle
 
@@ -48,6 +56,8 @@ Candidate-specific selection stages never fall back to global receipts. Every co
 - `intitle_observation`;
 - `kgr_intitle`;
 - `serp_review`.
+
+For `stage6_exact`, `intitle_observation`, `kgr_intitle`, `serp_review`, and `finalist_trend`, the production validator must be called with `--candidate-id <id>` and the protected command must contain the literal `SEO_CANDIDATE_ID=<id>`. The validator derives `candidate_keyword` from exactly one complete row and writes it to both the validation report and receipt. The Hook compares that normalized value with `manifest.candidates[<id>].keyword`; missing, duplicate, or mismatched rows fail closed. Global discovery receipts must not carry candidate identity.
 
 After verified Exact evidence, the existing evaluator remains authoritative for deterministic early elimination. Candidates with `principle_eliminate_volume`, `principle_eliminate_kd`, or `excluded_manual` stop there and are not forced through KGR/SERP.
 
@@ -86,6 +96,8 @@ The release acceptance set is:
 ### Codex Host acceptance
 
 Project-local hooks must be reviewed and trusted in Codex before the Host smoke test. The Host test must demonstrate automatic invocation rather than manually executing `runtime/codex_stage_hook.py`. It should be run from both the repository root and a repository subdirectory so relative working-directory assumptions cannot silently disable the gate.
+
+The Hook normalizes only a matching copy of Bash input, including backslash-newline continuations and repeated whitespace. The command passed to the tool is not changed. Single-line, multiline, `&&`, and directory-prefixed equivalent protected commands must resolve to the same prerequisite stage.
 
 ### Emerging acceptance semantics
 

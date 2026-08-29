@@ -69,7 +69,10 @@ def test_pretooluse_can_gate_one_candidate_without_blocking_others_mechanically(
     monkeypatch.setattr(
         hook,
         "_verify_validation_receipt",
-        lambda record, stage, candidate_id=None: ((candidate_id == "good"), "synthetic unit verifier"),
+        lambda record, stage, candidate_id=None, expected_keyword=None: (
+            (candidate_id == "good" and expected_keyword == "good keyword"),
+            "synthetic unit verifier",
+        ),
     )
     manifest = {
         "run_id": "r1",
@@ -77,8 +80,11 @@ def test_pretooluse_can_gate_one_candidate_without_blocking_others_mechanically(
         "status": "IN_PROGRESS",
         "stages": {},
         "candidates": {
-            "good": {"stage6_exact": {"status": "PASS"}},
-            "bad": {"stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay failed"}},
+            "good": {"keyword": "good keyword", "stage6_exact": {"status": "PASS"}},
+            "bad": {
+                "keyword": "bad keyword",
+                "stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay failed"},
+            },
         },
     }
     base = {"hook_event_name": "PreToolUse", "tool_name": "Bash"}

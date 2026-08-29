@@ -107,6 +107,7 @@ def test_complete_control_flow_allows_valid_candidate_lifecycle_when_verifiers_p
         },
         "candidates": {
             "candidate-1": {
+                "keyword": "candidate keyword",
                 "stage6_exact": {"status": "PASS"},
                 "intitle_observation": {"status": "PASS"},
                 "kgr_intitle": {"status": "PASS"},
