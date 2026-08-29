@@ -20,6 +20,21 @@ Read before execution:
 - `references/data-contracts.md`
 - `references/source-acquisition.md`
 
+## Production start
+
+Before the first discovery command, start the run manifest once and keep the
+same path in `SEO_RUN_MANIFEST` for the whole run:
+
+```bash
+export SEO_RUN_MANIFEST=.seo-run/active.json
+python3 runtime/start_seo_run.py --route traditional
+```
+
+The launcher creates a new `IN_PROGRESS` manifest and refuses to overwrite an
+existing run. Record global discovery results in `stages`; discovery stages
+remain global and must not carry `SEO_CANDIDATE_ID`. A normal code-review
+session that has not started a production run does not require this manifest.
+
 ## Mandatory Google acquisition
 
 For every required Seed, use the project Google live collector against a real Google Search page and capture the current visible autocomplete dropdown. A required Seed is blocked on network failure, CAPTCHA, unavailable/unconfirmed DOM, zero visible suggestions, or missing evidence.

@@ -59,6 +59,55 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 - 当前 Semrush acquisition 只允许项目 `sem.3ue.com` authenticated same-origin relay；失败时不切换 official API、Ahrefs 或其他 provider。
 - Google Autocomplete、intitle、SERP、Google Trends 必须是当前真实 Google evidence；拿不到就 BLOCKED。
 
+## 真实采集浏览器
+
+需要真实 Google 与 `sem.3ue.com` 采集时，启动项目专用的可见 Chrome：
+
+```bash
+eval "$(python3 runtime/start_live_browser.py --port 9223)"
+```
+
+它只监听 `127.0.0.1`，使用持久目录 `.seo-run/browser-profile/`，不使用 `--headless`，也不会读取、复制或修改正常 Chrome 的 profile。目标端口被未知进程占用时会直接停止，不会抢占或杀进程。如果专用窗口显示 Semrush 登录页，请只在该窗口内完成登录，不要把密码、验证码、Cookie 或 Token 发给 Agent；登录完成后再运行 collector。
+
+通常只需登录一次。锁屏不会清除登录；重启电脑后要重新启动专用 Chrome，但通常无需重新登录。正在采集时不要让机器睡眠。会话过期、主动退出、删除 `.seo-run/browser-profile/` 或清除浏览数据后，需要重新登录。
+
+## 生产运行最短闭环
+
+生产执行的第一步必须创建 active manifest；合成测试请把 `SEO_RUN_MANIFEST` 指向 `mktemp` 目录，禁止触碰已有 `.seo-run/active.json`：
+
+```bash
+export SEO_RUN_MANIFEST=.seo-run/active.json
+python3 runtime/start_seo_run.py --route traditional
+```
+
+启动器只创建 `run_id`、`route`、`status=IN_PROGRESS`、空的 `stages` 和空的 `candidates`，并拒绝覆盖已有运行。普通代码开发/审核会话没有启动 SEO production run 时，Stop Hook 仍可正常结束。
+
+传统路线先完成 global discovery，再建立候选。候选 ID 必须同时出现在 manifest、validator 参数和受保护命令的环境标记中；keyword 不接受第二个自由输入，而由唯一 `complete` row 派生：
+
+```bash
+python3 -c 'import json, os; from pathlib import Path; p=Path(os.environ["SEO_RUN_MANIFEST"]); m=json.loads(p.read_text()); m.setdefault("candidates", {})["cand_wedding_cost_calculator"]={"keyword":"wedding cost calculator"}; p.write_text(json.dumps(m, ensure_ascii=False, indent=2)+"\n")'
+SEO_CANDIDATE_ID=cand_wedding_cost_calculator python3 runtime/stage_validator.py \
+  --stage stage6_exact --candidate-id cand_wedding_cost_calculator --production \
+  --input .seo-run/evidence/exact-wedding-cost-calculator.json \
+  --report .seo-run/validation/cand-wedding-cost-calculator-exact.json
+```
+
+validator 成功后，把该 report 的 `validation_receipt_ref` 写入同一 candidate 的 stage 记录；intitle、KGR、SERP、Finalist Trends 继续使用同一个 literal `SEO_CANDIDATE_ID`。缺少 marker、ID 错配、keyword 错配或多于一条 complete row 都会被拒绝。外部证据不可用时记录真实 `BLOCKED`，不要用手写数据补齐。
+
+Emerging 路线也必须先启动 manifest，然后固定 `as_of` 完整执行四步并生成 receipt：
+
+```bash
+export SEO_RUN_MANIFEST=.seo-run/active.json
+python3 runtime/start_seo_run.py --route emerging
+python3 runtime/emerging_pipeline.py \
+  --input observations.json --as-of 2026-08-29T23:59:59Z \
+  --output-dir .seo-run/emerging/20260829T235959Z
+```
+
+将 receipt 的路径写入 `emerging_pipeline_receipt_ref`，将 `outputs.routed.path` 原样写入 `route_handoff_ref`；只有 pipeline 实际产出的 `selection_handoff` 才能在 manifest 中建立匹配的 `keyword`、`root_id`、`status` candidate。`no_handoff`、`watch`、`insufficient_evidence` 等真实结果必须如实保留，不得伪造 handoff。
+
+项目 `.codex/hooks.json` 需要在 Codex 中审阅并信任；配置变化后可能需要重新确认。普通 pytest/compileall 只能证明代码契约，不能代替真实 Host 自动触发的 PreToolUse/Stop 验收。
+
 ## 仓库结构
 
 ```text
@@ -73,6 +122,8 @@ runtime/
   stage_contracts.json
   stage_validator.py
   codex_stage_hook.py
+  start_seo_run.py
+  emerging_pipeline.py
   kgr_evidence_merge.py
 .codex/
   hooks.json

@@ -22,6 +22,35 @@ Read before execution:
 - `references/routing-rules.md` — downstream handoff rules.
 - `references/thresholds.json` — v1 temporal-shape thresholds only.
 
+## Production start and attested pipeline
+
+Start the Emerging run before collecting observations:
+
+```bash
+export SEO_RUN_MANIFEST=.seo-run/active.json
+python3 runtime/start_seo_run.py --route emerging
+```
+
+Run the four stages through the repository runner with one fixed `as_of`:
+
+```bash
+python3 runtime/emerging_pipeline.py \
+  --input observations.json --as-of 2026-08-29T23:59:59Z \
+  --output-dir .seo-run/emerging/20260829T235959Z
+```
+
+The runner writes validated, aggregated, classified, and routed outputs plus
+an `seo-emerging-pipeline/v1` receipt. Record its path as
+`emerging_pipeline_receipt_ref` and the receipt's `outputs.routed.path` as
+`route_handoff_ref` in the same manifest. The Hook checks current source
+hashes and deterministically replays all four stages. A real `no_handoff`,
+`watch`, or `insufficient_evidence` result stays that way; never hand-write a
+`selection_handoff` to force downstream work.
+
+The standalone router accepts a confirmed `emerging`/`breakout` state only
+when the input is a valid, error-free structured output from
+`classify_emergence.py`; it does not promote a hand-written status.
+
 ## Evidence Discipline
 
 `unknown != 0`. Missing values remain unknown; malformed values are invalid. Never invent Volume, KD, CPC, `intitle`, SERP facts, timestamps, first-seen dates, trend values, or growth.

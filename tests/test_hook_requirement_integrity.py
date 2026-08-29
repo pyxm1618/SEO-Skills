@@ -77,7 +77,7 @@ def test_traditional_route_only_autocomplete_and_exact_is_denied(monkeypatch):
             "discovery_handoff": {"status": "PASS"},
         },
         "candidates": {
-            "cand": {"stage6_exact": {"status": "PASS"}}
+            "cand": {"keyword": "candidate keyword", "stage6_exact": {"status": "PASS"}}
         },
     }
     monkeypatch.setattr(hook, "_verified_exact_disposition", lambda *args, **kwargs: ("do_candidate", ""))
@@ -117,6 +117,7 @@ def test_finalist_without_trends_is_denied(monkeypatch):
         },
         "candidates": {
             "cand_1": {
+                "keyword": "candidate keyword",
                 "stage6_exact": {"status": "PASS"},
                 "intitle_observation": {"status": "PASS"},
                 "kgr_intitle": {"status": "PASS"},

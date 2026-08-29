@@ -95,6 +95,7 @@ def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch
         },
         "candidates": {
             "cand_1": {
+                "keyword": "candidate keyword",
                 "is_finalist": False,
                 "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
                 "intitle_observation": {"status": "PASS", "validation_receipt_ref": "intitle"},
@@ -146,11 +147,13 @@ def test_verified_blocked_candidate_does_not_prevent_completed_batch(monkeypatch
         },
         "candidates": {
             "blocked": {
+                "keyword": "blocked keyword",
                 "terminal_status": "BLOCKED",
                 "blocked_stage": "stage6_exact",
                 "stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay unavailable"},
             },
             "good": {
+                "keyword": "good keyword",
                 "terminal_status": "COMPLETE",
                 "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
                 "intitle_observation": {"status": "PASS", "validation_receipt_ref": "intitle"},
@@ -179,7 +182,10 @@ def test_deterministic_exact_elimination_skips_kgr_and_serp(monkeypatch):
             "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
         },
         "candidates": {
-            "eliminated": {"stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"}}
+            "eliminated": {
+                "keyword": "eliminated keyword",
+                "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
+            }
         },
     }
     valid, reason = hook._verify_completion_requirements(manifest)

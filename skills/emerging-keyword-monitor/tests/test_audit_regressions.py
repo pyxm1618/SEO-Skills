@@ -379,6 +379,8 @@ def test_selection_handoff_preserves_metric_provenance(tmp_path):
             "status": "emerging",
             "signal_type": "net_new",
             "metric_status": "incomplete",
+            "classification_status": "valid",
+            "classification_errors": [],
             "metric_compatibility_status": "compatible",
             "kgr_compatibility_status": "incomplete",
             "metric_provenance": provenance,
