@@ -79,13 +79,27 @@ The release acceptance set is:
 3. Google Trends with real temporal evidence;
 4. authenticated `sem.3ue.com` Ideas and Exact relay collection, with no official API or fallback provider;
 5. KGR from the verified Exact + intitle pair;
-6. actual Codex Host `PreToolUse` and `Stop` invocation from the reviewed/trusted project `.codex/hooks.json`;
+6. actual Agent Host `PreToolUse` and `Stop` invocation from that host's reviewed/trusted project hook configuration, for **every** host the release covers;
 7. one Traditional workflow exercising a deterministic early-elimination candidate and the continuing-candidate gates as far as the external sources permit;
 8. one Emerging Monitor run using **real temporal observations** through `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py`.
 
-### Codex Host acceptance
+### Agent Host acceptance
 
-Project-local hooks must be reviewed and trusted in Codex before the Host smoke test. The Host test must demonstrate automatic invocation rather than manually executing `runtime/codex_stage_hook.py`. It should be run from both the repository root and a repository subdirectory so relative working-directory assumptions cannot silently disable the gate.
+These Skills are host-neutral; their hook wiring is not. Each host reads only its own configuration, so a host that was never wired runs the SEO method with the integrity gates **inert** — the protection appears present and enforces nothing. Host acceptance is therefore recorded **per host**, and a host without its own recorded Host acceptance is not a released host, however green the automated suite is.
+
+Known host configurations:
+
+- Claude Code — `.claude/settings.json` (`PreToolUse`, `Stop`, `SubagentStop`);
+- Codex — `.codex/hooks.json` (`PreToolUse`, `Stop`).
+
+For each host the release covers:
+
+- project-local hooks must be reviewed and trusted in that host before its smoke test;
+- the smoke test must demonstrate **automatic** invocation by the host, not a manual run of `runtime/codex_stage_hook.py`;
+- it must be exercised from both the repository root and a repository subdirectory, so relative working-directory assumptions cannot silently disable the gate;
+- every event through which that host could reach run completion must be gated. Claude Code's `Stop` does not fire for subagents, so `SubagentStop` is required there and is proven separately; a host with an equivalent delegation path needs the equivalent proof.
+
+A further host may be added only once its own hook configuration exists and its Host acceptance is recorded. Copying the Skills into a host that has no equivalent hook mechanism ships the SEO method without its execution-integrity guarantees; such a host may be documented as unsupported, but must not be presented as a released host.
 
 ### Emerging acceptance semantics
 
@@ -113,7 +127,7 @@ A release candidate may be recommended for merge when:
 - the repository-wide automated suite and compile checks pass;
 - P0 = 0 and P1 = 0;
 - Semrush relay-only policy and evidence provenance remain intact;
-- the actual Codex Host smoke passes;
+- Host acceptance passes for every host the release covers;
 - the real-data Emerging Monitor pipeline passes under the semantics above; and
 - any remaining Live source failure is only an `ACCEPTED_ENVIRONMENT_BLOCKER` meeting every condition above.
 
