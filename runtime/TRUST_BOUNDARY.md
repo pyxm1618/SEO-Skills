@@ -70,15 +70,51 @@ This preserves the run-level bypass repair without requiring an external OS sign
 
 ## Live acceptance requirement
 
-Automated tests prove contracts, hashes, replay behavior, lifecycle gates, and fail-closed control flow. Final acceptance must separately exercise the real host integrations:
+Automated tests prove contracts, hashes, replay behavior, lifecycle gates, and fail-closed control flow. Live acceptance separately exercises the real integrations without requiring external services or market conditions to behave deterministically.
+
+The release acceptance set is:
 
 1. Google Autocomplete in a real browser/CDP session;
-2. Google intitle and SERP with current screenshots/observations;
-3. Google Trends with current temporal evidence;
+2. Google intitle and SERP through the real Google collector;
+3. Google Trends with real temporal evidence;
 4. authenticated `sem.3ue.com` Ideas and Exact relay collection, with no official API or fallback provider;
 5. KGR from the verified Exact + intitle pair;
-6. actual Codex Host `PreToolUse` and `Stop` invocation from `.codex/hooks.json`;
-7. one Traditional end-to-end run;
-8. one Emerging end-to-end run using a real monitor `selection_handoff`.
+6. actual Codex Host `PreToolUse` and `Stop` invocation from the reviewed/trusted project `.codex/hooks.json`;
+7. one Traditional workflow exercising a deterministic early-elimination candidate and the continuing-candidate gates as far as the external sources permit;
+8. one Emerging Monitor run using **real temporal observations** through `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py`.
 
-If a required external source or host integration is unavailable, that Live item is `BLOCKED`, never synthetically promoted to PASS.
+### Codex Host acceptance
+
+Project-local hooks must be reviewed and trusted in Codex before the Host smoke test. The Host test must demonstrate automatic invocation rather than manually executing `runtime/codex_stage_hook.py`. It should be run from both the repository root and a repository subdirectory so relative working-directory assumptions cannot silently disable the gate.
+
+### Emerging acceptance semantics
+
+Live acceptance must not manufacture an `emerging` or `breakout` result just to force a `selection_handoff`.
+
+A real-data Emerging E2E is successful when real temporal observations pass through the complete Monitor pipeline and the resulting classification and route are consistent with the configured rules. Honest outcomes such as `watch`, `insufficient_evidence`, `monitor_only`, or `no_handoff` are valid Live outcomes when that is what the evidence supports. The positive `emerging/breakout -> selection_handoff` branch remains covered by deterministic regression tests and may additionally be demonstrated Live when the real evidence naturally produces such a candidate.
+
+### Accepted external-environment blocker
+
+A third-party source can block a Live request for reasons outside repository control, for example Google returning a CAPTCHA / `/sorry/` abnormal-traffic page. Such an event is never called `PASS`, but it may be recorded as `ACCEPTED_ENVIRONMENT_BLOCKER` for **release acceptance** when all of the following are true:
+
+- the real collector reached the intended external source and captured the blocker evidence;
+- the blocker is demonstrably external rather than a parser/contract bug;
+- no mock, synthetic data, official Semrush API, alternative SEO provider, or other fallback was used;
+- the collector and downstream workflow fail closed rather than fabricating or advancing with incomplete evidence;
+- targeted regression tests cover the relevant parser/extractor behavior; and
+- there is no open P0/P1 indicating that valid source data would be accepted incorrectly or that required gates can be bypassed.
+
+`ACCEPTED_ENVIRONMENT_BLOCKER` means the software correctly handled an unavailable external dependency. It does **not** turn the blocked observation into evidence and does not allow that individual production run to continue past the blocked stage.
+
+## Release decision
+
+A release candidate may be recommended for merge when:
+
+- the repository-wide automated suite and compile checks pass;
+- P0 = 0 and P1 = 0;
+- Semrush relay-only policy and evidence provenance remain intact;
+- the actual Codex Host smoke passes;
+- the real-data Emerging Monitor pipeline passes under the semantics above; and
+- any remaining Live source failure is only an `ACCEPTED_ENVIRONMENT_BLOCKER` meeting every condition above.
+
+A real code defect, unverifiable provenance, provider fallback, fabricated observation, missing Host enforcement, or open P0/P1 remains `DO NOT MERGE`.
