@@ -114,7 +114,7 @@ Known host configurations:
 For each host the release covers:
 
 - project-local hooks must be reviewed and trusted in that host before its smoke test;
-- the smoke test must demonstrate **automatic** invocation by the host, not a manual run of `runtime/codex_stage_hook.py`;
+- the smoke test must demonstrate **automatic** invocation by the host, not a manual run of `runtime/stage_hook.py`;
 - it must be exercised from both the repository root and a repository subdirectory, so relative working-directory assumptions cannot silently disable the gate;
 - every event through which that host could reach run completion must be gated. Claude Code's `Stop` does not fire for subagents, so `SubagentStop` is required there and is proven separately; a host with an equivalent delegation path needs the equivalent proof.
 

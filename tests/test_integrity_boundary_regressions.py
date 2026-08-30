@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BINDING = ROOT / "runtime" / "evidence_binding.py"
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 PIPELINE = ROOT / "runtime" / "emerging_pipeline.py"
 
 

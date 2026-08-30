@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 START = ROOT / "runtime" / "start_seo_run.py"
 VALIDATOR = ROOT / "runtime" / "stage_validator.py"
 PIPELINE = ROOT / "runtime" / "emerging_pipeline.py"

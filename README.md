@@ -126,7 +126,7 @@ runtime/
   discovery_coverage.py
   stage_contracts.json
   stage_validator.py
-  codex_stage_hook.py
+  stage_hook.py
   start_seo_run.py
   emerging_pipeline.py
   kgr_evidence_merge.py

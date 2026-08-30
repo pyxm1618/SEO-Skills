@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 runtime/codex_stage_hook.py pre",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 runtime/stage_hook.py pre",
             "timeout": 10,
             "statusMessage": "Checking SEO stage contract"
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 runtime/codex_stage_hook.py stop",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 runtime/stage_hook.py stop",
             "timeout": 10,
             "statusMessage": "Checking SEO run completeness"
           }

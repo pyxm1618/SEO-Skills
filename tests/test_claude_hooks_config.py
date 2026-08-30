@@ -24,7 +24,7 @@ def test_pretooluse_is_scoped_to_bash_and_runs_from_git_root():
     assert group.get("matcher") == "^Bash$"
     command = group["hooks"][0]["command"]
     assert command.startswith(ROOT_PREFIX)
-    assert command.endswith("python3 runtime/codex_stage_hook.py pre")
+    assert command.endswith("python3 runtime/stage_hook.py pre")
 
 
 def test_stop_and_subagent_stop_run_from_git_root():
@@ -32,7 +32,7 @@ def test_stop_and_subagent_stop_run_from_git_root():
     for event in ("Stop", "SubagentStop"):
         command = _command(hooks, event)
         assert command.startswith(ROOT_PREFIX), event
-        assert command.endswith("python3 runtime/codex_stage_hook.py stop"), event
+        assert command.endswith("python3 runtime/stage_hook.py stop"), event
 
 
 def test_subagent_stop_gate_is_present():
@@ -46,3 +46,19 @@ def test_claude_and_codex_hook_commands_do_not_drift():
     for event in ("PreToolUse", "Stop"):
         assert _command(claude, event) == _command(codex, event), event
     assert claude["PreToolUse"][0]["matcher"] == codex["PreToolUse"][0]["matcher"]
+
+
+def test_every_wired_hook_script_exists_on_disk():
+    # The gate is fail-closed, so a command pointing at a missing script makes
+    # every Bash call in that session fail, including the one needed to repair
+    # it. Renaming the hook without updating both configs is exactly that.
+    seen = set()
+    for hooks in (_claude(), _codex()):
+        for event, groups in hooks.items():
+            for group in groups:
+                for entry in group["hooks"]:
+                    command = entry["command"]
+                    script = command.split("python3 ", 1)[1].rsplit(" ", 1)[0]
+                    seen.add(script)
+                    assert (ROOT / script).is_file(), f"{event}: {script} is missing"
+    assert seen, "no hook commands were inspected"

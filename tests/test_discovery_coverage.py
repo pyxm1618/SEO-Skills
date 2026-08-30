@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COVERAGE = ROOT / "runtime" / "discovery_coverage.py"
 STAGE_VALIDATOR = ROOT / "runtime" / "stage_validator.py"
 CONTRACTS = ROOT / "runtime" / "stage_contracts.json"
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 GOOGLE_COLLECTOR = ROOT / "runtime" / "collectors" / "google_live_collector.py"
 
 
