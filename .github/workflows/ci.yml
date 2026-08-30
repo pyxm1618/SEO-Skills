@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # Not restricted to PRs targeting main: work lands through stacked PRs whose
+  # base is another feature branch, and those need CI before they are merged.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read

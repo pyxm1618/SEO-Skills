@@ -12,9 +12,9 @@ Observed evidence still has strict production requirements:
 - Semrush observations must come from the authenticated same-origin `sem.3ue.com` relay. Official Semrush API and alternative-provider fallback remain forbidden.
 - Collector receipts bind the expected collector name, the current collector source SHA256, normalized output SHA256, and the exact required artifact roles/hashes.
 - Verification replays Semrush normalization from the saved raw relay response and rechecks Google source URLs, observations, screenshots, and Trends timelines.
+- Traditional Discovery coverage is a separate ledger gate: it consumes a production-verified `discovery_input_manifest` for the Root/Natural Seeds original totals, Candidate inventory, and complete Candidate analysis, then reconciles required Seeds, Branch Seeds, configured competitor domains, and other mandatory sources without deleting blocked/unreviewed items. Google source PASS alone cannot satisfy Full Coverage.
 - Google Trends timeframe indexes are verified and retained as separate comparable series; the long (`5y`) series may support history/birth analysis, while medium and recent windows remain independent evidence.
 - A Google Related/Rising `Breakout` label is an observed source fact only. Canonical `breakout` remains an independent classifier result.
-- Traditional Discovery coverage is a separate ledger gate: it consumes a production-verified `discovery_input_manifest` for the Root/Natural Seeds original totals, Candidate inventory, and complete Candidate analysis, then reconciles required Seeds, Branch Seeds, configured competitor domains, and other mandatory sources without deleting blocked/unreviewed items. Google source PASS alone cannot satisfy Full Coverage.
 - A plain row containing fields such as `metric_source=Semrush` is never enough; production validation requires the complete evidence receipt and artifacts.
 
 These controls are intended to make the expected path deterministic, auditable, and fail-closed when real observations are unavailable.
