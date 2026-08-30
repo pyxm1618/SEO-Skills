@@ -40,6 +40,13 @@ SOURCE_EVIDENCE_TYPES = {
     "semrush_competitor_organic": "semrush_competitor_organic",
 }
 
+# Step 4 low-risk cleaning only. Opportunity judgement belongs to selection, so
+# there is deliberately no "low volume"/"too competitive" style exclusion here.
+EXCLUSION_RULE_CODES = frozenset(
+    {"brand_or_navigation", "semantic_drift", "non_target_language_or_market"}
+)
+VALID_ROW_DISPOSITIONS = frozenset({"kept", "dedupe_of", "excluded"})
+
 
 class CoverageContractError(ValueError):
     """Raised when a branch declaration cannot be made safely."""
@@ -180,6 +187,144 @@ def _validate_root_handoff_receipt(manifest):
     return issues
 
 
+def _validate_source_receipts(manifest, inventory_candidates, production, issue):
+    """Bind the manifest to its complete source-receipt set and reconcile every observed row.
+
+    The Candidate inventory is the denominator for the whole run, so it may not be
+    curated away before signing. Every row a bound receipt actually returned must be
+    accounted for exactly once: kept as a Candidate, recorded as a duplicate of a kept
+    Candidate, or excluded under a supported cleaning rule.
+    """
+
+    receipts = manifest.get("source_receipts")
+    if not isinstance(receipts, list) or not receipts:
+        issue("input_manifest.source_receipts:complete_receipt_set_required")
+        return
+
+    candidates_by_id = {
+        _text(candidate.get("candidate_id")): candidate
+        for candidate in inventory_candidates
+        if isinstance(candidate, dict) and _text(candidate.get("candidate_id"))
+    }
+
+    receipt_refs = []
+    normalized_by_ref = {}
+    for index, record in enumerate(receipts):
+        label = f"input_manifest.source_receipts[{index}]"
+        if not isinstance(record, dict):
+            issue(f"{label}:must_be_object")
+            continue
+        evidence_type = _text(record.get("evidence_type"))
+        ref = _text(record.get("evidence_receipt_ref"))
+        if evidence_type not in SOURCE_EVIDENCE_TYPES:
+            issue(f"{label}.evidence_type:must_be_real_observed_source")
+            continue
+        if not ref:
+            issue(f"{label}.evidence_receipt_ref:required")
+            continue
+        if ref in receipt_refs:
+            issue(f"{label}.evidence_receipt_ref:duplicate")
+            continue
+        receipt_refs.append(ref)
+        if evidence_type == "semrush_competitor_organic":
+            identity_field, identity = "competitor_domain", record.get("competitor_domain")
+        else:
+            identity_field, identity = "seed", record.get("seed")
+        if not _text(identity):
+            issue(f"{label}.{identity_field}:required")
+            continue
+        if production:
+            normalized = _verify_receipt(
+                ref, SOURCE_EVIDENCE_TYPES[evidence_type], identity_field, identity, label, issue
+            )
+            if normalized is not None:
+                normalized_by_ref[ref] = (evidence_type, normalized)
+
+    for index, candidate in enumerate(inventory_candidates):
+        if not isinstance(candidate, dict):
+            continue
+        ref = _candidate_receipt_ref(candidate)
+        if ref and ref not in receipt_refs:
+            issue(
+                f"input_manifest.candidate_inventory.candidates[{index}]"
+                ".evidence_receipt_ref:not_in_source_receipts"
+            )
+
+    if not production:
+        return
+
+    inventory = manifest.get("candidate_inventory")
+    row_ledger = inventory.get("row_ledger") if isinstance(inventory, dict) else None
+    if not isinstance(row_ledger, list):
+        issue("input_manifest.candidate_inventory:row_ledger_required_for_source_receipts")
+        return
+
+    ledger_by_ref = {}
+    for index, record in enumerate(row_ledger):
+        label = f"input_manifest.candidate_inventory.row_ledger[{index}]"
+        if not isinstance(record, dict):
+            issue(f"{label}:must_be_object")
+            continue
+        ref = _text(record.get("evidence_receipt_ref"))
+        if not ref:
+            issue(f"{label}.evidence_receipt_ref:required")
+        elif ref in ledger_by_ref:
+            issue(f"{label}.evidence_receipt_ref:duplicate")
+        else:
+            ledger_by_ref[ref] = record
+
+    if set(ledger_by_ref) != set(normalized_by_ref):
+        issue("input_manifest.candidate_inventory.row_ledger:must_cover_exact_source_receipt_set")
+
+    kept_candidate_ids = set()
+    for ref, (evidence_type, normalized) in normalized_by_ref.items():
+        record = ledger_by_ref.get(ref)
+        if record is None:
+            continue
+        label = f"input_manifest.candidate_inventory.row_ledger[{ref}]"
+        observed = _observed_keywords(normalized, SOURCE_EVIDENCE_TYPES[evidence_type])
+        rows = record.get("rows")
+        if not isinstance(rows, list):
+            issue(f"{label}.rows:must_be_list")
+            continue
+        declared = [
+            _norm_keyword(row.get("keyword")) if isinstance(row, dict) else None for row in rows
+        ]
+        if declared != observed:
+            issue(f"{label}.rows:must_match_observed_source_rows_in_order")
+            continue
+        for position, row in enumerate(rows):
+            row_label = f"{label}.rows[{position}]"
+            disposition = _text(row.get("disposition"))
+            if disposition not in VALID_ROW_DISPOSITIONS:
+                issue(f"{row_label}.disposition:must_be_kept_dedupe_of_or_excluded")
+                continue
+            if disposition == "excluded":
+                if _text(row.get("rule_code")) not in EXCLUSION_RULE_CODES:
+                    issue(f"{row_label}.rule_code:must_be_supported_cleaning_rule")
+                if not _text(row.get("reason")):
+                    issue(f"{row_label}.reason:required")
+                continue
+            candidate = candidates_by_id.get(_text(row.get("candidate_id")))
+            if candidate is None:
+                issue(f"{row_label}.candidate_id:must_resolve_to_inventory_candidate")
+                continue
+            # Recompute the duplicate relation rather than trusting the declaration.
+            if _norm_keyword(candidate.get("keyword")) != observed[position]:
+                issue(f"{row_label}.candidate_id:keyword_differs_from_observed_row")
+                continue
+            if disposition == "kept":
+                if _candidate_receipt_ref(candidate) != ref:
+                    issue(f"{row_label}.candidate_id:kept_candidate_must_cite_this_receipt")
+                elif _text(row.get("candidate_id")) in kept_candidate_ids:
+                    issue(f"{row_label}.candidate_id:kept_more_than_once")
+                else:
+                    kept_candidate_ids.add(_text(row.get("candidate_id")))
+
+    if set(candidates_by_id) - kept_candidate_ids:
+        issue("input_manifest.candidate_inventory:candidates_without_a_kept_source_row")
+
+
 def validate_input_manifest(manifest, production=False):
     """Validate the finite Root/Natural Seeds handoff consumed by Coverage."""
 
@@ -275,6 +420,8 @@ def validate_input_manifest(manifest, production=False):
                 issue(f"{label}.competitor_domain:required")
             if not receipt_ref:
                 issue(f"{label}.evidence_receipt_ref:required")
+
+    _validate_source_receipts(manifest, inventory_candidates, production, issue)
 
     candidate_analysis = manifest.get("candidate_analysis")
     if not isinstance(candidate_analysis, list):
@@ -517,6 +664,45 @@ def _validate_authoritative_inventory(manifest, ledger, required_seeds, observed
                 issue(f"{label}.branch_required:false_but_branch_record_present")
 
 
+def _validate_first_round_receipt_binding(manifest, required_seeds, competitor, issue):
+    """Every first-round acquisition receipt must be frozen into the input manifest.
+
+    Without this a whole source could pass Coverage on its own receipt while that
+    receipt was never listed in the manifest, so its observed rows would never be
+    reconciled against the Candidate inventory.
+    """
+
+    if not isinstance(manifest, dict):
+        return
+    receipts = manifest.get("source_receipts")
+    if not isinstance(receipts, list):
+        return
+    bound = {
+        _text(record.get("evidence_receipt_ref"))
+        for record in receipts
+        if isinstance(record, dict) and _text(record.get("evidence_receipt_ref"))
+    }
+    for index, item in enumerate(required_seeds):
+        if not isinstance(item, dict):
+            continue
+        for key in ("autocomplete", "semrush"):
+            record = item.get(key)
+            if not isinstance(record, dict) or _status(record) != PASS:
+                continue
+            ref = _receipt_ref(record)
+            if ref and ref not in bound:
+                issue(f"required_seed[{index}]:{key}:receipt_not_frozen_in_input_manifest")
+    if isinstance(competitor, dict) and competitor.get("configured") is True:
+        domains = competitor.get("domains")
+        if isinstance(domains, list):
+            for index, record in enumerate(domains):
+                if not isinstance(record, dict) or _status(record) != PASS:
+                    continue
+                ref = _receipt_ref(record)
+                if ref and ref not in bound:
+                    issue(f"competitor_sweep.domain[{index}]:receipt_not_frozen_in_input_manifest")
+
+
 def _check_acquisition(item, key, label, evidence_type, identity_field, identity, production, issue):
     record = item.get(key) if isinstance(item, dict) else None
     if not isinstance(record, dict):
@@ -706,6 +892,7 @@ def _analyze(ledger, production=False):
         issue(f"required_branch_seeds:branch_safety_limit_exceeded:{len(branches)}>{max_branch_seeds}")
 
     seen_branch_keys = set()
+    depth_by_seed = {seed_key: 0 for seed_key in root_seed_keys}
     branch_autocomplete_pass = 0
     branch_semrush_pass = 0
     for index, branch in enumerate(branches):
@@ -743,18 +930,18 @@ def _analyze(ledger, production=False):
             issue(f"{label}.branch_reason:required_analysis")
         if _text(branch.get("analysis_status")).casefold() != "required":
             issue(f"{label}.analysis_status:must_be_required")
-        if isinstance(depth, bool):
+        try:
+            declared_depth = _strict_positive_integer(depth)
+        except (TypeError, ValueError):
+            declared_depth = None
             issue(f"{label}.depth:must_be_positive_integer")
-        else:
-            try:
-                parsed_depth = int(depth)
-            except (TypeError, ValueError):
-                parsed_depth = 0
-                issue(f"{label}.depth:must_be_positive_integer")
-            if parsed_depth <= 0:
-                issue(f"{label}.depth:must_be_positive_integer")
-            elif parsed_depth > max_branch_depth:
-                issue(f"{label}.depth:branch_safety_limit_exceeded:{parsed_depth}>{max_branch_depth}")
+        # The visited parent chain, never the caller, decides the real depth.
+        parent_depth = depth_by_seed.get(parent_key)
+        effective_depth = declared_depth if parent_depth is None else parent_depth + 1
+        if declared_depth is not None and parent_depth is not None and declared_depth != effective_depth:
+            issue(f"{label}.depth:must_equal_parent_depth_plus_one:{declared_depth}!={effective_depth}")
+        if effective_depth is not None and effective_depth > max_branch_depth:
+            issue(f"{label}.depth:branch_safety_limit_exceeded:{effective_depth}>{max_branch_depth}")
         if candidate is not None:
             candidate_keyword = _text(candidate.get("keyword"))
             candidate_source = _text(candidate.get("source"))
@@ -772,6 +959,8 @@ def _analyze(ledger, production=False):
                 issue(f"{label}.parent_seed:provenance_mismatch_with_candidate_source_seed")
         if branch_is_new and parent_is_visited:
             seen_branch_keys.add(branch_key)
+            if effective_depth is not None:
+                depth_by_seed[branch_key] = effective_depth
         autocomplete_status = _check_acquisition(
             branch,
             "autocomplete",
@@ -873,6 +1062,8 @@ def _analyze(ledger, production=False):
                 f"competitor_sweep.status:mismatch:{_text(competitor.get('status')) or 'missing'}!={computed_competitor_status}"
             )
 
+    _validate_first_round_receipt_binding(authoritative_manifest, required_seeds, competitor, issue)
+
     _validate_authoritative_inventory(
         authoritative_manifest,
         ledger,
@@ -970,12 +1161,55 @@ def enrich_coverage(ledger):
     return enriched
 
 
+def validate_handoff_keywords(coverage_row, keywords):
+    """Require the handoff word list to be exactly the verified Coverage candidates.
+
+    Branch Seeds prove that a demand branch was really explored; the keywords they
+    observe belong to a later Discovery round with its own frozen manifest, not to
+    this handoff. So the handoff may neither invent a keyword nor drop one.
+    """
+
+    if not isinstance(coverage_row, dict):
+        return ["coverage_row:must_be_object"]
+    candidates = coverage_row.get("observed_candidates")
+    if not isinstance(candidates, list):
+        return ["coverage_row.observed_candidates:must_be_list"]
+    if not isinstance(keywords, list) or not keywords:
+        return ["keywords:complete_candidate_list_required"]
+
+    errors = []
+    expected = {
+        _text(candidate.get("candidate_id")): _candidate_fingerprint(candidate)
+        for candidate in candidates
+        if isinstance(candidate, dict) and _text(candidate.get("candidate_id"))
+    }
+    actual = {}
+    for index, item in enumerate(keywords):
+        label = f"keywords[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{label}:must_be_object")
+            continue
+        candidate_id = _text(item.get("candidate_id"))
+        if not candidate_id:
+            errors.append(f"{label}.candidate_id:required")
+        elif candidate_id in actual:
+            errors.append(f"{label}.candidate_id:duplicate")
+        else:
+            actual[candidate_id] = _candidate_fingerprint(item)
+    if set(actual) != set(expected):
+        errors.append("keywords:must_cover_exact_coverage_candidate_inventory")
+    for candidate_id in sorted(set(actual) & set(expected)):
+        if actual[candidate_id] != expected[candidate_id]:
+            errors.append(f"keywords[{candidate_id}]:differs_from_coverage_candidate")
+    return errors
+
+
 def add_required_branch_seed(
     ledger,
     originating_candidate_id,
     parent_seed,
     branch_reason,
-    depth=1,
+    depth=None,
     branch_seed=None,
 ):
     """Promote an existing observed candidate, never an agent-created string."""
@@ -1006,10 +1240,6 @@ def add_required_branch_seed(
         raise CoverageContractError("parent seed is required")
     if not _text(branch_reason):
         raise CoverageContractError("branch reason is required")
-    try:
-        parsed_depth = _strict_positive_integer(depth)
-    except (TypeError, ValueError) as exc:
-        raise CoverageContractError("branch depth must be a positive integer") from exc
 
     branches = ledger.setdefault("required_branch_seeds", [])
     if not isinstance(branches, list):
@@ -1023,8 +1253,6 @@ def add_required_branch_seed(
         )
     except (TypeError, ValueError) as exc:
         raise CoverageContractError("branch safety budget must be a positive integer") from exc
-    if parsed_depth > max_branch_depth:
-        raise CoverageContractError("branch depth exceeds the configured safety limit")
     if len(branches) >= max_branch_seeds:
         raise CoverageContractError("branch safety budget is exhausted")
     candidate_key = _norm_keyword(keyword)
@@ -1040,8 +1268,29 @@ def add_required_branch_seed(
     }
     if candidate_key in existing_keys or candidate_key in root_keys:
         raise CoverageContractError("branch seed would create a duplicate or cycle")
-    if _norm_keyword(parent_seed) not in root_keys | existing_keys:
+
+    # The visited parent chain, never the caller, decides the real depth.
+    depth_by_seed = {key: 0 for key in root_keys}
+    for item in branches:
+        if not isinstance(item, dict):
+            continue
+        try:
+            depth_by_seed[_norm_keyword(item.get("branch_seed"))] = _strict_positive_integer(item.get("depth"))
+        except (TypeError, ValueError) as exc:
+            raise CoverageContractError("existing branch ledger records an invalid depth") from exc
+    parent_depth = depth_by_seed.get(_norm_keyword(parent_seed))
+    if parent_depth is None:
         raise CoverageContractError("parent seed must already be visited")
+    parsed_depth = parent_depth + 1
+    if depth is not None:
+        try:
+            declared_depth = _strict_positive_integer(depth)
+        except (TypeError, ValueError) as exc:
+            raise CoverageContractError("branch depth must be a positive integer") from exc
+        if declared_depth != parsed_depth:
+            raise CoverageContractError("branch depth must equal parent depth plus one")
+    if parsed_depth > max_branch_depth:
+        raise CoverageContractError("branch depth exceeds the configured safety limit")
 
     branch = {
         "branch_seed": keyword,

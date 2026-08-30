@@ -10,7 +10,7 @@ Own the former `seo-keyword-selection` Steps 0–4 only: candidate-domain contex
 ## Boundaries
 
 - Upstream: `keyword-root-library` supplies roots.
-- Before Coverage, the Root/Natural Seeds producer must hand off one production-verified `discovery_input_manifest` containing the exact Seed plan, original Candidate inventory, and complete per-Candidate branch-analysis state. Coverage consumes that receipt; it does not accept a self-reduced replacement ledger.
+- Before Coverage, the Root/Natural Seeds producer must hand off one production-verified `discovery_input_manifest` containing the exact Seed plan, the complete first-round source-receipt set, a row ledger accounting for every observed row, the resulting Candidate inventory, and complete per-Candidate branch-analysis state. Coverage consumes that receipt; it does not accept a self-reduced replacement ledger.
 - Downstream: `seo-keyword-selection` starts at the former Step 5 / Ideas-stage recall.
 - This skill does not own Exact qualification, KGR, SERP upgrade, KDRoi, opportunity clustering, mapping, or the human final decision.
 - Confirmed `emerging`/`breakout` keywords do **not** come back through this skill; they hand directly to selection.
@@ -41,7 +41,7 @@ Competitor Organic Keywords are a domain/root-cluster coverage source, not a per
 
 Branch analysis may promote a keyword only from an already observed candidate. The ledger records the exact existing candidate, parent Seed, source, evidence receipt, analysis reason, and acquisition status. It may not turn an AI-created string into an observed Branch Seed. A required Branch Seed must run the same real Google Autocomplete and Semrush route as a required Seed.
 
-Expansion is by distinct demand branch, not by recursively re-expanding every keyword. The runtime rejects visited/cycle duplicates and enforces configurable depth and branch-count safety limits. Those limits protect execution; they are not SEO opportunity thresholds.
+Expansion is by distinct demand branch, not by recursively re-expanding every keyword. The runtime rejects visited/cycle duplicates, derives each Branch Seed's depth from its visited parent chain rather than from a declared value, and enforces configurable depth and branch-count safety limits. Those limits protect execution; they are not SEO opportunity thresholds.
 
 ## Discovery Coverage Contract
 
@@ -53,7 +53,7 @@ The final `discovery_coverage` record is the single Full Discovery coverage gate
 - competitor configuration/status and other mandatory-source statuses;
 - explicit blocked/unreviewed reasons and `formal_handoff_allowed`.
 
-The ledger must include the verified upstream input manifest, `source_seed` on every observed Candidate, and one analysis record for every authoritative Candidate. The current required Seed list and observed Candidate list must match the manifest's original totals and item identities exactly. A Candidate marked `branch_required=true` in the authoritative analysis must have exactly one Branch record; a `false` decision cannot be used to hide a missing Branch analysis. Every required item remains in the ledger when it is `BLOCKED`, `NOT_RUN`, or `UNKNOWN`; counts may not be shrunk by deleting failures. Full coverage is `PASS` only when every required Seed has Google and Semrush PASS, every required Branch Seed has both PASS, every configured competitor domain passes, and all other mandatory sources have a supported evidence type plus a verified receipt in production. Only then may a `discovery_handoff` be issued and passed to `seo-keyword-selection`.
+The ledger must include the verified upstream input manifest, `source_seed` on every observed Candidate, and one analysis record for every authoritative Candidate. The current required Seed list and observed Candidate list must match the manifest's original totals and item identities exactly. The manifest itself is bound to its complete source-receipt set: every row those receipts returned is accounted for as kept, an explicit duplicate, or a rule-coded exclusion, so the Candidate denominator cannot be curated down before signing. A Candidate marked `branch_required=true` in the authoritative analysis must have exactly one Branch record; a `false` decision cannot be used to hide a missing Branch analysis. Every required item remains in the ledger when it is `BLOCKED`, `NOT_RUN`, or `UNKNOWN`; counts may not be shrunk by deleting failures. Full coverage is `PASS` only when every required Seed has Google and Semrush PASS, every required Branch Seed has both PASS, every configured competitor domain passes, and all other mandatory sources have a supported evidence type plus a verified receipt in production. Only then may a `discovery_handoff` be issued and passed to `seo-keyword-selection`.
 
 Historical captured endpoints may help locate the current UI request but are not current evidence. A relay request becomes usable only after current live HTTP/RPC success and response-shape verification.
 
@@ -63,6 +63,6 @@ Preserve `observed`, `calculated`, `analysis`, and `unknown`. Missing, invalid, 
 
 ## Completion
 
-A formal `discovery_handoff` exists only when the production validator itself re-verifies the exact `discovery_coverage` receipt, whose report has `coverage_status=PASS` and `formal_handoff_allowed=true`. If any mandatory Seed, Branch Seed, configured competitor domain, or other mandatory source fails or remains unreviewed, mark the coverage batch `BLOCKED`; preserve the partial evidence and do not silently shrink the handoff.
+A formal `discovery_handoff` exists only when the production validator itself re-verifies the exact `discovery_coverage` receipt, whose report has `coverage_status=PASS` and `formal_handoff_allowed=true`, and when the handoff `keywords` list reconciles exactly against that verified Candidate inventory. A Branch Seed's own acquisition proves the branch was explored; its observed keywords reach selection through a further Discovery round, not through this handoff. If any mandatory Seed, Branch Seed, configured competitor domain, or other mandatory source fails or remains unreviewed, mark the coverage batch `BLOCKED`; preserve the partial evidence and do not silently shrink the handoff.
 
 Selection still owns Ideas-stage recall onward, including all Volume/KD/CPC/KGR/SERP/KDRoi and final opportunity decisions. This skill does not add Trends novelty, birth windows, Rising/breakout classification, long-term monitoring, a second root library, or a Discovery database.

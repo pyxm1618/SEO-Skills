@@ -1,6 +1,6 @@
 {
   "discovery_input_manifest": {
-    "required": ["schema", "batch_id", "root_handoff_receipt_ref", "root_handoff_receipt_sha256", "seed_plan", "candidate_inventory", "candidate_analysis"],
+    "required": ["schema", "batch_id", "root_handoff_receipt_ref", "root_handoff_receipt_sha256", "seed_plan", "source_receipts", "candidate_inventory", "candidate_analysis"],
     "equals": {"schema": "seo-discovery-input/v1"}
   },
   "discovery_autocomplete": {
@@ -33,10 +33,13 @@
   "discovery_handoff": {
     "required": [
       "batch_id", "required_seed_count", "autocomplete_pass_count", "status",
-      "coverage_status", "coverage_receipt_ref"
+      "coverage_status", "coverage_receipt_ref", "keywords"
     ],
     "equals": {"status": "PASS", "coverage_status": "PASS"},
-    "equal_fields": [["required_seed_count", "autocomplete_pass_count"]]
+    "equal_fields": [["required_seed_count", "autocomplete_pass_count"]],
+    "items_required": {
+      "keywords": ["candidate_id", "keyword", "source", "source_seed", "evidence_receipt_ref"]
+    }
   },
   "stage6_exact": {
     "required": [

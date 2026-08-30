@@ -39,9 +39,15 @@ def _source_status(status="PASS", receipt=None, reason=None):
 
 def _required_seed(seed, autocomplete="PASS", semrush="PASS"):
     item = {"seed": seed}
-    item["autocomplete"] = _source_status(autocomplete, f"evidence/{seed}-google.receipt.json", "Google blocked")
-    item["semrush"] = _source_status(semrush, f"evidence/{seed}-semrush.receipt.json", "Semrush blocked")
+    item["autocomplete"] = _source_status(
+        autocomplete, _receipt_ref(seed, "google_autocomplete"), "Google blocked"
+    )
+    item["semrush"] = _source_status(semrush, _receipt_ref(seed, "semrush_ideas"), "Semrush blocked")
     return item
+
+
+def _receipt_ref(seed, evidence_type):
+    return f"evidence/{seed}-{evidence_type}.receipt.json"
 
 
 def _branch(branch_seed, candidate_id, parent_seed="wedding calculator", depth=1, autocomplete="PASS", semrush="PASS"):
@@ -51,7 +57,7 @@ def _branch(branch_seed, candidate_id, parent_seed="wedding calculator", depth=1
         "parent_seed": parent_seed,
         "originating_candidate_id": candidate_id,
         "source": source,
-        "evidence_ref": f"evidence/{candidate_id}-{'google' if source == 'google_autocomplete' else 'semrush'}.receipt.json",
+        "evidence_ref": _receipt_ref("wedding calculator", source),
         "branch_reason": "distinct observed demand branch",
         "analysis_status": "required",
         "depth": depth,
@@ -68,14 +74,14 @@ def full_ledger():
             "keyword": "wedding alcohol calculator",
             "source": "google_autocomplete",
             "source_seed": "wedding calculator",
-            "evidence_receipt_ref": "evidence/candidate-alcohol-google.receipt.json",
+            "evidence_receipt_ref": _receipt_ref("wedding calculator", "google_autocomplete"),
         },
         {
             "candidate_id": "candidate-timeline",
             "keyword": "wedding timeline calculator",
             "source": "semrush_ideas",
             "source_seed": "wedding calculator",
-            "evidence_receipt_ref": "evidence/candidate-timeline-semrush.receipt.json",
+            "evidence_receipt_ref": _receipt_ref("wedding calculator", "semrush_ideas"),
         },
     ]
     upstream_input = {
@@ -87,6 +93,15 @@ def full_ledger():
             "original_seed_count": 3,
             "seeds": ["wedding calculator", "wedding planner", "wedding budget"],
         },
+        "source_receipts": [
+            {
+                "evidence_type": evidence_type,
+                "seed": seed,
+                "evidence_receipt_ref": f"evidence/{seed}-{evidence_type}.receipt.json",
+            }
+            for seed in ["wedding calculator", "wedding planner", "wedding budget"]
+            for evidence_type in ["google_autocomplete", "semrush_ideas"]
+        ],
         "candidate_inventory": {
             "original_candidate_count": len(observed),
             "candidates": [dict(candidate) for candidate in observed],
@@ -214,7 +229,7 @@ def test_branch_promotion_derives_exact_keyword_from_observed_candidate():
     )
 
     assert branch["branch_seed"] == "wedding alcohol calculator"
-    assert branch["evidence_ref"] == "evidence/candidate-alcohol-google.receipt.json"
+    assert branch["evidence_ref"] == _receipt_ref("wedding calculator", "google_autocomplete")
     assert branch["source"] == "google_autocomplete"
     assert ledger["required_branch_seeds"][-1] == branch
 
@@ -367,6 +382,40 @@ def test_branch_parent_must_match_candidate_source_seed_and_self_cycle_is_denied
     assert any("cycle" in error.lower() or "parent" in error.lower() for error in cycle_errors)
 
 
+def test_branch_depth_must_equal_computed_parent_depth_plus_one():
+    coverage = load_module("discovery_coverage_branch_depth_provenance", COVERAGE)
+    ledger = full_ledger()
+    ledger["max_branch_depth"] = 2
+    ledger["observed_candidates"][1]["source_seed"] = "wedding alcohol calculator"
+    ledger["upstream_input"]["candidate_inventory"]["candidates"][1]["source_seed"] = "wedding alcohol calculator"
+    ledger["required_branch_seeds"][1]["parent_seed"] = "wedding alcohol calculator"
+    ledger["required_branch_seeds"][1]["depth"] = 1
+
+    errors = coverage.validate_coverage(ledger)
+
+    assert any("depth" in error.lower() and "parent" in error.lower() for error in errors)
+
+
+def test_a_whole_source_receipt_cannot_be_left_out_of_the_input_manifest():
+    coverage = load_module("discovery_coverage_unfrozen_receipt", COVERAGE)
+    ledger = full_ledger()
+    # The Semrush acquisition still passes on its own receipt, but that receipt is
+    # never frozen into the manifest, so its rows would escape reconciliation.
+    ledger["upstream_input"]["source_receipts"] = [
+        record
+        for record in ledger["upstream_input"]["source_receipts"]
+        if not (
+            record["evidence_type"] == "semrush_ideas"
+            and record["seed"] == "wedding planner"
+        )
+    ]
+
+    errors = coverage.validate_coverage(ledger)
+
+    assert any("receipt_not_frozen_in_input_manifest" in error for error in errors)
+    assert coverage.summarize_coverage(ledger)["formal_handoff_allowed"] is False
+
+
 def test_candidate_analysis_branch_decision_cannot_be_rewritten_in_coverage_ledger():
     coverage = load_module("discovery_coverage_authoritative_analysis", COVERAGE)
     ledger = full_ledger()
@@ -435,6 +484,15 @@ def test_production_handoff_rejects_nonexistent_coverage_receipt():
         "status": "PASS",
         "coverage_status": "PASS",
         "coverage_receipt_ref": "does-not-exist.receipt.json",
+        "keywords": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "keyword": "wedding alcohol calculator",
+                "source": "google_autocomplete",
+                "source_seed": "wedding calculator",
+                "evidence_receipt_ref": _receipt_ref("wedding calculator", "google_autocomplete"),
+            }
+        ],
     }
 
     errors = validator.validate_stage("discovery_handoff", payload, contracts, production=True)
@@ -614,7 +672,7 @@ def test_discovery_handoff_contract_requires_coverage_receipt():
     assert any("coverage" in error for error in errors)
 
 
-def _write_google_receipt(tmp_path):
+def _write_google_receipt(tmp_path, suggestions=None):
     collector = ROOT / "runtime" / "collectors" / "google_live_collector.py"
     screenshot = tmp_path / "google.png"
     screenshot.write_bytes(
@@ -622,13 +680,14 @@ def _write_google_receipt(tmp_path):
         b"\x00\x00\x00\x0aIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     observed_at = "2026-08-30T00:00:00+00:00"
+    suggestions = suggestions or ["wedding alcohol calculator"]
     observation = tmp_path / "google.observation.json"
     observation.write_text(
         json.dumps(
             {
                 "page_url": "https://www.google.com/search?q=wedding+calculator",
                 "seed": "wedding calculator",
-                "suggestions": ["wedding alcohol calculator"],
+                "suggestions": suggestions,
                 "country": "US",
                 "language": "en",
                 "observed_at": observed_at,
@@ -642,7 +701,7 @@ def _write_google_receipt(tmp_path):
         json.dumps(
             {
                 "seed": "wedding calculator",
-                "suggestions": ["wedding alcohol calculator"],
+                "suggestions": suggestions,
                 "country": "US",
                 "language": "en",
                 "observed_at": observed_at,
@@ -674,7 +733,7 @@ def _write_google_receipt(tmp_path):
     return normalized, receipt
 
 
-def _write_ideas_receipt(tmp_path):
+def _write_ideas_receipt(tmp_path, phrases=None):
     semrush_path = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"
     semrush = load_module("discovery_coverage_ideas_fixture", semrush_path)
     capture = tmp_path / "semrush.capture.json"
@@ -689,7 +748,11 @@ def _write_ideas_receipt(tmp_path):
         "metric_database": "us",
         "seed": "wedding calculator",
     }
-    response = {"jsonrpc": "2.0", "result": [{"phrase": "wedding cost calculator", "volume": 900, "difficulty": 22}]}
+    phrases = phrases or ["wedding cost calculator"]
+    response = {
+        "jsonrpc": "2.0",
+        "result": [{"phrase": phrase, "volume": 900, "difficulty": 22} for phrase in phrases],
+    }
     observed_at = "2026-08-30T00:00:01+00:00"
     raw = tmp_path / "ideas.raw.json"
     raw.write_text(
@@ -781,17 +844,32 @@ def _write_input_manifest_receipt(tmp_path, manifest):
     return manifest_path, report_path.with_suffix(".receipt.json")
 
 
-def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
-    google_input, google_receipt = _write_google_receipt(tmp_path)
+def test_production_input_manifest_rejects_candidate_inventory_smaller_than_source_receipts(tmp_path):
+    google_input, google_receipt = _write_google_receipt(
+        tmp_path,
+        suggestions=["wedding alcohol calculator", "wedding budget calculator"],
+    )
     _ideas_input, ideas_receipt = _write_ideas_receipt(tmp_path)
-    input_manifest = {
+    manifest = {
         "schema": "seo-discovery-input/v1",
-        "batch_id": "batch-formal",
+        "batch_id": "batch-source-inventory",
         "root_handoff_receipt_ref": str(tmp_path / "root-handoff.receipt.json"),
         "seed_plan": {
             "original_seed_count": 1,
             "seeds": ["wedding calculator"],
         },
+        "source_receipts": [
+            {
+                "evidence_type": "google_autocomplete",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(google_receipt),
+            },
+            {
+                "evidence_type": "semrush_ideas",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(ideas_receipt),
+            },
+        ],
         "candidate_inventory": {
             "original_candidate_count": 1,
             "candidates": [
@@ -813,6 +891,350 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
             }
         ],
     }
+    root_receipt = tmp_path / "root-handoff.receipt.json"
+    root_receipt.write_text(
+        json.dumps(
+            {
+                "schema": "seo-root-natural-seeds/v1",
+                "status": "PASS",
+                "batch_id": manifest["batch_id"],
+                "seed_plan": manifest["seed_plan"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest["root_handoff_receipt_sha256"] = hashlib.sha256(root_receipt.read_bytes()).hexdigest()
+    input_path = tmp_path / "input-manifest.json"
+    input_path.write_text(json.dumps(manifest), encoding="utf-8")
+    report_path = tmp_path / "input-manifest.report.json"
+
+    result = _run_production_stage("discovery_input_manifest", input_path, report_path)
+
+    assert result.returncode == 2
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    errors = [error for row in report["blocked"] for error in row["errors"]]
+    assert any("candidate_inventory" in error and "source" in error for error in errors)
+    assert not report_path.with_suffix(".receipt.json").exists()
+
+
+def _run_input_manifest_stage(tmp_path, manifest):
+    root_receipt = tmp_path / "root-handoff.receipt.json"
+    root_receipt.write_text(
+        json.dumps(
+            {
+                "schema": "seo-root-natural-seeds/v1",
+                "status": "PASS",
+                "batch_id": manifest["batch_id"],
+                "seed_plan": manifest["seed_plan"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest["root_handoff_receipt_ref"] = str(root_receipt)
+    manifest["root_handoff_receipt_sha256"] = hashlib.sha256(root_receipt.read_bytes()).hexdigest()
+    input_path = tmp_path / "input-manifest.json"
+    input_path.write_text(json.dumps(manifest), encoding="utf-8")
+    report_path = tmp_path / "input-manifest.report.json"
+    result = _run_production_stage("discovery_input_manifest", input_path, report_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    errors = [error for row in report.get("blocked", []) for error in row["errors"]]
+    return result, errors, report_path
+
+
+def _row_ledger_manifest(google_receipt, ideas_receipt, google_rows, ideas_rows, candidates):
+    return {
+        "schema": "seo-discovery-input/v1",
+        "batch_id": "batch-row-ledger",
+        "seed_plan": {"original_seed_count": 1, "seeds": ["wedding calculator"]},
+        "source_receipts": [
+            {
+                "evidence_type": "google_autocomplete",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(google_receipt),
+            },
+            {
+                "evidence_type": "semrush_ideas",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(ideas_receipt),
+            },
+        ],
+        "candidate_inventory": {
+            "original_candidate_count": len(candidates),
+            "candidates": candidates,
+            "row_ledger": [
+                {"evidence_receipt_ref": str(google_receipt), "rows": google_rows},
+                {"evidence_receipt_ref": str(ideas_receipt), "rows": ideas_rows},
+            ],
+        },
+        "candidate_analysis": [
+            {
+                "candidate_id": candidate["candidate_id"],
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
+            }
+            for candidate in candidates
+        ],
+    }
+
+
+def _row_ledger_candidates(google_receipt, ideas_receipt):
+    return [
+        {
+            "candidate_id": "candidate-alcohol",
+            "keyword": "wedding alcohol calculator",
+            "source": "google_autocomplete",
+            "source_seed": "wedding calculator",
+            "evidence_receipt_ref": str(google_receipt),
+        },
+        {
+            "candidate_id": "candidate-cost",
+            "keyword": "wedding cost calculator",
+            "source": "semrush_ideas",
+            "source_seed": "wedding calculator",
+            "evidence_receipt_ref": str(ideas_receipt),
+        },
+    ]
+
+
+def test_production_input_manifest_accepts_a_complete_row_ledger(tmp_path):
+    _google_input, google_receipt = _write_google_receipt(
+        tmp_path, suggestions=["wedding alcohol calculator", "wedding budget calculator"]
+    )
+    _ideas_input, ideas_receipt = _write_ideas_receipt(
+        tmp_path, phrases=["wedding alcohol calculator", "wedding cost calculator"]
+    )
+    manifest = _row_ledger_manifest(
+        google_receipt,
+        ideas_receipt,
+        google_rows=[
+            {
+                "keyword": "wedding alcohol calculator",
+                "disposition": "kept",
+                "candidate_id": "candidate-alcohol",
+            },
+            {
+                "keyword": "wedding budget calculator",
+                "disposition": "excluded",
+                "rule_code": "semantic_drift",
+                "reason": "budget planning is a different demand branch",
+            },
+        ],
+        ideas_rows=[
+            {
+                "keyword": "wedding alcohol calculator",
+                "disposition": "dedupe_of",
+                "candidate_id": "candidate-alcohol",
+            },
+            {
+                "keyword": "wedding cost calculator",
+                "disposition": "kept",
+                "candidate_id": "candidate-cost",
+            },
+        ],
+        candidates=_row_ledger_candidates(google_receipt, ideas_receipt),
+    )
+
+    result, errors, report_path = _run_input_manifest_stage(tmp_path, manifest)
+
+    assert result.returncode == 0, errors
+    assert report_path.with_suffix(".receipt.json").exists()
+
+
+def test_production_input_manifest_rejects_an_unverifiable_dedupe_claim(tmp_path):
+    _google_input, google_receipt = _write_google_receipt(
+        tmp_path, suggestions=["wedding alcohol calculator", "wedding budget calculator"]
+    )
+    _ideas_input, ideas_receipt = _write_ideas_receipt(
+        tmp_path, phrases=["wedding alcohol calculator", "wedding cost calculator"]
+    )
+    manifest = _row_ledger_manifest(
+        google_receipt,
+        ideas_receipt,
+        google_rows=[
+            {
+                "keyword": "wedding alcohol calculator",
+                "disposition": "kept",
+                "candidate_id": "candidate-alcohol",
+            },
+            {
+                "keyword": "wedding budget calculator",
+                "disposition": "excluded",
+                "rule_code": "semantic_drift",
+                "reason": "budget planning is a different demand branch",
+            },
+        ],
+        # Claims a duplicate of a candidate that holds a different keyword.
+        ideas_rows=[
+            {
+                "keyword": "wedding alcohol calculator",
+                "disposition": "dedupe_of",
+                "candidate_id": "candidate-cost",
+            },
+            {
+                "keyword": "wedding cost calculator",
+                "disposition": "kept",
+                "candidate_id": "candidate-cost",
+            },
+        ],
+        candidates=_row_ledger_candidates(google_receipt, ideas_receipt),
+    )
+
+    result, errors, report_path = _run_input_manifest_stage(tmp_path, manifest)
+
+    assert result.returncode == 2
+    assert any("keyword_differs_from_observed_row" in error for error in errors)
+    assert not report_path.with_suffix(".receipt.json").exists()
+
+
+def test_production_input_manifest_rejects_a_row_ledger_that_drops_an_observed_row(tmp_path):
+    _google_input, google_receipt = _write_google_receipt(
+        tmp_path, suggestions=["wedding alcohol calculator"]
+    )
+    _ideas_input, ideas_receipt = _write_ideas_receipt(
+        tmp_path, phrases=["wedding cost calculator", "wedding venue calculator"]
+    )
+    candidates = _row_ledger_candidates(google_receipt, ideas_receipt)
+    manifest = _row_ledger_manifest(
+        google_receipt,
+        ideas_receipt,
+        google_rows=[
+            {
+                "keyword": "wedding alcohol calculator",
+                "disposition": "kept",
+                "candidate_id": "candidate-alcohol",
+            }
+        ],
+        # "wedding venue calculator" was really observed but is silently absent.
+        ideas_rows=[
+            {
+                "keyword": "wedding cost calculator",
+                "disposition": "kept",
+                "candidate_id": "candidate-cost",
+            }
+        ],
+        candidates=candidates,
+    )
+
+    result, errors, report_path = _run_input_manifest_stage(tmp_path, manifest)
+
+    assert result.returncode == 2
+    assert any("must_match_observed_source_rows_in_order" in error for error in errors)
+    assert not report_path.with_suffix(".receipt.json").exists()
+
+
+def test_branch_promotion_derives_depth_from_the_parent_chain():
+    coverage = load_module("discovery_coverage_branch_depth_writer", COVERAGE)
+    ledger = full_ledger()
+    ledger["required_branch_seeds"] = []
+    ledger["max_branch_depth"] = 2
+
+    first = coverage.add_required_branch_seed(
+        ledger,
+        originating_candidate_id="candidate-alcohol",
+        parent_seed="wedding calculator",
+        branch_reason="the observed candidate opens a beverage-planning demand branch",
+    )
+    assert first["depth"] == 1
+
+    # A second hop is depth 2 even when the caller says otherwise.
+    with pytest.raises(coverage.CoverageContractError, match="depth"):
+        coverage.add_required_branch_seed(
+            ledger,
+            originating_candidate_id="candidate-timeline",
+            parent_seed="wedding alcohol calculator",
+            branch_reason="a declared depth may not contradict the parent chain",
+            depth=1,
+        )
+
+    second = coverage.add_required_branch_seed(
+        ledger,
+        originating_candidate_id="candidate-timeline",
+        parent_seed="wedding alcohol calculator",
+        branch_reason="second hop stays inside the configured safety limit",
+    )
+    assert second["depth"] == 2
+
+
+def _build_formal_coverage(tmp_path):
+    google_input, google_receipt = _write_google_receipt(tmp_path)
+    _ideas_input, ideas_receipt = _write_ideas_receipt(tmp_path)
+    input_manifest = {
+        "schema": "seo-discovery-input/v1",
+        "batch_id": "batch-formal",
+        "root_handoff_receipt_ref": str(tmp_path / "root-handoff.receipt.json"),
+        "seed_plan": {
+            "original_seed_count": 1,
+            "seeds": ["wedding calculator"],
+        },
+        "source_receipts": [
+            {
+                "evidence_type": "google_autocomplete",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(google_receipt),
+            },
+            {
+                "evidence_type": "semrush_ideas",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(ideas_receipt),
+            },
+        ],
+        "candidate_inventory": {
+            "original_candidate_count": 2,
+            "candidates": [
+                {
+                    "candidate_id": "candidate-alcohol",
+                    "keyword": "wedding alcohol calculator",
+                    "source": "google_autocomplete",
+                    "source_seed": "wedding calculator",
+                    "evidence_receipt_ref": str(google_receipt),
+                },
+                {
+                    "candidate_id": "candidate-cost",
+                    "keyword": "wedding cost calculator",
+                    "source": "semrush_ideas",
+                    "source_seed": "wedding calculator",
+                    "evidence_receipt_ref": str(ideas_receipt),
+                },
+            ],
+            "row_ledger": [
+                {
+                    "evidence_receipt_ref": str(google_receipt),
+                    "rows": [
+                        {
+                            "keyword": "wedding alcohol calculator",
+                            "disposition": "kept",
+                            "candidate_id": "candidate-alcohol",
+                        }
+                    ],
+                },
+                {
+                    "evidence_receipt_ref": str(ideas_receipt),
+                    "rows": [
+                        {
+                            "keyword": "wedding cost calculator",
+                            "disposition": "kept",
+                            "candidate_id": "candidate-cost",
+                        }
+                    ],
+                },
+            ],
+        },
+        "candidate_analysis": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
+            },
+            {
+                "candidate_id": "candidate-cost",
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
+            },
+        ],
+    }
     _manifest_path, input_manifest_receipt = _write_input_manifest_receipt(tmp_path, input_manifest)
     ledger = {
         "batch_id": "batch-formal",
@@ -831,7 +1253,14 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
                 "source": "google_autocomplete",
                 "source_seed": "wedding calculator",
                 "evidence_receipt_ref": str(google_receipt),
-            }
+            },
+            {
+                "candidate_id": "candidate-cost",
+                "keyword": "wedding cost calculator",
+                "source": "semrush_ideas",
+                "source_seed": "wedding calculator",
+                "evidence_receipt_ref": str(ideas_receipt),
+            },
         ],
         "upstream_input": dict(input_manifest, validation_receipt_ref=str(input_manifest_receipt)),
         "candidate_analysis": [
@@ -840,7 +1269,13 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
                 "analysis_status": "COMPLETE",
                 "branch_required": False,
                 "analysis_reason": "reviewed; no branch expansion required",
-            }
+            },
+            {
+                "candidate_id": "candidate-cost",
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
+            },
         ],
         "required_branch_seeds": [],
         "competitor_sweep": {"configured": False, "domains": [], "status": "not_configured"},
@@ -854,8 +1289,34 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
     coverage_report = tmp_path / "coverage.report.json"
     assert _run_production_stage("discovery_autocomplete", google_input, autocomplete_report).returncode == 0
     assert _run_production_stage("discovery_coverage", ledger_path, coverage_report).returncode == 0
+    return {
+        "google_receipt": google_receipt,
+        "ideas_receipt": ideas_receipt,
+        "autocomplete_report": autocomplete_report,
+        "coverage_receipt": coverage_report.with_suffix(".receipt.json"),
+    }
 
-    coverage_receipt = coverage_report.with_suffix(".receipt.json")
+
+def _formal_handoff_keywords(google_receipt, ideas_receipt):
+    return [
+        {
+            "candidate_id": "candidate-alcohol",
+            "keyword": "wedding alcohol calculator",
+            "source": "google_autocomplete",
+            "source_seed": "wedding calculator",
+            "evidence_receipt_ref": str(google_receipt),
+        },
+        {
+            "candidate_id": "candidate-cost",
+            "keyword": "wedding cost calculator",
+            "source": "semrush_ideas",
+            "source_seed": "wedding calculator",
+            "evidence_receipt_ref": str(ideas_receipt),
+        },
+    ]
+
+
+def _run_formal_handoff(tmp_path, coverage_receipt, keywords):
     handoff_input = tmp_path / "handoff-input.json"
     handoff_input.write_text(
         json.dumps(
@@ -866,12 +1327,53 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
                 "status": "PASS",
                 "coverage_status": "PASS",
                 "coverage_receipt_ref": str(coverage_receipt),
+                "keywords": keywords,
             }
         ),
         encoding="utf-8",
     )
     handoff_report = tmp_path / "handoff.report.json"
-    assert _run_production_stage("discovery_handoff", handoff_input, handoff_report).returncode == 0
+    result = _run_production_stage("discovery_handoff", handoff_input, handoff_report)
+    report = json.loads(handoff_report.read_text(encoding="utf-8"))
+    errors = [error for row in report.get("blocked", []) for error in row["errors"]]
+    return result, errors, handoff_report
+
+
+def test_production_handoff_cannot_drop_or_invent_keywords(tmp_path):
+    built = _build_formal_coverage(tmp_path)
+    complete = _formal_handoff_keywords(built["google_receipt"], built["ideas_receipt"])
+
+    dropped, errors, report_path = _run_formal_handoff(tmp_path, built["coverage_receipt"], complete[:1])
+    assert dropped.returncode == 2
+    assert any("handoff_keywords_do_not_match_coverage" in error for error in errors)
+    assert not report_path.with_suffix(".receipt.json").exists()
+
+    invented = complete + [
+        {
+            "candidate_id": "candidate-invented",
+            "keyword": "wedding seating chart calculator",
+            "source": "google_autocomplete",
+            "source_seed": "wedding calculator",
+            "evidence_receipt_ref": str(built["google_receipt"]),
+        }
+    ]
+    added, errors, report_path = _run_formal_handoff(tmp_path, built["coverage_receipt"], invented)
+    assert added.returncode == 2
+    assert any("handoff_keywords_do_not_match_coverage" in error for error in errors)
+    assert not report_path.with_suffix(".receipt.json").exists()
+
+
+def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
+    built = _build_formal_coverage(tmp_path)
+    coverage_receipt = built["coverage_receipt"]
+    autocomplete_report = built["autocomplete_report"]
+
+    result, errors, handoff_report = _run_formal_handoff(
+        tmp_path,
+        coverage_receipt,
+        _formal_handoff_keywords(built["google_receipt"], built["ideas_receipt"]),
+    )
+    assert result.returncode == 0, errors
 
     manifest = {
         "run_id": "formal-coverage-run",
@@ -916,6 +1418,13 @@ def test_production_coverage_cannot_shrink_a_verified_upstream_inventory(tmp_pat
             "original_seed_count": 1,
             "seeds": ["wedding calculator"],
         },
+        "source_receipts": [
+            {
+                "evidence_type": "google_autocomplete",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(google_receipt),
+            }
+        ],
         "candidate_inventory": {
             "original_candidate_count": 1,
             "candidates": [
@@ -925,6 +1434,18 @@ def test_production_coverage_cannot_shrink_a_verified_upstream_inventory(tmp_pat
                     "source": "google_autocomplete",
                     "source_seed": "wedding calculator",
                     "evidence_receipt_ref": str(google_receipt),
+                }
+            ],
+            "row_ledger": [
+                {
+                    "evidence_receipt_ref": str(google_receipt),
+                    "rows": [
+                        {
+                            "keyword": "wedding alcohol calculator",
+                            "disposition": "kept",
+                            "candidate_id": "candidate-alcohol",
+                        }
+                    ],
                 }
             ],
         },

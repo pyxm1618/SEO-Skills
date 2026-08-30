@@ -188,6 +188,9 @@ def _verify_coverage_receipt_for_handoff(payload):
     coverage_errors = _coverage().validate_coverage(coverage_row, production=True)
     if coverage_errors:
         return ["coverage_receipt:coverage_revalidation_failed:" + " | ".join(coverage_errors)]
+    keyword_errors = _coverage().validate_handoff_keywords(coverage_row, payload.get("keywords"))
+    if keyword_errors:
+        return ["coverage_receipt:handoff_keywords_do_not_match_coverage:" + " | ".join(keyword_errors)]
     return []
 
 
