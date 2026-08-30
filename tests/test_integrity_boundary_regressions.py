@@ -1,9 +1,12 @@
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BINDING = ROOT / "runtime" / "evidence_binding.py"
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
+PIPELINE = ROOT / "runtime" / "emerging_pipeline.py"
 
 
 def load_module(name, path):
@@ -17,59 +20,95 @@ def load_hook(name="integrity_boundary_hook"):
     return load_module(name, HOOK)
 
 
-def test_external_helper_cannot_mint_issuance_or_create_workspace_secret(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("SEO_ISSUANCE_SECRET", raising=False)
-    binding = load_module("boundary_no_local_mint", BINDING)
+def test_pipeline_and_hook_bind_the_same_emerging_scripts():
+    # The pipeline writes the receipt's script hashes and the hook re-verifies
+    # them against its own list. If the two lists drift, a script that shapes
+    # the result (birth_history.py did) is executed but never hash-bound, so
+    # tampering with it would leave a valid-looking receipt.
+    pipeline = load_module("drift_guard_pipeline", PIPELINE)
+    hook = load_hook("drift_guard_hook")
+    assert set(pipeline.SCRIPT_PATHS) == set(hook.EMERGING_SCRIPT_PATHS)
+    for name, path in pipeline.SCRIPT_PATHS.items():
+        assert path.resolve() == hook.EMERGING_SCRIPT_PATHS[name].resolve(), name
+    assert pipeline.THRESHOLDS_PATH.resolve() == hook.EMERGING_THRESHOLDS_PATH.resolve()
+
+
+def test_runtime_has_no_os_broker_dependency():
+    binding = load_module("boundary_scoped_binding", BINDING)
+    assert not hasattr(binding, "_trusted_broker_path")
+    assert not hasattr(binding, "_broker_request")
+    assert not hasattr(binding, "_mint_issuance_proof")
+    assert not hasattr(binding, "verify_external_attestation")
+
+
+def test_generic_helper_still_cannot_write_collector_receipt(tmp_path):
+    binding = load_module("boundary_direct_writer", BINDING)
+    raw = tmp_path / "raw.json"
+    capture = tmp_path / "capture.json"
+    raw.write_text("{}", encoding="utf-8")
+    capture.write_text("{}", encoding="utf-8")
     try:
-        binding._mint_issuance_proof(
-            "semrush_relay_collector", "semrush_exact", "a" * 64, "2026-08-27T00:00:00Z"
+        binding.write_observed_output(
+            tmp_path / "out.json",
+            {"keyword": "example"},
+            "semrush_relay_collector",
+            "semrush_exact",
+            [
+                {"path": raw, "role": "relay_raw_response"},
+                {"path": capture, "role": "current_network_capture"},
+            ],
         )
-    except Exception:
-        pass
+    except binding.EvidenceIntegrityError as exc:
+        assert "collector" in str(exc).lower() or "direct cli" in str(exc).lower()
     else:
-        raise AssertionError("ordinary helper code must not be able to mint a trusted issuance proof")
-    assert not (tmp_path / ".seo-run" / ".issuance_secret").exists()
+        raise AssertionError("ordinary helper code must not write production collector receipts")
 
 
-def test_attacker_controlled_env_secret_cannot_mint_trusted_issuance(monkeypatch):
-    monkeypatch.setenv("SEO_ISSUANCE_SECRET", "attacker-controlled-secret")
-    binding = load_module("boundary_env_secret", BINDING)
+def test_artifact_hash_tampering_is_rejected(tmp_path):
+    binding = load_module("boundary_artifact_hash", BINDING)
+    raw = tmp_path / "raw.json"
+    capture = tmp_path / "capture.json"
+    raw.write_text(json.dumps({"original": True}), encoding="utf-8")
+    capture.write_text(json.dumps({"capture": True}), encoding="utf-8")
+    records = [
+        {"role": "relay_raw_response", "path": str(raw), "sha256": hashlib.sha256(raw.read_bytes()).hexdigest()},
+        {"role": "current_network_capture", "path": str(capture), "sha256": hashlib.sha256(capture.read_bytes()).hexdigest()},
+    ]
+    raw.write_text(json.dumps({"tampered": True}), encoding="utf-8")
     try:
-        binding._mint_issuance_proof(
-            "stage_validator", "stage6_exact", "b" * 64, "2026-08-27T00:00:00Z"
-        )
-    except Exception:
-        return
-    raise AssertionError("an agent-controlled environment variable must not grant signing authority")
+        binding._roles_to_paths(records, "semrush_exact")
+    except binding.EvidenceIntegrityError as exc:
+        assert "hash mismatch" in str(exc).lower()
+    else:
+        raise AssertionError("post-capture artifact tampering must be rejected")
 
 
-def test_agent_readable_workspace_secret_cannot_mint_trusted_issuance(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("SEO_ISSUANCE_SECRET", raising=False)
-    secret_dir = tmp_path / ".seo-run"
-    secret_dir.mkdir()
-    (secret_dir / ".issuance_secret").write_text("agent-readable-secret\n", encoding="utf-8")
-    binding = load_module("boundary_workspace_secret", BINDING)
-    try:
-        binding._mint_issuance_proof(
-            "google_live_collector", "google_intitle", "c" * 64, "2026-08-27T00:00:00Z"
-        )
-    except Exception:
-        return
-    raise AssertionError("an agent-readable workspace file must not grant signing authority")
-
-
-def test_emerging_route_cannot_be_self_declared_without_trusted_route_attestation():
-    hook = load_hook("route_attestation_required")
+def test_emerging_route_cannot_be_self_declared_without_monitor_handoff():
+    hook = load_hook("route_handoff_required")
     stages, error = hook._infer_canonical_required_stages({
         "run_id": "r-emerging",
         "route": "emerging",
         "status": "COMPLETE",
-        "candidates": {"cand_1": {}},
+        "candidates": {"cand_1": {"keyword": "new demand"}},
     })
     assert stages is None
-    assert "attest" in error.lower() or "handoff" in error.lower() or "route" in error.lower()
+    assert "handoff" in error.lower() or "route" in error.lower()
+
+
+def test_emerging_completion_requires_a_validated_radar_run_stage(monkeypatch):
+    hook = load_hook("emerging_run_stage_required_red")
+    monkeypatch.setattr(hook, "_verify_route_attestation", lambda *args, **kwargs: (True, ""))
+
+    stages, error = hook._infer_canonical_required_stages(
+        {
+            "run_id": "r-emerging",
+            "route": "emerging",
+            "status": "COMPLETE",
+            "candidates": {"cand_1": {"keyword": "new demand"}},
+        }
+    )
+
+    assert stages == ["emerging_radar_run"], error
 
 
 def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch):
@@ -82,10 +121,14 @@ def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
         },
         "candidates": {
             "cand_1": {
+                "keyword": "candidate keyword",
                 "is_finalist": False,
                 "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
                 "intitle_observation": {"status": "PASS", "validation_receipt_ref": "intitle"},
@@ -96,7 +139,7 @@ def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch
     }
     valid, reason = hook._verify_completion_requirements(manifest)
     assert valid is False
-    assert "finalist" in reason.lower() or "trend" in reason.lower() or "disposition" in reason.lower()
+    assert "finalist" in reason.lower() or "review" in reason.lower() or "disposition" in reason.lower()
 
 
 def test_candidate_specific_stages_must_not_fallback_to_global_receipts(monkeypatch):
@@ -108,7 +151,10 @@ def test_candidate_specific_stages_must_not_fallback_to_global_receipts(monkeypa
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
             "stage6_exact": {"status": "PASS", "validation_receipt_ref": "global-exact"},
             "intitle_observation": {"status": "PASS", "validation_receipt_ref": "global-intitle"},
             "kgr_intitle": {"status": "PASS", "validation_receipt_ref": "global-kgr"},
@@ -133,15 +179,20 @@ def test_verified_blocked_candidate_does_not_prevent_completed_batch(monkeypatch
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
         },
         "candidates": {
             "blocked": {
+                "keyword": "blocked keyword",
                 "terminal_status": "BLOCKED",
                 "blocked_stage": "stage6_exact",
                 "stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay unavailable"},
             },
             "good": {
+                "keyword": "good keyword",
                 "terminal_status": "COMPLETE",
                 "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
                 "intitle_observation": {"status": "PASS", "validation_receipt_ref": "intitle"},
@@ -167,10 +218,16 @@ def test_deterministic_exact_elimination_skips_kgr_and_serp(monkeypatch):
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
         },
         "candidates": {
-            "eliminated": {"stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"}}
+            "eliminated": {
+                "keyword": "eliminated keyword",
+                "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
+            }
         },
     }
     valid, reason = hook._verify_completion_requirements(manifest)

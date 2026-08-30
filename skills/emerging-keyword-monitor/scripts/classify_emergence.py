@@ -13,11 +13,18 @@ from typing import Any
 BASE = Path(__file__).resolve().parents[1]
 THRESHOLDS_PATH = BASE / "references" / "thresholds.json"
 VARIANT_SUBTYPES = {"new_expression", "typo", "modifier_shift"}
+DEMAND_HISTORY_TYPES = {"newly_observed", "preexisting", "resurgent", "unknown"}
 STATE_VALUES = {"new_signal", "watch", "emerging", "breakout", "mature", "noise", "insufficient_evidence"}
 UNKNOWN_FIELDS = (
     "root_id",
     "first_observed_at",
     "estimated_birth_window",
+    "birth_window_start",
+    "birth_window_end",
+    "birth_source_resolution",
+    "birth_confidence",
+    "birth_reason",
+    "demand_history_type",
     "age_days",
     "baseline_signal",
     "novelty_baseline_signal",
@@ -339,6 +346,15 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
     evidence_used: list[str] = []
     errors: list[str] = []
 
+    demand_history_type = row.get("demand_history_type")
+    if is_missing(demand_history_type):
+        demand_history_type = "unknown"
+    else:
+        demand_history_type = str(demand_history_type).strip().lower()
+        if demand_history_type not in DEMAND_HISTORY_TYPES:
+            errors.append("demand_history_type")
+    row["demand_history_type"] = demand_history_type
+
     keyword = str(row.get("keyword") or "").strip()
     if not keyword:
         errors.append("keyword")
@@ -466,6 +482,7 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             evidence_used.append(f"recent_signal={recent:.4g}")
         if historical_positive_seen is not None:
             evidence_used.append(f"historical_positive_seen={str(historical_positive_seen).lower()}")
+        evidence_used.append(f"demand_history_type={demand_history_type}")
         if freshness_status != "unknown":
             evidence_used.append(f"freshness_status={freshness_status}")
         if row.get("latest_observation_age_days") is not None:
@@ -513,6 +530,8 @@ def classify_candidate(candidate: dict[str, Any], thresholds: dict[str, Any]) ->
             reason = f"Persistent recent demand is paired with an explicit {variant_subtype} relationship to an existing search expression."
             evidence_used.append(f"variant_subtype={variant_subtype}")
         elif (
+            demand_history_type not in {"preexisting", "resurgent"}
+            and
             historical_positive_seen is not True
             and novelty_baseline is not None
             and novelty_baseline == 0

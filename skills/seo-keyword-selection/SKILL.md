@@ -26,6 +26,33 @@ Read before execution:
 - `references/thresholds.json` — unchanged source of truth.
 - `references/source-acquisition.md`
 
+## Production candidate start
+
+The `traditional` run must already have its active manifest and completed
+global discovery stages. Add a concrete candidate with a canonical keyword,
+then use the same literal candidate ID in the manifest, validator argument,
+and protected command environment:
+
+```bash
+export SEO_RUN_MANIFEST=.seo-run/active.json
+export SEO_CANDIDATE_ID=cand_wedding_cost_calculator
+python3 -c 'import json, os; from pathlib import Path; p=Path(os.environ["SEO_RUN_MANIFEST"]); m=json.loads(p.read_text()); m.setdefault("candidates", {})[os.environ["SEO_CANDIDATE_ID"]]={"keyword":"wedding cost calculator"}; p.write_text(json.dumps(m, ensure_ascii=False, indent=2)+"\n")'
+python3 runtime/stage_validator.py \
+  --stage stage6_exact --candidate-id "$SEO_CANDIDATE_ID" --production \
+  --input .seo-run/evidence/exact-wedding-cost-calculator.json \
+  --report .seo-run/validation/cand-wedding-cost-calculator-exact.json
+```
+
+The production validator derives `candidate_keyword` from exactly one
+complete row and writes it to the report and receipt. Record that receipt's
+`validation_receipt_ref` under the same candidate's `stage6_exact` record;
+repeat the identity-bound pattern for `intitle_observation`, `kgr_intitle`,
+`serp_review`, and conditional `finalist_trend`. Use the same literal
+`SEO_CANDIDATE_ID=<id>` prefix for protected collector/evaluator commands.
+Missing markers, duplicate or missing complete rows, receipt mounting under a
+different candidate, and keyword mismatches fail closed. Shared discovery
+receipts stay global and cannot contain candidate identity.
+
 ## Execution integrity
 
 The existing evaluator remains the calculator/classifier. Do not change its treatment of `pending_metrics`, KGR, SERP weak evidence, or KDRoi merely to enforce production completeness.

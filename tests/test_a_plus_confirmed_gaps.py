@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 VALIDATOR = ROOT / "runtime" / "stage_validator.py"
 CONTRACTS = ROOT / "runtime" / "stage_contracts.json"
 SEMRUSH = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"

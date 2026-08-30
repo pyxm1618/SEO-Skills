@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production-stage contract validator with collector-evidence and external broker binding."""
+"""Production-stage contract validator with collector-evidence binding."""
 
 import argparse
 import hashlib
@@ -7,7 +7,6 @@ import importlib.util
 import json
 import math
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,18 +14,32 @@ NOT_APPLICABLE = "not_applicable"
 UNKNOWN = "unknown"
 ROOT = Path(__file__).resolve().parent
 BINDING_PATH = ROOT / "evidence_binding.py"
+COVERAGE_PATH = ROOT / "discovery_coverage.py"
 PRODUCTION_BINDINGS = {
     "discovery_autocomplete": "google_autocomplete",
     "discovery_semrush_ideas": "semrush_ideas",
+    "discovery_semrush_competitor_organic": "semrush_competitor_organic",
     "stage6_exact": "semrush_exact",
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
+    "trends_related": "google_trends_related",
+    "trends_timeline": "google_trends",
 }
+CANDIDATE_SCOPED_STAGES = frozenset(
+    {"stage6_exact", "intitle_observation", "kgr_intitle", "serp_review", "finalist_trend"}
+)
 
 
 def _binding():
     spec = importlib.util.spec_from_file_location("seo_evidence_binding", BINDING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _coverage():
+    spec = importlib.util.spec_from_file_location("seo_discovery_coverage_validator", COVERAGE_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -111,6 +124,34 @@ def _validate_number_range(field, value, rule):
 def _validate_production_binding(stage, payload):
     if stage == "finalist_trend" and payload.get("is_finalist") is not True:
         return []
+    if stage == "emerging_radar_run":
+        errors = []
+        if payload.get("status") not in {"PASS", "BLOCKED"}:
+            errors.append("status:must_be_PASS_or_BLOCKED")
+        blockers = payload.get("blockers")
+        if not isinstance(blockers, list):
+            errors.append("blockers:must_be_list")
+        elif payload.get("status") == "PASS" and blockers:
+            errors.append("blockers:PASS_run_must_be_empty")
+        elif payload.get("status") == "BLOCKED" and not blockers:
+            errors.append("blockers:BLOCKED_run_requires_entry")
+        if not isinstance(payload.get("candidate_counts"), dict):
+            errors.append("candidate_counts:must_be_object")
+        artifacts = payload.get("output_artifacts")
+        if not isinstance(artifacts, dict):
+            errors.append("output_artifacts:must_be_object")
+        else:
+            for field in ("run_summary", "database", "csv", "evidence_dir", "emerging_radar_run_validation"):
+                if value_state(artifacts.get(field)) != "value":
+                    errors.append(f"output_artifacts.{field}:required")
+        stages = payload.get("stages")
+        stage_record = stages.get("emerging_radar_run") if isinstance(stages, dict) else None
+        if payload.get("status") == "PASS":
+            if not isinstance(stage_record, dict) or stage_record.get("status") != "PASS":
+                errors.append("stages.emerging_radar_run:PASS_registration_required")
+            elif value_state(stage_record.get("validation_receipt_ref")) != "value":
+                errors.append("stages.emerging_radar_run.validation_receipt_ref:required")
+        return errors
     binding = _binding()
     try:
         if stage == "kgr_intitle":
@@ -121,6 +162,68 @@ def _validate_production_binding(stage, payload):
                 binding.verify_payload(payload, evidence_type)
     except Exception as exc:
         return [f"evidence:{exc}"]
+    return []
+
+
+def _verify_coverage_receipt_for_handoff(payload):
+    """Verify the exact production Coverage receipt before issuing handoff PASS."""
+
+    coverage_ref = str(payload.get("coverage_receipt_ref") or "").strip()
+    if not coverage_ref:
+        return ["coverage_receipt_ref:required_for_production_handoff"]
+    receipt_path = Path(coverage_ref)
+    if not receipt_path.is_file():
+        return ["coverage_receipt:evidence_receipt_invalid:file_missing"]
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"coverage_receipt:invalid_json:{exc}"]
+    if not isinstance(receipt, dict):
+        return ["coverage_receipt:must_be_object"]
+    if receipt.get("schema") != "seo-stage-validation/v1":
+        return ["coverage_receipt:schema_mismatch"]
+    if receipt.get("stage") != "discovery_coverage" or receipt.get("status") != "PASS":
+        return ["coverage_receipt:stage_or_status_mismatch"]
+    try:
+        if receipt.get("validator_source_sha256") != _sha256(Path(__file__).resolve()):
+            return ["coverage_receipt:validator_source_mismatch"]
+        report_ref = str(receipt.get("report_ref") or "").strip()
+        if not report_ref:
+            return ["coverage_receipt:report_ref_required"]
+        report_path = Path(report_ref)
+        if not report_path.is_file():
+            return ["coverage_receipt:report_file_missing"]
+        if receipt.get("report_sha256") != _sha256(report_path):
+            return ["coverage_receipt:report_hash_mismatch"]
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        return [f"coverage_receipt:report_invalid:{exc}"]
+    if not isinstance(report, dict):
+        return ["coverage_receipt:report_must_be_object"]
+    if report.get("stage") != "discovery_coverage" or report.get("status") != "PASS":
+        return ["coverage_receipt:report_stage_or_status_mismatch"]
+    if report.get("production") is not True:
+        return ["coverage_receipt:report_must_be_production"]
+    if report.get("validation_receipt_ref") != str(receipt_path):
+        return ["coverage_receipt:report_receipt_ref_mismatch"]
+    complete = report.get("complete")
+    if report.get("complete_count") != 1 or report.get("blocked_count") != 0:
+        return ["coverage_receipt:report_must_contain_one_complete_row"]
+    if not isinstance(complete, list) or len(complete) != 1:
+        return ["coverage_receipt:report_complete_row_missing"]
+    coverage_row = complete[0]
+    if not isinstance(coverage_row, dict):
+        return ["coverage_receipt:coverage_row_must_be_object"]
+    if coverage_row.get("coverage_status") != "PASS" or coverage_row.get("formal_handoff_allowed") is not True:
+        return ["coverage_receipt:coverage_not_formally_eligible"]
+    if str(coverage_row.get("batch_id") or "").strip() != str(payload.get("batch_id") or "").strip():
+        return ["coverage_receipt:batch_id_mismatch"]
+    coverage_errors = _coverage().validate_coverage(coverage_row, production=True)
+    if coverage_errors:
+        return ["coverage_receipt:coverage_revalidation_failed:" + " | ".join(coverage_errors)]
+    keyword_errors = _coverage().validate_handoff_keywords(coverage_row, payload.get("keywords"))
+    if keyword_errors:
+        return ["coverage_receipt:handoff_keywords_do_not_match_coverage:" + " | ".join(keyword_errors)]
     return []
 
 
@@ -194,13 +297,30 @@ def validate_stage(stage, payload, contracts, production=False):
             if payload.get(field) != expected:
                 errors.append(f"{field}:must_equal:{expected}")
 
+    if stage == "discovery_input_manifest" and not errors:
+        errors.extend(_coverage().validate_input_manifest(payload, production=production))
+
+    if stage == "discovery_coverage" and not errors:
+        errors.extend(_coverage().validate_coverage(payload, production=production))
+
+    if stage == "discovery_handoff" and production and not errors:
+        errors.extend(_verify_coverage_receipt_for_handoff(payload))
+
     if production and not errors:
         errors.extend(_validate_production_binding(stage, payload))
     return errors
 
 
 def validate_payload(stage, data, contracts, production=False):
-    if isinstance(data, list):
+    if stage == "discovery_coverage" and isinstance(data, dict):
+        data = _coverage().enrich_coverage(data)
+    # Semrush discovery stages are stage-level envelopes whose own contracts
+    # require top-level identity/rows/provenance fields. Their rows are
+    # evidence data, not independent stage payloads. Other list-shaped inputs
+    # remain batches.
+    if stage in {"discovery_semrush_ideas", "discovery_semrush_competitor_organic"} and isinstance(data, dict):
+        rows = [data]
+    elif isinstance(data, list):
         rows = data
     elif isinstance(data, dict) and isinstance(data.get("rows"), list):
         rows = data["rows"]
@@ -230,27 +350,41 @@ def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _normalized_keyword(value):
+    return " ".join(str(value or "").split()).casefold()
+
+
 def _write_validation_receipt(report_path, report, candidate_id=None):
+    """Bind a PASS report to this validator source and its exact report bytes."""
     report_path = Path(report_path)
     receipt_path = report_path.with_suffix(".receipt.json")
+    candidate_id = str(candidate_id).strip() if candidate_id not in (None, "") else None
+    if candidate_id is not None and report.get("stage") not in CANDIDATE_SCOPED_STAGES:
+        raise ValueError(f"global stage {report.get('stage')} cannot use candidate_id")
+    if candidate_id is not None:
+        rows = report.get("complete")
+        if not isinstance(rows, list) or len(rows) != 1:
+            raise ValueError("candidate-scoped validation requires exactly one complete row")
+        candidate_keyword = _normalized_keyword(rows[0].get("keyword")) if isinstance(rows[0], dict) else ""
+        if not candidate_keyword:
+            raise ValueError("candidate-scoped validation requires a complete row keyword")
+    else:
+        if report.get("candidate_keyword") not in (None, ""):
+            raise ValueError("global validation cannot carry candidate_keyword")
+        candidate_keyword = None
+    report["candidate_id"] = candidate_id
+    report["candidate_keyword"] = candidate_keyword
     report["validation_receipt_ref"] = str(receipt_path)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    report_sha = _sha256(report_path)
-    issued_at = report.get("generated_at") or datetime.now(timezone.utc).isoformat()
-    issuance = _binding()._mint_issuance_proof(
-        "stage_validator",
-        report["stage"],
-        report_sha,
-        str(issued_at),
-    )
     receipt = {
         "schema": "seo-stage-validation/v1",
         "stage": report["stage"],
         "status": report["status"],
         "candidate_id": candidate_id,
+        "candidate_keyword": candidate_keyword,
+        "validator_source_sha256": _sha256(Path(__file__).resolve()),
         "report_ref": str(report_path),
-        "report_sha256": report_sha,
-        "issuance": issuance,
+        "report_sha256": _sha256(report_path),
     }
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return receipt_path
@@ -270,6 +404,11 @@ def main():
         print("BLOCKED: --production requires --report so a validation receipt can be issued", file=sys.stderr)
         return 2
 
+    candidate_id = str(args.candidate_id).strip() if args.candidate_id else None
+    if candidate_id and args.stage not in CANDIDATE_SCOPED_STAGES:
+        print(f"BLOCKED: global stage {args.stage} cannot use --candidate-id", file=sys.stderr)
+        return 2
+
     contracts = json.loads(Path(args.contracts).read_text(encoding="utf-8"))
     data = json.loads(Path(args.input).read_text(encoding="utf-8"))
     complete, blocked = validate_payload(args.stage, data, contracts, production=args.production)
@@ -277,36 +416,31 @@ def main():
         "stage": args.stage,
         "status": batch_status(complete, blocked),
         "production": bool(args.production),
-        "candidate_id": args.candidate_id,
+        "candidate_id": candidate_id,
+        "candidate_keyword": None,
         "complete_count": len(complete),
         "blocked_count": len(blocked),
         "complete": complete,
         "blocked": blocked,
     }
 
-    issuance_error = None
+    receipt_error = None
     if args.report:
         report_path = Path(args.report)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         if args.production and not blocked:
             try:
-                _write_validation_receipt(report_path, report, args.candidate_id)
+                _write_validation_receipt(report_path, report, candidate_id)
             except Exception as exc:
-                issuance_error = str(exc)
+                receipt_error = str(exc)
                 if not report_path.is_file():
-                    report_path.write_text(
-                        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                        encoding="utf-8",
-                    )
+                    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         else:
-            report_path.write_text(
-                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    if issuance_error:
-        print(f"BLOCKED: {issuance_error}", file=sys.stderr)
+    if receipt_error:
+        print(f"BLOCKED: {receipt_error}", file=sys.stderr)
         return 2
     if blocked:
         for item in blocked:

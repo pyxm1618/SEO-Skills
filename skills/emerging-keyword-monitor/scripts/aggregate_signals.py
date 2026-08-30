@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from birth_history import infer_demand_history, load_thresholds as load_birth_thresholds
 from validate_observations import is_missing, load_rows, parse_iso, validate_rows
 
 SERIES_FIELDS = ("source", "source_type", "country", "signal_unit", "metric_database", "time_window")
@@ -165,6 +166,26 @@ def normalized_context_value(value: Any) -> str | None:
     return str(value).strip().lower()
 
 
+def is_long_history_window(value: Any) -> bool:
+    normalized = "".join(character for character in str(value or "").strip().lower() if character.isalnum())
+    return normalized in {"5y", "5year", "5years", "today5y", "past5years"}
+
+
+def classification_window_rank(value: Any) -> int:
+    normalized = "".join(character for character in str(value or "").strip().lower() if character.isalnum())
+    if normalized in {"7d", "7day", "7days", "past7d", "recent7d", "today7d"}:
+        return 0
+    if normalized in {"30d", "30day", "30days", "past30d", "recent30d", "today30d"}:
+        return 1
+    if normalized in {"90d", "90day", "90days", "3m", "3month", "3months", "past90d", "recent90d", "today90d"}:
+        return 2
+    if normalized in {"12m", "12month", "12months", "1y", "1year", "today12m", "past12months"}:
+        return 3
+    if is_long_history_window(value):
+        return 4
+    return 5
+
+
 def metric_compatibility_status(records: dict[str, dict[str, Any] | None]) -> str:
     """Check whether core keyword metrics share provider, database, and market context."""
     present = [record for record in records.values() if isinstance(record, dict)]
@@ -294,6 +315,17 @@ def summarize_series(key: tuple[Any, ...], rows: list[dict[str, Any]], as_of: da
         "signal_unit": key[3],
         "metric_database": key[4],
         "time_window": key[5],
+        "source_url": latest_non_missing(rows, "source_url"),
+        "requested_timeframe": latest_non_missing(rows, "requested_timeframe"),
+        "actual_resolution": latest_non_missing(rows, "actual_resolution"),
+        "series": latest_non_missing(rows, "series"),
+        "evidence_refs": sorted(
+            {
+                str(row.get("evidence_ref")).strip()
+                for row in rows
+                if not is_missing(row.get("evidence_ref"))
+            }
+        ),
         "observation_count": len(points),
         "first_observed_at": first_dt.date().isoformat() if first_dt else None,
         "last_observed_at": latest_dt.date().isoformat() if latest_dt else None,
@@ -362,7 +394,12 @@ def choose_primary(series: list[dict[str, Any]]) -> dict[str, Any] | None:
         last, _ = parse_iso(item.get("last_observed_at"))
         timestamp = last.timestamp() if last else 0.0
         identity = tuple(str(item.get(field) or "") for field in SERIES_FIELDS)
-        return (-int(item.get("observation_count") or 0), -timestamp, identity)
+        return (
+            classification_window_rank(item.get("time_window")),
+            -timestamp,
+            -int(item.get("observation_count") or 0),
+            identity,
+        )
 
     return sorted(series, key=sort_key)[0]
 
@@ -403,6 +440,32 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
         evidence.sort(key=lambda item: tuple(str(item.get(field) or "") for field in SERIES_FIELDS))
         primary = choose_primary(evidence)
 
+        long_series = [
+            (key, srows)
+            for key, srows in series_rows.items()
+            if is_long_history_window(key[5])
+        ]
+        long_series.sort(
+            key=lambda item: (
+                -len(item[1]),
+                tuple(str(item[0][field_index] or "") for field_index in range(len(SERIES_FIELDS))),
+            )
+        )
+        long_history = None
+        if long_series:
+            _, long_rows = long_series[0]
+            long_resolution = latest_non_missing(long_rows, "actual_resolution")
+            if is_missing(long_resolution):
+                long_resolution = latest_non_missing(long_rows, "source_resolution")
+            long_points = [
+                {
+                    "time": row.get("observed_at"),
+                    "value": row.get("signal_value"),
+                }
+                for row in long_rows
+            ]
+            long_history = infer_demand_history(long_points, load_birth_thresholds(), long_resolution)
+
         observed_dates = [row_dt(row) for row in keyword_rows if row_dt(row) is not None]
         carried_first_dates = [historical_first_dt(row) for row in keyword_rows if historical_first_dt(row) is not None]
         first_dt = min((dt for dt in observed_dates + carried_first_dates if dt is not None), default=None)
@@ -439,7 +502,20 @@ def aggregate(rows: list[dict[str, Any]], as_of: datetime) -> dict[str, Any]:
             "root_id": root_ids[0] if len(root_ids) == 1 else None,
             "root_id_conflict": len(root_ids) > 1,
             "first_observed_at": first_dt.date().isoformat() if first_dt else None,
-            "estimated_birth_window": None,
+            "estimated_birth_window": long_history.get("estimated_birth_window") if long_history else None,
+            "birth_window_start": long_history.get("birth_window_start") if long_history else None,
+            "birth_window_end": long_history.get("birth_window_end") if long_history else None,
+            "birth_source_resolution": long_history.get("birth_source_resolution") if long_history else "unknown",
+            "birth_confidence": long_history.get("birth_confidence") if long_history else "low",
+            "birth_reason": long_history.get("birth_reason") if long_history else "no_long_history_series",
+            "birth_evidence_series": long_history.get("birth_evidence_series", []) if long_history else [],
+            "demand_history_type": long_history.get("demand_history_type", "unknown") if long_history else "unknown",
+            "resurgence_window": long_history.get("resurgence_window") if long_history else None,
+            "resurgence_window_start": long_history.get("resurgence_window_start") if long_history else None,
+            "resurgence_window_end": long_history.get("resurgence_window_end") if long_history else None,
+            "long_history_positive_seen": long_history.get("historical_positive_seen") if long_history else None,
+            "long_history_positive_observations": long_history.get("historical_positive_observations") if long_history else None,
+            "long_history_positive_windows": long_history.get("historical_positive_windows", []) if long_history else [],
             "age_days": (as_of.date() - first_dt.date()).days if first_dt else None,
             "baseline_signal": primary.get("baseline_signal") if primary else None,
             "recent_signal": primary.get("recent_signal") if primary else None,

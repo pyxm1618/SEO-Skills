@@ -1,4 +1,8 @@
 {
+  "discovery_input_manifest": {
+    "required": ["schema", "batch_id", "root_handoff_receipt_ref", "root_handoff_receipt_sha256", "seed_plan", "source_receipts", "candidate_inventory", "candidate_analysis"],
+    "equals": {"schema": "seo-discovery-input/v1"}
+  },
   "discovery_autocomplete": {
     "required": ["seed", "suggestions", "country", "language", "observed_at", "source", "evidence_ref"],
     "equals": {"source": "google_autocomplete"},
@@ -10,10 +14,70 @@
     "host_equals": {"relay_origin": "sem.3ue.com"},
     "list_min": {"rows": 1}
   },
+  "discovery_semrush_competitor_organic": {
+    "required": [
+      "competitor_domain", "rows", "observed_at", "metric_source", "metric_database",
+      "metric_stage", "relay_origin", "provenance_ref"
+    ],
+    "equals": {"metric_source": "Semrush", "metric_database": "us", "metric_stage": "competitor_organic"},
+    "host_equals": {"relay_origin": "sem.3ue.com"},
+    "list_min": {"rows": 1}
+  },
+  "discovery_coverage": {
+    "required": [
+      "batch_id", "discovery_mode", "required_seeds", "observed_candidates",
+      "required_branch_seeds", "competitor_sweep", "other_mandatory_sources",
+      "max_branch_depth", "max_branch_seeds", "upstream_input", "candidate_analysis"
+    ]
+  },
   "discovery_handoff": {
-    "required": ["batch_id", "required_seed_count", "autocomplete_pass_count", "status"],
-    "equals": {"status": "PASS"},
-    "equal_fields": [["required_seed_count", "autocomplete_pass_count"]]
+    "required": [
+      "batch_id", "required_seed_count", "autocomplete_pass_count", "status",
+      "coverage_status", "coverage_receipt_ref", "keywords"
+    ],
+    "equals": {"status": "PASS", "coverage_status": "PASS"},
+    "equal_fields": [["required_seed_count", "autocomplete_pass_count"]],
+    "items_required": {
+      "keywords": ["candidate_id", "keyword", "source", "source_seed", "evidence_receipt_ref"]
+    }
+  },
+  "trends_related": {
+    "required": [
+      "anchor", "related_queries", "country", "timeframe", "observed_at",
+      "source", "source_type", "source_url", "raw_evidence_ref", "screenshot_ref",
+      "evidence_receipt_ref"
+    ],
+    "equals": {"source": "Google Trends", "source_type": "google_trends_related"},
+    "host_equals": {"source_url": "trends.google.com"},
+    "items_required": {
+      "related_queries": ["query", "relation_type", "rank", "is_google_breakout"]
+    }
+  },
+  "trends_timeline": {
+    "required": [
+      "keyword", "market", "requested_timeframe", "actual_resolution", "series",
+      "observed_at", "source", "source_type", "source_url", "raw_evidence_ref",
+      "screenshot_ref", "evidence_receipt_ref"
+    ],
+    "equals": {"source": "Google Trends", "source_type": "google_trends_timeline"},
+    "host_equals": {"source_url": "trends.google.com"},
+    "list_min": {"series": 2},
+    "items_required": {"series": ["time", "value"]}
+  },
+  "emerging_radar_run": {
+    "required": [
+      "domain", "status", "recursive_edge_policy", "supplemental_recursive",
+      "anchor_pool", "candidate_counts", "blockers", "output_artifacts"
+    ],
+    "equals": {
+      "recursive_edge_policy": "google_trends_rising_only",
+      "supplemental_recursive": false
+    },
+    "list_min": {"anchor_pool": 1},
+    "items_required": {
+      "anchor_pool": ["keyword", "anchor_source", "discovery_depth"],
+      "blockers": ["status", "reason"]
+    }
   },
   "stage6_exact": {
     "required": [

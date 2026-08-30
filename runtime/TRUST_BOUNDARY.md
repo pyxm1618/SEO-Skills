@@ -1,59 +1,169 @@
-# SEO Execution Integrity Trust Boundary
+# SEO Execution Integrity Scope
 
-Production evidence authenticity cannot be established by a secret, token, or signer stored in the same agent-writable repository or environment. A normal Codex/agent workflow can read and execute repository code, so any same-principal signing material would be forgeable.
+This repository protects **normal agent workflow correctness and evidence traceability**. It is designed to stop Codex/AI from accidentally skipping real collection, treating `unknown` as observed data, switching providers, advancing with incomplete stages, or claiming `COMPLETE` before the canonical workflow is satisfied.
 
-## Trusted issuance broker
+It does **not** claim cryptographic separation from a malicious local principal that already has arbitrary shell access and can rewrite the repository and its evidence files. Building that OS-level security boundary is outside the scope of these SEO Skills.
 
-`runtime/evidence_binding.py` therefore delegates production issuance and verification to an OS-level broker at one of these fixed paths:
+## Production evidence boundary
 
-- `/usr/local/libexec/seo-issuance-broker`
-- `/opt/openai/libexec/seo-issuance-broker`
+Observed evidence still has strict production requirements:
 
-The repository accepts only a regular, non-symlink executable that is root-owned and not group/world writable. The repository does not create or store the broker signing secret. If no trusted broker is installed, production issuance/verification fails closed.
+- Google observations must come through the project Google live collector and include the required current screenshot / structured observation or Trends temporal payload.
+- Semrush observations must come from the authenticated same-origin `sem.3ue.com` relay. Official Semrush API and alternative-provider fallback remain forbidden.
+- Collector receipts bind the expected collector name, the current collector source SHA256, normalized output SHA256, and the exact required artifact roles/hashes.
+- Verification replays Semrush normalization from the saved raw relay response and rechecks Google source URLs, observations, screenshots, and Trends timelines.
+- Traditional Discovery coverage is a separate ledger gate: it consumes a production-verified `discovery_input_manifest` for the Root/Natural Seeds original totals, Candidate inventory, and complete Candidate analysis, then reconciles required Seeds, Branch Seeds, configured competitor domains, and other mandatory sources without deleting blocked/unreviewed items. Google source PASS alone cannot satisfy Full Coverage.
+- Google Trends timeframe indexes are verified and retained as separate comparable series; the long (`5y`) series may support history/birth analysis, while medium and recent windows remain independent evidence.
+- A Google Related/Rising `Breakout` label is an observed source fact only. Canonical `breakout` remains an independent classifier result.
+- A plain row containing fields such as `metric_source=Semrush` is never enough; production validation requires the complete evidence receipt and artifacts.
 
-The broker is part of the host trust boundary, not this repository. It MUST independently enforce authorization. In particular, a normal agent invoking the broker directly with a fabricated `sign` request MUST be denied. Repository-side Python stack inspection is defense in depth only and MUST NOT be treated as the authoritative security boundary.
+These controls are intended to make the expected path deterministic, auditable, and fail-closed when real observations are unavailable.
 
-The broker supports:
+## Validation receipts
 
-- `sign`: issue a production evidence or stage-validation proof only for an authorized collector/validator execution;
-- `verify`: verify an issued proof against the expected issuer/kind/subject hash;
-- `verify-attestation`: verify host-controlled workflow attestations used for facts that an agent must not self-declare.
+A production Stage PASS must carry a validation receipt. The receipt binds:
 
-## Workflow attestations
+- canonical stage;
+- candidate scope when applicable;
+- current `runtime/stage_validator.py` source SHA256;
+- validation report path and SHA256.
 
-The Stop gate uses external attestations for workflow facts that cannot safely be accepted from `active.json` alone:
+The Stop/PreToolUse hook reloads the report and reruns production evidence validation against the **current underlying evidence** before trusting the PASS. Editing a report or evidence artifact after validation therefore invalidates its hash or its semantic replay.
 
-- `emerging_route`: binds `run_id`, route=`emerging`, and the exact candidate-id set to a trusted emerging-selection handoff;
-- `candidate_finalist`: binds `run_id` and `candidate_id`, and carries a boolean `is_finalist` claim;
-- `candidate_blocked`: binds `run_id`, `candidate_id`, terminal status `BLOCKED`, and the canonical blocked stage;
-- `run_blocked`: binds `run_id`, route (or `unresolved` before route resolution), terminal status `BLOCKED`, `blocked_stage`, and the exact `blocked_reason` for a run-level terminal blocker.
+## Emerging route handoff
 
-Traditional route identity is established by its mandatory verified discovery stages. Emerging is allowed to skip discovery only with the trusted route attestation.
+An Emerging Radar run is a separate canonical stage. Its report must record the domain, anchor pool, Rising-only recursive-edge policy, supplemental-source non-recursion, candidate counts, blockers, and output artifact paths. The live runner validates the final summary and registers `stages.emerging_radar_run` with a validation receipt for a PASS summary; a PASS summary has no blockers, while a blocked summary retains the matching structured blocker. A blocked Google or relay stage remains `BLOCKED`; the runner never substitutes synthetic or alternate-provider evidence.
 
-A bare run-level `status=BLOCKED` is never sufficient. Normal run-level blockers require a trusted `run_blocked` attestation, so an agent cannot skip collection or lifecycle gates merely by editing `active.json`.
+Traditional runs require their verified discovery stages.
 
-There is one narrow bootstrap exception: when the trusted issuance broker itself is absent, the Stop hook may accept only the exact blocker `blocked_stage=trust_boundary` and `blocked_reason="trusted issuance broker unavailable"`, and only after directly confirming that `_trusted_broker_path()` fails for broker unavailability. This exception exists because the missing broker cannot attest its own absence. It MUST NOT be generalized to browser, Semrush, collector, data, or workflow blockers; if a trusted broker is present, the bootstrap claim is rejected.
+An Emerging run may skip traditional discovery only when `emerging_pipeline_receipt_ref` points to a `seo-emerging-pipeline/v1` receipt produced by `runtime/emerging_pipeline.py`. The receipt binds:
+
+- the original observation input path and SHA256 plus the fixed `as_of` time;
+- the current `emerging_pipeline.py`, all four monitor scripts, and `references/thresholds.json` SHA256 values;
+- the validated, aggregated, classified, and routed output paths and SHA256 values.
+
+The Hook reloads every file, checks every hash, replays `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py` with the recorded `as_of`, and compares every saved JSON output with the replay. `route_handoff_ref` must point to that receipt's routed output. A bare routes JSON, even with a plausible handoff shape, is not an attestation.
+
+Every routed `selection_handoff` candidate must have exactly one manifest candidate with:
+
+- status `emerging` or `breakout`;
+- `root_relation=existing_root`;
+- a non-empty `root_id`;
+- matching candidate keyword.
+
+Only `net_new`, `breakout`, `emerging_variant`, and `unknown` are canonical `signal_type` values; a confirmed handoff must carry a non-`unknown` canonical value. A complete pipeline that honestly produces `no_handoff` is valid monitor evidence and must remain `no_handoff`; it does not require a fabricated candidate. A bare `route=emerging` or a direct `status=emerging` input is insufficient.
+
+## Traditional Discovery handoff
+
+Traditional runs require verified `discovery_autocomplete`, `discovery_coverage`, and `discovery_handoff` stages. The handoff report must point to the exact `discovery_coverage` validation receipt; the handoff validator verifies that receipt and its report before issuing PASS. That report must contain a PASS coverage summary with `formal_handoff_allowed=true` and the same `batch_id`. A configured competitor sweep or required Branch Seed that is blocked prevents formal handoff while preserving earlier evidence.
 
 ## Candidate lifecycle
 
-Candidate-specific selection stages never fall back to global receipts. Every candidate that continues through selection must own its own `stage6_exact`, `intitle_observation`, `kgr_intitle`, and `serp_review` validation chain.
+Candidate-specific selection stages never fall back to global receipts. Every continuing candidate must own its own:
 
-After verified Exact evidence, the existing evaluator remains authoritative for deterministic early elimination. Candidates with `principle_eliminate_volume`, `principle_eliminate_kd`, or `excluded_manual` stop there and are not forced through KGR/SERP. A genuinely blocked candidate may also terminate without blocking other candidates, but only when its blocker is externally attested.
+- `stage6_exact`;
+- `intitle_observation`;
+- `kgr_intitle`;
+- `serp_review`.
 
-Finalist Trends remains conditional. The agent cannot escape it by writing `is_finalist=false`: finalist disposition must either be demonstrated by a verified `finalist_trend` stage or by a trusted candidate-finalist attestation.
+For `stage6_exact`, `intitle_observation`, `kgr_intitle`, `serp_review`, and `finalist_trend`, the production validator must be called with `--candidate-id <id>` and the protected command must contain the literal `SEO_CANDIDATE_ID=<id>`. The validator derives `candidate_keyword` from exactly one complete row and writes it to both the validation report and receipt. The Hook compares that normalized value with `manifest.candidates[<id>].keyword`; missing, duplicate, or mismatched rows fail closed. Global discovery receipts must not carry candidate identity.
 
-## Acceptance requirement
+After verified Exact evidence, the existing evaluator remains authoritative for deterministic early elimination. Candidates with `principle_eliminate_volume`, `principle_eliminate_kd`, or `excluded_manual` stop there and are not forced through KGR/SERP.
 
-Automated tests without the host broker may prove fail-closed behavior and mechanism regressions, but they cannot prove Live issuance. Final acceptance must separately demonstrate:
+A candidate may terminate as `BLOCKED` only with a canonical `blocked_stage`, a matching stage record whose status is `BLOCKED`, and a non-empty real blocker reason.
 
-1. the real broker is installed at an allowed OS path with correct ownership/mode;
-2. normal agent code cannot read signing material;
-3. a direct agent `sign` request is denied;
-4. direct CLI collector/validator execution can obtain valid issuance only when authorized by the broker;
-5. broker verification rejects forged/tampered proofs;
-6. route/finalist/candidate-blocker/run-blocker attestations are bound to the claimed run/candidate state;
-7. a bare or tampered run-level `BLOCKED` claim is denied;
-8. a valid `run_blocked` attestation is accepted only for the exact bound route/stage/reason;
-9. the broker-missing bootstrap exception succeeds only when the trusted broker is actually unavailable and is rejected when the broker exists.
+Finalist Trends remains conditional. A continuing candidate must either have a verified `finalist_trend` PASS, or an explicit `finalist_review` object containing boolean `is_finalist` plus a non-empty `reason`. If `is_finalist=true`, verified Trends is mandatory before COMPLETE.
 
-If these host checks cannot be performed, broker-dependent Live acceptance is `BLOCKED`, not `PASS`.
+## Run-level BLOCKED
+
+A bare run-level `status=BLOCKED` is never sufficient. A terminal blocked run requires:
+
+- non-empty `run_id`;
+- canonical `blocked_stage`;
+- non-empty `blocked_reason`;
+- route, when present, must be `traditional` or `emerging`;
+- the same canonical stage must exist in the run's `stages` map with `status=BLOCKED`;
+- that stage record must contain the same non-empty `blocked_reason`.
+
+This preserves the run-level bypass repair without requiring an external OS signer: a run cannot stop merely by inventing top-level blocker fields; it must first record the blocker on the stage that actually failed.
+
+## Live acceptance requirement
+
+Automated tests prove contracts, hashes, replay behavior, lifecycle gates, and fail-closed control flow. Live acceptance separately exercises the real integrations without requiring external services or market conditions to behave deterministically.
+
+The release acceptance set is:
+
+1. Google Autocomplete in a real browser/CDP session;
+2. Google intitle and SERP through the real Google collector;
+3. Google Trends with real temporal evidence;
+4. authenticated `sem.3ue.com` Ideas and Exact relay collection, with no official API or fallback provider;
+5. KGR from the verified Exact + intitle pair;
+6. actual Agent Host `PreToolUse` and `Stop` invocation from that host's reviewed/trusted project hook configuration, for **every** host the release covers;
+7. one Traditional workflow exercising a deterministic early-elimination candidate and the continuing-candidate gates as far as the external sources permit;
+8. one Emerging Monitor run using **real temporal observations** through `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py`.
+
+### Agent Host acceptance
+
+These Skills are host-neutral; their hook wiring is not. Each host reads only its own configuration, so a host that was never wired runs the SEO method with the integrity gates **inert** — the protection appears present and enforces nothing. Host acceptance is therefore recorded **per host**, and a host without its own recorded Host acceptance is not a released host, however green the automated suite is.
+
+Known host configurations:
+
+- Claude Code — `.claude/settings.json` (`PreToolUse`, `Stop`, `SubagentStop`);
+- Codex — `.codex/hooks.json` (`PreToolUse`, `Stop`).
+
+For each host the release covers:
+
+- project-local hooks must be reviewed and trusted in that host before its smoke test;
+- the smoke test must demonstrate **automatic** invocation by the host, not a manual run of `runtime/stage_hook.py`;
+- it must be exercised from both the repository root and a repository subdirectory, so relative working-directory assumptions cannot silently disable the gate;
+- every event through which that host could reach run completion must be gated. Claude Code's `Stop` does not fire for subagents, so `SubagentStop` is required there and is proven separately; a host with an equivalent delegation path needs the equivalent proof.
+
+A further host may be added only once its own hook configuration exists and its Host acceptance is recorded. Copying the Skills into a host that has no equivalent hook mechanism ships the SEO method without its execution-integrity guarantees; such a host may be documented as unsupported, but must not be presented as a released host.
+
+The Hook normalizes only a matching copy of Bash input, including backslash-newline continuations and repeated whitespace. The command passed to the tool is not changed. Single-line, multiline, `&&`, and directory-prefixed equivalent protected commands must resolve to the same prerequisite stage.
+
+### Fail-closed hook lockout (accepted operational risk)
+
+The gate denies a command when the hook *decides* to deny it, and equally when the hook itself *fails to execute*. The second case is deliberate — a hook that cannot run has not cleared anything, so treating its failure as approval would be the bypass this repository exists to prevent. The operational consequence is that a hook which cannot execute rejects **every** Bash call in that session, including the one that would repair it.
+
+Three causes have actually occurred:
+
+- the sandbox lost access to the worktree path, so the hook could not resolve its working directory;
+- the wired script path did not exist, because the script was renamed or deleted while the session was still running the wiring it had cached at startup;
+- the configured interpreter was unavailable.
+
+Recovery does not require abandoning fail-closed behavior, because `Write`/`Edit` do not pass through the Bash hook. Restoring the wired path with those tools restores Bash immediately. Where the cause is environmental rather than a missing file, restarting the session is the remedy.
+
+This risk is accepted rather than mitigated away, and it constrains one specific change: a host reads its hook wiring **once, at startup**, so editing `.claude/settings.json` or `.codex/hooks.json` does not repoint a session already running. Changing a hook's path therefore requires keeping the old file in place, repointing the configuration, restarting every session, and only then deleting the old path. `test_every_wired_hook_script_exists_on_disk` enforces that the configuration never references a missing script, but it cannot observe that a live session is still using superseded wiring; only the restart ordering covers that.
+
+### Emerging acceptance semantics
+
+Live acceptance must not manufacture an `emerging` or `breakout` result just to force a `selection_handoff`.
+
+A real-data Emerging E2E is successful when real temporal observations pass through the complete Monitor pipeline and the resulting classification and route are consistent with the configured rules. Honest outcomes such as `watch`, `insufficient_evidence`, `monitor_only`, or `no_handoff` are valid Live outcomes when that is what the evidence supports. The positive `emerging/breakout -> selection_handoff` branch remains covered by deterministic regression tests and may additionally be demonstrated Live when the real evidence naturally produces such a candidate.
+
+### Accepted external-environment blocker
+
+A third-party source can block a Live request for reasons outside repository control, for example Google returning a CAPTCHA / `/sorry/` abnormal-traffic page. Such an event is never called `PASS`, but it may be recorded as `ACCEPTED_ENVIRONMENT_BLOCKER` for **release acceptance** when all of the following are true:
+
+- the real collector reached the intended external source and captured the blocker evidence;
+- the blocker is demonstrably external rather than a parser/contract bug;
+- no mock, synthetic data, official Semrush API, alternative SEO provider, or other fallback was used;
+- the collector and downstream workflow fail closed rather than fabricating or advancing with incomplete evidence;
+- targeted regression tests cover the relevant parser/extractor behavior; and
+- there is no open P0/P1 indicating that valid source data would be accepted incorrectly or that required gates can be bypassed.
+
+`ACCEPTED_ENVIRONMENT_BLOCKER` means the software correctly handled an unavailable external dependency. It does **not** turn the blocked observation into evidence and does not allow that individual production run to continue past the blocked stage.
+
+## Release decision
+
+A release candidate may be recommended for merge when:
+
+- the repository-wide automated suite and compile checks pass;
+- P0 = 0 and P1 = 0;
+- Semrush relay-only policy and evidence provenance remain intact;
+- Host acceptance passes for every host the release covers;
+- the real-data Emerging Monitor pipeline passes under the semantics above; and
+- any remaining Live source failure is only an `ACCEPTED_ENVIRONMENT_BLOCKER` meeting every condition above.
+
+A real code defect, unverifiable provenance, provider fallback, fabricated observation, missing Host enforcement, or open P0/P1 remains `DO NOT MERGE`.
