@@ -24,6 +24,7 @@ COLLECTOR_FILES = {
     "google_intitle": ROOT / "collectors" / "google_live_collector.py",
     "google_serp": ROOT / "collectors" / "google_live_collector.py",
     "google_trends": ROOT / "collectors" / "google_live_collector.py",
+    "google_trends_related": ROOT / "collectors" / "google_live_collector.py",
 }
 EXPECTED_COLLECTORS = {
     "semrush_ideas": "semrush_relay_collector",
@@ -33,6 +34,7 @@ EXPECTED_COLLECTORS = {
     "google_intitle": "google_live_collector",
     "google_serp": "google_live_collector",
     "google_trends": "google_live_collector",
+    "google_trends_related": "google_live_collector",
 }
 REQUIRED_ARTIFACT_ROLES = {
     "semrush_ideas": {"relay_raw_response", "current_network_capture"},
@@ -42,6 +44,7 @@ REQUIRED_ARTIFACT_ROLES = {
     "google_intitle": {"screenshot", "structured_observation"},
     "google_serp": {"screenshot", "structured_observation"},
     "google_trends": {"temporal_payload", "screenshot"},
+    "google_trends_related": {"related_payload", "screenshot"},
 }
 
 
@@ -225,6 +228,35 @@ def _verify_semrush_semantics(evidence_type, normalized, role_paths):
 def _verify_google_semantics(evidence_type, normalized, role_paths):
     screenshot_path = role_paths["screenshot"]
     _assert_png(screenshot_path)
+    if evidence_type == "google_trends_related":
+        raw_path = role_paths["related_payload"]
+        raw = _json_read(raw_path, "Google Trends related evidence")
+        if _host(raw.get("source_url")) != "trends.google.com":
+            raise EvidenceIntegrityError("Google Trends related source URL mismatch")
+        collector = _load_module(_expected_collector_path(evidence_type), "evidence_replay_google_trends_related")
+        try:
+            replayed_rows = collector.parse_trends_related(raw.get("payload"))
+        except Exception as exc:
+            raise EvidenceIntegrityError(f"Google Trends related payload cannot be replayed: {exc}") from exc
+        if replayed_rows != raw.get("related_queries") or replayed_rows != normalized.get("related_queries"):
+            raise EvidenceIntegrityError("Google Trends related rows differ from payload replay")
+        checks = {
+            "anchor": raw.get("anchor"),
+            "country": raw.get("country"),
+            "timeframe": raw.get("timeframe"),
+            "observed_at": raw.get("observed_at"),
+            "source_url": raw.get("source_url"),
+        }
+        for field, expected in checks.items():
+            if normalized.get(field) != expected:
+                raise EvidenceIntegrityError(f"Google Trends related {field} differs from temporal evidence")
+        if normalized.get("source") != "Google Trends" or normalized.get("source_type") != "google_trends_related":
+            raise EvidenceIntegrityError("Google Trends related source label mismatch")
+        if not _same_path(normalized.get("raw_evidence_ref"), raw_path):
+            raise EvidenceIntegrityError("Google Trends related evidence ref mismatch")
+        if not _same_path(normalized.get("screenshot_ref"), screenshot_path):
+            raise EvidenceIntegrityError("Google Trends related screenshot ref mismatch")
+        return
     if evidence_type == "google_trends":
         raw_path = role_paths["temporal_payload"]
         raw = _json_read(raw_path, "Google Trends temporal evidence")
@@ -242,6 +274,12 @@ def _verify_google_semantics(evidence_type, normalized, role_paths):
             "google_trends_market": raw.get("market"),
             "google_trends_observed_at": raw.get("observed_at"),
         }
+        if "requested_timeframe" in normalized and normalized.get("requested_timeframe") != raw.get("requested_timeframe"):
+            raise EvidenceIntegrityError("Google Trends requested timeframe differs from temporal evidence")
+        if "actual_resolution" in normalized and normalized.get("actual_resolution") != raw.get("actual_resolution"):
+            raise EvidenceIntegrityError("Google Trends actual resolution differs from temporal evidence")
+        if "series" in normalized and normalized.get("series") != replayed_series:
+            raise EvidenceIntegrityError("Google Trends series alias differs from temporal evidence")
         for field, expected in checks.items():
             if normalized.get(field) != expected:
                 raise EvidenceIntegrityError(f"Google Trends normalized {field} differs from temporal evidence")
@@ -251,6 +289,12 @@ def _verify_google_semantics(evidence_type, normalized, role_paths):
             raise EvidenceIntegrityError("Google Trends evidence ref mismatch")
         if not _same_path(normalized.get("google_trends_screenshot_ref"), screenshot_path):
             raise EvidenceIntegrityError("Google Trends screenshot ref mismatch")
+        if "source" in normalized and normalized.get("source") != "Google Trends":
+            raise EvidenceIntegrityError("Google Trends normalized source label mismatch")
+        if "source_type" in normalized and normalized.get("source_type") != "google_trends_timeline":
+            raise EvidenceIntegrityError("Google Trends normalized source type mismatch")
+        if "source_url" in normalized and normalized.get("source_url") != raw.get("source_url"):
+            raise EvidenceIntegrityError("Google Trends normalized source URL differs from temporal evidence")
         return
 
     observation_path = role_paths["structured_observation"]

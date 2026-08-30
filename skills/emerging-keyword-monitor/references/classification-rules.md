@@ -10,6 +10,8 @@ The novelty check must not include the same recent observations that establish p
 
 The label means **newly observed within the available evidence window**, not an absolute search-demand birth date. A zero relative-source novelty baseline does not prove absolute historical search Volume was zero.
 
+The long-history `demand_history_type` is an additional guard. `preexisting` and `resurgent` candidates must not be labeled `net_new`, even when a nearer recent baseline is zero. `newly_observed` is still a bounded evidence-window conclusion, not an absolute birth claim.
+
 ### `breakout`
 
 Requires a positive historical growth baseline plus persistent recent signal materially above that baseline. A keyword with an established baseline must not be relabeled `net_new` merely because growth is large.
@@ -57,6 +59,8 @@ Missing freshness metadata remains unknown; it is not treated as stale or fresh 
 `trend_status` belongs to a source/series. A `lasted`/ended status from one source cannot globally veto a separate fresh verified series. If the primary series is ended or stale and another verified, fresh, active series carries valid temporal evidence, classification may use that independent series and records it in `classification_primary_series`.
 
 If the selected/only usable series reports `lasted`, the candidate remains `watch` unless new independent evidence supersedes it.
+
+Google Related/Rising may expose `google_rising_label=Breakout`. That source fact is preserved for discovery evidence only. It does not set canonical `signal_type=breakout` or `status=breakout`; the classifier independently applies the positive-baseline and persistent-growth rule above.
 
 ## Noise
 

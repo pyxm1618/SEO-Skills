@@ -42,10 +42,18 @@ STAGE_EVIDENCE_TYPES = {
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
+    "trends_related": "google_trends_related",
+    "trends_timeline": "google_trends",
 }
 CANONICAL_STAGES = frozenset(
     set(STAGE_EVIDENCE_TYPES)
-    | {"kgr_intitle", "discovery_input_manifest", "discovery_coverage", "discovery_handoff"}
+    | {
+        "kgr_intitle",
+        "discovery_input_manifest",
+        "discovery_coverage",
+        "discovery_handoff",
+        "emerging_radar_run",
+    }
 )
 TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_coverage", "discovery_handoff")
 EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})
@@ -317,7 +325,7 @@ def _infer_canonical_required_stages(manifest):
         valid, reason = _verify_route_attestation(manifest)
         if not valid:
             return None, reason
-        return [], ""
+        return ["emerging_radar_run"], ""
     return None, f"COMPLETE has unknown or missing route: {route or 'missing'}"
 
 

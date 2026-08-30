@@ -12,11 +12,21 @@ from typing import Any
 CONFIRMED_STATUSES = {"emerging", "breakout"}
 NON_ACTIONABLE_STATUSES = {"mature", "noise", "insufficient_evidence"}
 SELECTION_FIELDS = (
+    "domain",
     "keyword",
     "root_id",
     "signal_type",
     "variant_subtype",
+    "demand_history_type",
     "first_observed_at",
+    "estimated_birth_window",
+    "birth_window_start",
+    "birth_window_end",
+    "birth_source_resolution",
+    "birth_confidence",
+    "birth_reason",
+    "birth_evidence_series",
+    "resurgence_window",
     "age_days",
     "growth_rate",
     "persistence",
@@ -34,6 +44,11 @@ SELECTION_FIELDS = (
     "supply_signal",
     "status",
     "confidence",
+    "discovery_depth",
+    "parent_anchor",
+    "discovery_source",
+    "domain_relation",
+    "google_rising_label",
 )
 
 
@@ -62,7 +77,7 @@ def selection_handoff(candidate: dict[str, Any]) -> dict[str, Any]:
 
 
 def root_watch_handoff(candidate: dict[str, Any], reason: Any) -> dict[str, Any]:
-    return {
+    handoff = {
         "keyword": str(candidate.get("keyword") or "").strip(),
         "signal_type": candidate.get("signal_type"),
         "status": candidate.get("status"),
@@ -70,6 +85,21 @@ def root_watch_handoff(candidate: dict[str, Any], reason: Any) -> dict[str, Any]
         "source_evidence": candidate.get("source_evidence"),
         "root_watch_reason": reason,
     }
+    for field in (
+        "domain",
+        "demand_history_type",
+        "estimated_birth_window",
+        "birth_reason",
+        "resurgence_window",
+        "discovery_depth",
+        "parent_anchor",
+        "discovery_source",
+        "domain_relation",
+        "google_rising_label",
+    ):
+        if field in candidate:
+            handoff[field] = candidate.get(field)
+    return handoff
 
 
 def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:

@@ -13,6 +13,8 @@ Observed evidence still has strict production requirements:
 - Collector receipts bind the expected collector name, the current collector source SHA256, normalized output SHA256, and the exact required artifact roles/hashes.
 - Verification replays Semrush normalization from the saved raw relay response and rechecks Google source URLs, observations, screenshots, and Trends timelines.
 - Traditional Discovery coverage is a separate ledger gate: it consumes a production-verified `discovery_input_manifest` for the Root/Natural Seeds original totals, Candidate inventory, and complete Candidate analysis, then reconciles required Seeds, Branch Seeds, configured competitor domains, and other mandatory sources without deleting blocked/unreviewed items. Google source PASS alone cannot satisfy Full Coverage.
+- Google Trends timeframe indexes are verified and retained as separate comparable series; the long (`5y`) series may support history/birth analysis, while medium and recent windows remain independent evidence.
+- A Google Related/Rising `Breakout` label is an observed source fact only. Canonical `breakout` remains an independent classifier result.
 - A plain row containing fields such as `metric_source=Semrush` is never enough; production validation requires the complete evidence receipt and artifacts.
 
 These controls are intended to make the expected path deterministic, auditable, and fail-closed when real observations are unavailable.
@@ -29,6 +31,8 @@ A production Stage PASS must carry a validation receipt. The receipt binds:
 The Stop/PreToolUse hook reloads the report and reruns production evidence validation against the **current underlying evidence** before trusting the PASS. Editing a report or evidence artifact after validation therefore invalidates its hash or its semantic replay.
 
 ## Emerging route handoff
+
+An Emerging Radar run is a separate canonical stage. Its report must record the domain, anchor pool, Rising-only recursive-edge policy, supplemental-source non-recursion, candidate counts, blockers, and output artifact paths. The live runner validates the final summary and registers `stages.emerging_radar_run` with a validation receipt for a PASS summary; a PASS summary has no blockers, while a blocked summary retains the matching structured blocker. A blocked Google or relay stage remains `BLOCKED`; the runner never substitutes synthetic or alternate-provider evidence.
 
 Traditional runs require their verified discovery stages.
 

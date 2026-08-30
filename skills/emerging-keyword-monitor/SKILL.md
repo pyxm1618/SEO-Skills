@@ -28,7 +28,9 @@ Read before execution:
 
 `first_observed_at` means the first observation in the current evidence system. It is not an absolute keyword birth date. Google Trends zero is a relative signal, not proof of zero real searches.
 
-Never add signals with different units or incomparable source contexts. Trends indexes, search volume, mentions, and other units remain separate series.
+Never add signals with different units or incomparable source contexts. Trends indexes, search volume, mentions, and other units remain separate series. Different timeframe indexes in Google Trends are also normalized independently: `5y`, `12m`, `90d`, `30d`, and `7d` are separate comparable series and must never be compared arithmetically or concatenated. Use the long series for history/birth inference, the medium series for shape, and recent series for persistence/acceleration.
+
+Google Related/Rising `Breakout` is an observed Google label only (`google_rising_label=Breakout`). It never directly sets this skill's canonical `signal_type` or `status`; canonical `breakout` requires the existing classifier's baseline, growth, persistence, and freshness evidence. Google collection must use a genuinely isolated logged-out context; if that cannot be established, fail closed rather than copying or deleting cookies or using a temporary account.
 
 If a real data source is unavailable, say so and leave the relevant field `unknown`. Do not replace a missing search-demand time series with supply-side page counts, product launches, article frequency, or general web mentions and then call the result confirmed search growth.
 
@@ -58,6 +60,12 @@ Route without making final SEO decisions:
 python scripts/route_candidates.py --input classified.json --format json
 ```
 
+For a domain-level radar, start with a domain/anchor pool and use Trends Rising as the recursive edge. Autocomplete and Semrush Ideas may be supplemental evidence but are not recursive BFS edges by default. Persist radar records and handoffs under `.seo-run/`; the monitor still does not invoke selection decisions.
+
+The live radar CLI may receive repeatable `--semrush-request PATH` options. Each path must be a current authenticated same-origin Semrush Ideas request descriptor for its captured seed; unmatched anchors remain without Semrush supplemental evidence, and any attempted relay/schema failure is a blocker. The CLI never constructs a Semrush endpoint or falls back to an API/provider.
+
+Before a live run is considered complete, the runner writes the final summary, validates it against the `emerging_radar_run` contract, and registers `stages.emerging_radar_run.validation_receipt_ref`. A `PASS` summary must have no blockers; a blocked summary must retain a structured blocker.
+
 When running interactively without normalized files, apply the same contracts conceptually. Do not loosen the state machine or routing rules just because evidence was gathered conversationally or from web research.
 
 ## Canonical Runtime Contract
@@ -65,6 +73,8 @@ When running interactively without normalized files, apply the same contracts co
 Use canonical enums exactly in structured output. Do not invent aliases such as `candidate`, `strong candidate`, `reject`, `possible emerging`, or mixed labels such as `typo / modifier shift` in canonical fields.
 
 `signal_type` must be exactly one of `net_new`, `breakout`, `emerging_variant`, or `unknown`.
+
+`demand_history_type` must be exactly one of `newly_observed`, `preexisting`, `resurgent`, or `unknown`. A birth window is an evidence-backed bucket/month range from one long comparable series, not an absolute keyword birthday. A series whose first available buckets already contain sustained demand is `preexisting` with `birth_reason=before_available_history`; an isolated spike remains `unknown`.
 
 `variant_subtype` must be exactly one of `new_expression`, `typo`, `modifier_shift`, or `unknown`.
 

@@ -96,6 +96,7 @@ def test_emerging_route_only_exact_is_denied(monkeypatch):
         "run_id": "r_emerg_partial",
         "route": "emerging",
         "status": "COMPLETE",
+        "stages": {"emerging_radar_run": {"status": "PASS"}},
         "candidates": {"cand": {"stage6_exact": {"status": "PASS"}}},
     }
     valid, reason = hook._verify_completion_requirements(manifest)

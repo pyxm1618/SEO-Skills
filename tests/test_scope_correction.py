@@ -119,7 +119,7 @@ def test_emerging_route_uses_monitor_handoff_evidence_not_external_attestation(t
         "candidates": {"cand_1": {"keyword": "new demand term"}},
     }
     stages, reason = hook._infer_canonical_required_stages(manifest)
-    assert stages == [], reason
+    assert stages == ["emerging_radar_run"], reason
 
 
 def test_explicit_finalist_review_false_does_not_require_external_attestation(monkeypatch):
