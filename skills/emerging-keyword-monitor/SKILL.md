@@ -28,7 +28,7 @@ Read before execution:
 
 `first_observed_at` means the first observation in the current evidence system. It is not an absolute keyword birth date. Google Trends zero is a relative signal, not proof of zero real searches.
 
-Never add signals with different units or incomparable source contexts. Trends indexes, search volume, mentions, and other units remain separate series. Google Trends also normalizes each timeframe independently: `5y`, `12m`, `90d`, `30d`, and `7d` are separate comparable series and must never be compared arithmetically or concatenated. Use the long series for history/birth inference, the medium series for shape, and recent series for persistence/acceleration.
+Never add signals with different units or incomparable source contexts. Trends indexes, search volume, mentions, and other units remain separate series. Different timeframe indexes in Google Trends are also normalized independently: `5y`, `12m`, `90d`, `30d`, and `7d` are separate comparable series and must never be compared arithmetically or concatenated. Use the long series for history/birth inference, the medium series for shape, and recent series for persistence/acceleration.
 
 Google Related/Rising `Breakout` is an observed Google label only (`google_rising_label=Breakout`). It never directly sets this skill's canonical `signal_type` or `status`; canonical `breakout` requires the existing classifier's baseline, growth, persistence, and freshness evidence. Google collection must use a genuinely isolated logged-out context; if that cannot be established, fail closed rather than copying or deleting cookies or using a temporary account.
 

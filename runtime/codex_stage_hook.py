@@ -41,8 +41,10 @@ STAGE_EVIDENCE_TYPES = {
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
+    "trends_related": "google_trends_related",
+    "trends_timeline": "google_trends",
 }
-CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff"})
+CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff", "emerging_radar_run"})
 TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_handoff")
 EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})
 CONFIRMED_EMERGING_STATUSES = frozenset({"emerging", "breakout"})

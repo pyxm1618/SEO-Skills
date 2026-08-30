@@ -38,6 +38,21 @@
     "list_min": {"series": 2},
     "items_required": {"series": ["time", "value"]}
   },
+  "emerging_radar_run": {
+    "required": [
+      "domain", "status", "recursive_edge_policy", "supplemental_recursive",
+      "anchor_pool", "candidate_counts", "blockers", "output_artifacts"
+    ],
+    "equals": {
+      "recursive_edge_policy": "google_trends_rising_only",
+      "supplemental_recursive": false
+    },
+    "list_min": {"anchor_pool": 1},
+    "items_required": {
+      "anchor_pool": ["keyword", "anchor_source", "discovery_depth"],
+      "blockers": ["status", "reason"]
+    }
+  },
   "stage6_exact": {
     "required": [
       "keyword", "volume", "kd", "cpc", "intent", "competition_level", "trend",
