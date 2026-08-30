@@ -402,9 +402,49 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
         raise RuntimeError(f"wrong Google Trends origin: {host}")
     body = page.locator("body").inner_text(timeout=5000).lower()
     if "related" not in body and "关联" not in body and not observed_payloads:
-        raise RuntimeError("Google Trends related result could not be confirmed")
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", anchor).strip("-")
+        blocker_observed_at = now()
+        blocker_evidence = evidence_json(
+            evidence_dir,
+            f"trends-related-{slug}-blocked.json",
+            {
+                "anchor": anchor,
+                "country": country,
+                "timeframe": timeframe,
+                "observed_at": blocker_observed_at,
+                "page_url": page.url,
+                "body_excerpt": body[:2000],
+                "observed_related_payload_count": 0,
+                "blocker": "related_result_not_confirmed",
+            },
+        )
+        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{slug}-blocked.png")
+        raise RuntimeError(
+            "Google Trends related result could not be confirmed; "
+            f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
+        )
     if not observed_payloads:
-        raise RuntimeError("Google Trends related payload was not observed; screenshot-only evidence is insufficient")
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", anchor).strip("-")
+        blocker_observed_at = now()
+        blocker_evidence = evidence_json(
+            evidence_dir,
+            f"trends-related-{slug}-payload-blocked.json",
+            {
+                "anchor": anchor,
+                "country": country,
+                "timeframe": timeframe,
+                "observed_at": blocker_observed_at,
+                "page_url": page.url,
+                "body_excerpt": body[:2000],
+                "observed_related_payload_count": 0,
+                "blocker": "related_payload_not_observed",
+            },
+        )
+        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{slug}-payload-blocked.png")
+        raise RuntimeError(
+            "Google Trends related payload was not observed; screenshot-only evidence is insufficient; "
+            f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
+        )
 
     captured = observed_payloads[-1]
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", anchor).strip("-")
