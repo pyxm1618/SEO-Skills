@@ -102,8 +102,10 @@ Optionally mirror the persisted database into a Google Sheet:
 ```bash
 python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json --dry-run
 python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json \
-  --sheet-id SHEET_ID --credentials /path/to/service-account.json
+  --sheet-id SHEET_ID --credentials ~/.config/seo-sheets/service-account.json
 ```
+
+`--dry-run` prints the rows and needs no dependency or credential. A real export needs `gspread` and a Google service-account key whose `client_email` has Editor access on the target sheet; `~` in either path is expanded. Rows are upserted by `(domain, keyword)`, so re-running updates in place instead of appending duplicates.
 
 The Sheet is an export layer, never a data source. The authoritative outputs remain the local JSON/CSV, the export takes part in no stage contract, evidence receipt, or pipeline source hash, and a failed export leaves run validity untouched. `unknown` is exported as `unknown` and is never rendered as an empty cell or `0`. Google's own `Breakout`/rising label is exported in its own source column and is never merged into the classifier's `signal_type` or `status`.
 

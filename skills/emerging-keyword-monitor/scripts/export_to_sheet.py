@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -76,6 +77,16 @@ class SheetClient(Protocol):
     def update(self, range_name: str, values: list[list[Any]]) -> Any: ...
 
     def append_rows(self, values: list[list[Any]]) -> Any: ...
+
+
+def expand_path(value: str) -> str:
+    """Expand ~ and environment variables.
+
+    Credential and database paths are typed by hand and are routinely given as
+    ``~/...``; the underlying libraries do not expand it and would report a
+    confusing "file not found" instead.
+    """
+    return os.path.expanduser(os.path.expandvars(str(value)))
 
 
 def format_cell(value: Any) -> str:
@@ -159,9 +170,9 @@ def export(client: SheetClient, database: dict[str, Any]) -> dict[str, Any]:
     plan = plan_writes(existing, rows)
 
     if plan["header_needed"]:
-        client.update(_a1(1, len(HEADER)), [HEADER])
+        client.update(range_name=_a1(1, len(HEADER)), values=[HEADER])
     for range_name, row in plan["updates"]:
-        client.update(range_name, [row])
+        client.update(range_name=range_name, values=[row])
     if plan["appends"]:
         client.append_rows(plan["appends"])
 
@@ -182,7 +193,7 @@ def open_worksheet(sheet_id: str, worksheet: str, credentials: str) -> SheetClie
         raise RuntimeError(
             "gspread is not installed; install it or run with --dry-run"
         ) from exc
-    client = gspread.service_account(filename=credentials)
+    client = gspread.service_account(filename=expand_path(credentials))
     spreadsheet = client.open_by_key(sheet_id)
     try:
         return spreadsheet.worksheet(worksheet)
@@ -194,7 +205,7 @@ def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", required=True, help="emerging-keywords.json")
     parser.add_argument("--sheet-id")
-    parser.add_argument("--worksheet", default="Emerging Keywords")
+    parser.add_argument("--worksheet", default="emerging_keywords")
     parser.add_argument("--credentials", help="Google service account JSON path")
     parser.add_argument(
         "--dry-run",
@@ -203,7 +214,7 @@ def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
     )
     args = parser.parse_args()
 
-    database = load_database(Path(args.database))
+    database = load_database(Path(expand_path(args.database)))
     if args.dry_run:
         rows = build_rows(database)
         print(json.dumps({"header": HEADER, "rows": rows}, ensure_ascii=False, indent=2))

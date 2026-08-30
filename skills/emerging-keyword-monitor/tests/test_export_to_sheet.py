@@ -210,3 +210,27 @@ def test_record_without_keyword_is_rejected():
     exporter = load_module("sheet_keyword_red", EXPORTER)
     with pytest.raises(ValueError):
         exporter.build_rows(database([{"domain": "wedding", "keyword": "  "}]))
+
+
+def test_tilde_paths_are_expanded(monkeypatch, tmp_path):
+    # Credential and database paths are typed by hand as ~/... . gspread and
+    # pathlib do not expand it, so an unexpanded path fails as "file not found".
+    exporter = load_module("sheet_tilde_red", EXPORTER)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    expanded = exporter.expand_path("~/.config/seo-sheets/service-account.json")
+
+    assert "~" not in expanded
+    assert expanded == str(tmp_path / ".config/seo-sheets/service-account.json")
+
+
+def test_cli_reads_a_tilde_database_path(monkeypatch, tmp_path, capsys):
+    exporter = load_module("sheet_tilde_cli_red", EXPORTER)
+    home = tmp_path / "home"
+    (home / "runs").mkdir(parents=True)
+    db_path = home / "runs" / "emerging-keywords.json"
+    db_path.write_text(json.dumps(database([record()])), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+
+    sys.argv = ["export_to_sheet.py", "--database", "~/runs/emerging-keywords.json", "--dry-run"]
+    assert exporter.main(worksheet_factory=lambda *a, **k: FakeWorksheet()) == 0
+    assert len(json.loads(capsys.readouterr().out)["rows"]) == 1
