@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ALLOWED_HOST = "sem.3ue.com"
-MODES = {"ideas", "exact"}
+MODES = {"ideas", "exact", "competitor_organic"}
 DEFAULT_CAPTURE_MAX_AGE_SECONDS = 900
 MAX_FUTURE_SKEW_SECONDS = 60
 BINDING_PATH = Path(__file__).resolve().parents[1] / "evidence_binding.py"
@@ -66,6 +66,16 @@ def _keyword(value):
     return " ".join(str(value or "").split()).casefold()
 
 
+def _identity_field(mode):
+    if mode == "ideas":
+        return "seed"
+    if mode == "exact":
+        return "keyword"
+    if mode == "competitor_organic":
+        return "competitor_domain"
+    raise RuntimeError(f"unsupported relay normalization mode: {mode}")
+
+
 def _capture_time(value):
     text = str(value or "").strip()
     if text.endswith("Z"):
@@ -106,7 +116,7 @@ def load_request(path):
         raise RuntimeError(f"live relay request descriptor incomplete: {', '.join(missing)}")
     if data["mode"] not in MODES:
         raise RuntimeError(f"unsupported relay normalization mode: {data['mode']}")
-    identity_field = "seed" if data["mode"] == "ideas" else "keyword"
+    identity_field = _identity_field(data["mode"])
     if not _present(data.get(identity_field)):
         raise RuntimeError(f"live relay request descriptor incomplete: {identity_field}")
     if str(data["metric_database"]).lower() != "us":
@@ -223,12 +233,71 @@ def normalize_exact(data, descriptor, observed_at, raw_evidence_ref=None):
     }
 
 
+def normalize_competitor_organic(data, descriptor, observed_at, raw_evidence_ref=None):
+    if not isinstance(data, dict) or "error" in data:
+        raise RuntimeError("relay competitor response schema mismatch")
+    result = data.get("result")
+    if isinstance(result, dict):
+        rows_data = result.get("keywords")
+    else:
+        rows_data = result
+    if not isinstance(rows_data, list):
+        raise RuntimeError("relay competitor response schema mismatch: result.keywords missing")
+
+    rows = []
+    for index, item in enumerate(rows_data):
+        if not isinstance(item, dict) or not _present(item.get("phrase")):
+            raise RuntimeError(f"relay competitor response schema invalid row {index}")
+        row = {"keyword": str(item["phrase"]).strip()}
+        if item.get("volume") is not None:
+            row["volume"] = _number(item["volume"], f"rows[{index}].volume", minimum=0)
+        if item.get("difficulty") is not None:
+            row["kd"] = _number(item["difficulty"], f"rows[{index}].difficulty", minimum=0, maximum=100)
+        if item.get("cpc") is not None:
+            row["cpc"] = _number(item["cpc"], f"rows[{index}].cpc", minimum=0)
+        if item.get("position") is not None:
+            row["position"] = _number(item["position"], f"rows[{index}].position", minimum=1)
+        if item.get("traffic") is not None:
+            row["traffic"] = _number(item["traffic"], f"rows[{index}].traffic", minimum=0)
+        if item.get("traffic_percent") is not None:
+            row["traffic_percent"] = _number(
+                item["traffic_percent"], f"rows[{index}].traffic_percent", minimum=0, maximum=100
+            )
+        if item.get("intents") is not None:
+            if not isinstance(item["intents"], list):
+                raise RuntimeError(f"relay competitor response schema invalid rows[{index}].intents")
+            row["intent"] = item["intents"]
+        if item.get("competition_level") is not None:
+            row["competition_level"] = item["competition_level"]
+        rows.append(row)
+    if not rows:
+        raise RuntimeError("relay competitor response contains no rows")
+    provenance_ref = _provenance(descriptor, raw_evidence_ref)
+    if not provenance_ref:
+        raise RuntimeError("relay competitor evidence provenance is missing")
+    competitor_domain = str(descriptor.get("competitor_domain") or "").strip()
+    if not competitor_domain:
+        raise RuntimeError("relay competitor descriptor missing competitor_domain")
+    return {
+        "competitor_domain": competitor_domain,
+        "rows": rows,
+        "observed_at": observed_at,
+        "metric_source": "Semrush",
+        "metric_database": "us",
+        "metric_stage": "competitor_organic",
+        "relay_origin": f"https://{ALLOWED_HOST}/",
+        "provenance_ref": provenance_ref,
+    }
+
+
 def _normalize(data, descriptor, observed_at, raw_evidence_ref=None):
     mode = descriptor.get("mode")
     if mode == "ideas":
         return normalize_ideas(data, descriptor, observed_at, raw_evidence_ref)
     if mode == "exact":
         return normalize_exact(data, descriptor, observed_at, raw_evidence_ref)
+    if mode == "competitor_organic":
+        return normalize_competitor_organic(data, descriptor, observed_at, raw_evidence_ref)
     raise RuntimeError(f"unsupported relay normalization mode: {mode}")
 
 
@@ -284,6 +353,7 @@ def collect(page, descriptor, raw_evidence_ref=None, raw_output_path=None):
             "metric_database": descriptor["metric_database"],
             "seed": descriptor.get("seed"),
             "keyword": descriptor.get("keyword"),
+            "competitor_domain": descriptor.get("competitor_domain"),
             "response": data,
         }
         raw_path.write_text(json.dumps(raw_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -304,7 +374,11 @@ def main():
         raw_output = Path(args.raw_output) if args.raw_output else output.with_suffix(".raw.json")
         pw, browser, page = connect_same_origin()
         result = collect(page, descriptor, raw_output_path=raw_output)
-        evidence_type = "semrush_ideas" if descriptor["mode"] == "ideas" else "semrush_exact"
+        evidence_type = {
+            "ideas": "semrush_ideas",
+            "exact": "semrush_exact",
+            "competitor_organic": "semrush_competitor_organic",
+        }[descriptor["mode"]]
         result = _binding().write_observed_output(
             output,
             result,

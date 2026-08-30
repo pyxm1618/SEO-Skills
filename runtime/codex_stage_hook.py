@@ -24,7 +24,7 @@ REQUIRE_RE = re.compile(r"(?:^|\s)SEO_STAGE_REQUIRE=([A-Za-z0-9_.-]+)")
 CANDIDATE_RE = re.compile(r"(?:^|\s)SEO_CANDIDATE_ID=([^\s]+)")
 
 PROTECTED_COMMAND_RULES = (
-    (re.compile(r"\bstage_validator\.py\b.*--stage(?:=|\s+)discovery_handoff\b"), "discovery_autocomplete"),
+    (re.compile(r"\bstage_validator\.py\b.*--stage(?:=|\s+)discovery_handoff\b"), "discovery_coverage"),
     (re.compile(r"\bgoogle_live_collector\.py\b.*\bintitle\b"), "stage6_exact"),
     (re.compile(r"\bkgr_evidence_merge\.py\b"), "stage6_exact"),
     (re.compile(r"\bevaluate_candidates\.py\b.*--stage(?:=|\s+)exact\b"), "stage6_exact"),
@@ -37,13 +37,17 @@ PROTECTED_COMMAND_RULES = (
 STAGE_EVIDENCE_TYPES = {
     "discovery_autocomplete": "google_autocomplete",
     "discovery_semrush_ideas": "semrush_ideas",
+    "discovery_semrush_competitor_organic": "semrush_competitor_organic",
     "stage6_exact": "semrush_exact",
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
 }
-CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff"})
-TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_handoff")
+CANONICAL_STAGES = frozenset(
+    set(STAGE_EVIDENCE_TYPES)
+    | {"kgr_intitle", "discovery_input_manifest", "discovery_coverage", "discovery_handoff"}
+)
+TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_coverage", "discovery_handoff")
 EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})
 CONFIRMED_EMERGING_STATUSES = frozenset({"emerging", "breakout"})
 
@@ -175,6 +179,29 @@ def _verify_current_evidence(report, stage):
                 return False, "underlying evidence invalid: " + " | ".join(errors)
     except Exception as exc:
         return False, f"underlying evidence invalid: {exc}"
+    if stage == "discovery_handoff":
+        if len(rows) != 1:
+            return False, "discovery handoff validation must contain exactly one coverage-bound row"
+        return _verify_handoff_coverage_report(rows[0])
+    return True, ""
+
+
+def _verify_handoff_coverage_report(handoff_row):
+    coverage_ref = str(handoff_row.get("coverage_receipt_ref") or "").strip()
+    if not coverage_ref:
+        return False, "discovery handoff lacks coverage_receipt_ref"
+    coverage_record = {"status": "PASS", "validation_receipt_ref": coverage_ref}
+    coverage_report, reason = _load_validation_report(coverage_record, "discovery_coverage")
+    if coverage_report is None:
+        return False, f"discovery handoff coverage receipt is not verified: {reason}"
+    rows = coverage_report.get("complete")
+    if not isinstance(rows, list) or len(rows) != 1:
+        return False, "discovery coverage report must contain exactly one complete ledger"
+    coverage_row = rows[0]
+    if coverage_row.get("coverage_status") != "PASS" or coverage_row.get("formal_handoff_allowed") is not True:
+        return False, "discovery coverage is not eligible for formal handoff"
+    if _norm_keyword(coverage_row.get("batch_id")) != _norm_keyword(handoff_row.get("batch_id")):
+        return False, "discovery handoff batch_id differs from coverage ledger"
     return True, ""
 
 
@@ -420,6 +447,16 @@ def _verify_completion_requirements(manifest):
         valid, reason = _verify_validation_receipt(record, stage)
         if not valid:
             return False, f"system required stage {stage} is not verified: {reason}"
+
+    if str(manifest.get("route") or "").strip().lower() == "traditional":
+        coverage_record = _stage_record(manifest, "discovery_coverage")
+        handoff_record = _stage_record(manifest, "discovery_handoff")
+        coverage_ref = str(coverage_record.get("validation_receipt_ref") or "").strip()
+        handoff_coverage_ref = str(handoff_record.get("coverage_receipt_ref") or "").strip()
+        if not coverage_ref or not handoff_coverage_ref:
+            return False, "discovery handoff must bind to the discovery coverage receipt"
+        if coverage_ref != handoff_coverage_ref:
+            return False, "discovery handoff coverage receipt differs from verified coverage stage"
 
     candidates = manifest.get("candidates")
     if not isinstance(candidates, dict):
