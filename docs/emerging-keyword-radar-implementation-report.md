@@ -90,7 +90,7 @@ Draft PR：[pyxm1618/SEO-Skills#24](https://github.com/pyxm1618/SEO-Skills/pull/
 
 - targeted：`python3 -m pytest -q skills/emerging-keyword-monitor/tests tests/test_live_acceptance_p1_repairs.py tests/test_observed_evidence_binding.py tests/test_execution_integrity.py` → `108 passed`。
 - review-fix collector focused：`python3 -m pytest -q tests/test_emerging_radar_google_safety.py tests/test_emerging_radar_related.py` → `11 passed`。
-- full repository：`python3 -m pytest -q` → `240 passed`。
+- full repository：`python3 -m pytest -q` → `241 passed`。
 - compile：`python3 -m compileall -q runtime skills` → exit `0`。
 - whitespace：`git diff --check` 和 base-to-head `git diff --check` → exit `0`。
 - `emerging_radar_run` PASS summary 的 production contract、receipt registration、PASS-with-blocker rejection、BLOCKED envelope 均有回归覆盖。
