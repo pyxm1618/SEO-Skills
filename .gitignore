@@ -4,3 +4,9 @@ __pycache__/
 .DS_Store
 .seo-run/
 .claude/settings.local.json
+
+# Google service-account credentials used by the Sheet export layer.
+# The export is a mirror of local outputs; its key must never enter the repo.
+*service-account*.json
+*service_account*.json
+*credentials*.json

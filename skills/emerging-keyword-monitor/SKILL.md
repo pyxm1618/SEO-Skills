@@ -97,6 +97,16 @@ Before a live run is considered complete, the runner writes the final summary, v
 
 When running interactively without normalized files, apply the same contracts conceptually. Do not loosen the state machine or routing rules just because evidence was gathered conversationally or from web research.
 
+Optionally mirror the persisted database into a Google Sheet:
+
+```bash
+python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json --dry-run
+python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json \
+  --sheet-id SHEET_ID --credentials /path/to/service-account.json
+```
+
+The Sheet is an export layer, never a data source. The authoritative outputs remain the local JSON/CSV, the export takes part in no stage contract, evidence receipt, or pipeline source hash, and a failed export leaves run validity untouched. `unknown` is exported as `unknown` and is never rendered as an empty cell or `0`. Google's own `Breakout`/rising label is exported in its own source column and is never merged into the classifier's `signal_type` or `status`.
+
 ## Canonical Runtime Contract
 
 Use canonical enums exactly in structured output. Do not invent aliases such as `candidate`, `strong candidate`, `reject`, `possible emerging`, or mixed labels such as `typo / modifier shift` in canonical fields.
