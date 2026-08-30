@@ -122,6 +122,20 @@ A further host may be added only once its own hook configuration exists and its 
 
 The Hook normalizes only a matching copy of Bash input, including backslash-newline continuations and repeated whitespace. The command passed to the tool is not changed. Single-line, multiline, `&&`, and directory-prefixed equivalent protected commands must resolve to the same prerequisite stage.
 
+### Fail-closed hook lockout (accepted operational risk)
+
+The gate denies a command when the hook *decides* to deny it, and equally when the hook itself *fails to execute*. The second case is deliberate — a hook that cannot run has not cleared anything, so treating its failure as approval would be the bypass this repository exists to prevent. The operational consequence is that a hook which cannot execute rejects **every** Bash call in that session, including the one that would repair it.
+
+Three causes have actually occurred:
+
+- the sandbox lost access to the worktree path, so the hook could not resolve its working directory;
+- the wired script path did not exist, because the script was renamed or deleted while the session was still running the wiring it had cached at startup;
+- the configured interpreter was unavailable.
+
+Recovery does not require abandoning fail-closed behavior, because `Write`/`Edit` do not pass through the Bash hook. Restoring the wired path with those tools restores Bash immediately. Where the cause is environmental rather than a missing file, restarting the session is the remedy.
+
+This risk is accepted rather than mitigated away, and it constrains one specific change: a host reads its hook wiring **once, at startup**, so editing `.claude/settings.json` or `.codex/hooks.json` does not repoint a session already running. Changing a hook's path therefore requires keeping the old file in place, repointing the configuration, restarting every session, and only then deleting the old path. `test_every_wired_hook_script_exists_on_disk` enforces that the configuration never references a missing script, but it cannot observe that a live session is still using superseded wiring; only the restart ordering covers that.
+
 ### Emerging acceptance semantics
 
 Live acceptance must not manufacture an `emerging` or `breakout` result just to force a `selection_handoff`.
