@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 
 
-def load_hook(name="codex_stage_hook_unit"):
+def load_hook(name="stage_hook_unit"):
     spec = importlib.util.spec_from_file_location(name, HOOK)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -48,7 +48,7 @@ def test_pretooluse_denies_invalid_preceding_stage(tmp_path):
 
 
 def test_pretooluse_allows_valid_contract_mechanically_when_receipt_verifier_passes(monkeypatch):
-    hook = load_hook("codex_stage_hook_allow_unit")
+    hook = load_hook("stage_hook_allow_unit")
     monkeypatch.setattr(hook, "_verify_validation_receipt", lambda record, stage, candidate_id=None: (True, ""))
     manifest = {
         "run_id": "r1",
@@ -65,11 +65,14 @@ def test_pretooluse_allows_valid_contract_mechanically_when_receipt_verifier_pas
 
 
 def test_pretooluse_can_gate_one_candidate_without_blocking_others_mechanically(monkeypatch):
-    hook = load_hook("codex_stage_hook_candidate_unit")
+    hook = load_hook("stage_hook_candidate_unit")
     monkeypatch.setattr(
         hook,
         "_verify_validation_receipt",
-        lambda record, stage, candidate_id=None: ((candidate_id == "good"), "synthetic unit verifier"),
+        lambda record, stage, candidate_id=None, expected_keyword=None: (
+            (candidate_id == "good" and expected_keyword == "good keyword"),
+            "synthetic unit verifier",
+        ),
     )
     manifest = {
         "run_id": "r1",
@@ -77,8 +80,11 @@ def test_pretooluse_can_gate_one_candidate_without_blocking_others_mechanically(
         "status": "IN_PROGRESS",
         "stages": {},
         "candidates": {
-            "good": {"stage6_exact": {"status": "PASS"}},
-            "bad": {"stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay failed"}},
+            "good": {"keyword": "good keyword", "stage6_exact": {"status": "PASS"}},
+            "bad": {
+                "keyword": "bad keyword",
+                "stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay failed"},
+            },
         },
     }
     base = {"hook_event_name": "PreToolUse", "tool_name": "Bash"}

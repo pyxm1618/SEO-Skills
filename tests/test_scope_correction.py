@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BINDING = ROOT / "runtime" / "evidence_binding.py"
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 SEMRUSH = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"
 
 
@@ -88,7 +88,7 @@ def test_structurally_bound_live_receipt_does_not_require_os_broker(tmp_path):
     assert verified["keyword"] == "wedding calculator"
 
 
-def test_emerging_route_uses_monitor_handoff_evidence_not_external_attestation(tmp_path):
+def test_emerging_route_requires_complete_monitor_pipeline_attestation(tmp_path):
     hook = load_module("scope_route_hook", HOOK)
     handoff = tmp_path / "routes.json"
     handoff.write_text(
@@ -119,7 +119,12 @@ def test_emerging_route_uses_monitor_handoff_evidence_not_external_attestation(t
         "candidates": {"cand_1": {"keyword": "new demand term"}},
     }
     stages, reason = hook._infer_canonical_required_stages(manifest)
-    assert stages == ["emerging_radar_run"], reason
+    # Route handoff alone is not a complete monitor pipeline attestation, so no
+    # canonical stage list is inferred at all. The separate requirement that a
+    # fully attested emerging run must still carry emerging_radar_run is covered
+    # by test_emerging_completion_requires_a_validated_radar_run_stage.
+    assert stages is None
+    assert "receipt" in reason.lower() or "pipeline" in reason.lower()
 
 
 def test_explicit_finalist_review_false_does_not_require_external_attestation(monkeypatch):
@@ -139,6 +144,7 @@ def test_explicit_finalist_review_false_does_not_require_external_attestation(mo
         },
         "candidates": {
             "cand_1": {
+                "keyword": "new demand term",
                 "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
                 "intitle_observation": {"status": "PASS", "validation_receipt_ref": "intitle"},
                 "kgr_intitle": {"status": "PASS", "validation_receipt_ref": "kgr"},

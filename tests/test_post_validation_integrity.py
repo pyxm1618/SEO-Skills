@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 VALIDATOR = ROOT / "runtime" / "stage_validator.py"
 
 
@@ -108,6 +108,7 @@ def test_complete_control_flow_allows_valid_candidate_lifecycle_when_verifiers_p
         },
         "candidates": {
             "candidate-1": {
+                "keyword": "candidate keyword",
                 "stage6_exact": {"status": "PASS"},
                 "intitle_observation": {"status": "PASS"},
                 "kgr_intitle": {"status": "PASS"},

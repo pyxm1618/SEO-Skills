@@ -36,14 +36,22 @@ An Emerging Radar run is a separate canonical stage. Its report must record the 
 
 Traditional runs require their verified discovery stages.
 
-An Emerging run may skip traditional discovery only when `route_handoff_ref` points to a structured output compatible with `emerging-keyword-monitor/scripts/route_candidates.py`. Every routed candidate must have exactly one confirmed `selection_handoff` with:
+An Emerging run may skip traditional discovery only when `emerging_pipeline_receipt_ref` points to a `seo-emerging-pipeline/v1` receipt produced by `runtime/emerging_pipeline.py`. The receipt binds:
+
+- the original observation input path and SHA256 plus the fixed `as_of` time;
+- the current `emerging_pipeline.py`, all four monitor scripts, and `references/thresholds.json` SHA256 values;
+- the validated, aggregated, classified, and routed output paths and SHA256 values.
+
+The Hook reloads every file, checks every hash, replays `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py` with the recorded `as_of`, and compares every saved JSON output with the replay. `route_handoff_ref` must point to that receipt's routed output. A bare routes JSON, even with a plausible handoff shape, is not an attestation.
+
+Every routed `selection_handoff` candidate must have exactly one manifest candidate with:
 
 - status `emerging` or `breakout`;
 - `root_relation=existing_root`;
 - a non-empty `root_id`;
 - matching candidate keyword.
 
-A bare `route=emerging` is insufficient.
+Only `net_new`, `breakout`, `emerging_variant`, and `unknown` are canonical `signal_type` values; a confirmed handoff must carry a non-`unknown` canonical value. A complete pipeline that honestly produces `no_handoff` is valid monitor evidence and must remain `no_handoff`; it does not require a fabricated candidate. A bare `route=emerging` or a direct `status=emerging` input is insufficient.
 
 ## Traditional Discovery handoff
 
@@ -57,6 +65,8 @@ Candidate-specific selection stages never fall back to global receipts. Every co
 - `intitle_observation`;
 - `kgr_intitle`;
 - `serp_review`.
+
+For `stage6_exact`, `intitle_observation`, `kgr_intitle`, `serp_review`, and `finalist_trend`, the production validator must be called with `--candidate-id <id>` and the protected command must contain the literal `SEO_CANDIDATE_ID=<id>`. The validator derives `candidate_keyword` from exactly one complete row and writes it to both the validation report and receipt. The Hook compares that normalized value with `manifest.candidates[<id>].keyword`; missing, duplicate, or mismatched rows fail closed. Global discovery receipts must not carry candidate identity.
 
 After verified Exact evidence, the existing evaluator remains authoritative for deterministic early elimination. Candidates with `principle_eliminate_volume`, `principle_eliminate_kd`, or `excluded_manual` stop there and are not forced through KGR/SERP.
 
@@ -88,13 +98,43 @@ The release acceptance set is:
 3. Google Trends with real temporal evidence;
 4. authenticated `sem.3ue.com` Ideas and Exact relay collection, with no official API or fallback provider;
 5. KGR from the verified Exact + intitle pair;
-6. actual Codex Host `PreToolUse` and `Stop` invocation from the reviewed/trusted project `.codex/hooks.json`;
+6. actual Agent Host `PreToolUse` and `Stop` invocation from that host's reviewed/trusted project hook configuration, for **every** host the release covers;
 7. one Traditional workflow exercising a deterministic early-elimination candidate and the continuing-candidate gates as far as the external sources permit;
 8. one Emerging Monitor run using **real temporal observations** through `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py`.
 
-### Codex Host acceptance
+### Agent Host acceptance
 
-Project-local hooks must be reviewed and trusted in Codex before the Host smoke test. The Host test must demonstrate automatic invocation rather than manually executing `runtime/codex_stage_hook.py`. It should be run from both the repository root and a repository subdirectory so relative working-directory assumptions cannot silently disable the gate.
+These Skills are host-neutral; their hook wiring is not. Each host reads only its own configuration, so a host that was never wired runs the SEO method with the integrity gates **inert** — the protection appears present and enforces nothing. Host acceptance is therefore recorded **per host**, and a host without its own recorded Host acceptance is not a released host, however green the automated suite is.
+
+Known host configurations:
+
+- Claude Code — `.claude/settings.json` (`PreToolUse`, `Stop`, `SubagentStop`);
+- Codex — `.codex/hooks.json` (`PreToolUse`, `Stop`).
+
+For each host the release covers:
+
+- project-local hooks must be reviewed and trusted in that host before its smoke test;
+- the smoke test must demonstrate **automatic** invocation by the host, not a manual run of `runtime/stage_hook.py`;
+- it must be exercised from both the repository root and a repository subdirectory, so relative working-directory assumptions cannot silently disable the gate;
+- every event through which that host could reach run completion must be gated. Claude Code's `Stop` does not fire for subagents, so `SubagentStop` is required there and is proven separately; a host with an equivalent delegation path needs the equivalent proof.
+
+A further host may be added only once its own hook configuration exists and its Host acceptance is recorded. Copying the Skills into a host that has no equivalent hook mechanism ships the SEO method without its execution-integrity guarantees; such a host may be documented as unsupported, but must not be presented as a released host.
+
+The Hook normalizes only a matching copy of Bash input, including backslash-newline continuations and repeated whitespace. The command passed to the tool is not changed. Single-line, multiline, `&&`, and directory-prefixed equivalent protected commands must resolve to the same prerequisite stage.
+
+### Fail-closed hook lockout (accepted operational risk)
+
+The gate denies a command when the hook *decides* to deny it, and equally when the hook itself *fails to execute*. The second case is deliberate — a hook that cannot run has not cleared anything, so treating its failure as approval would be the bypass this repository exists to prevent. The operational consequence is that a hook which cannot execute rejects **every** Bash call in that session, including the one that would repair it.
+
+Three causes have actually occurred:
+
+- the sandbox lost access to the worktree path, so the hook could not resolve its working directory;
+- the wired script path did not exist, because the script was renamed or deleted while the session was still running the wiring it had cached at startup;
+- the configured interpreter was unavailable.
+
+Recovery does not require abandoning fail-closed behavior, because `Write`/`Edit` do not pass through the Bash hook. Restoring the wired path with those tools restores Bash immediately. Where the cause is environmental rather than a missing file, restarting the session is the remedy.
+
+This risk is accepted rather than mitigated away, and it constrains one specific change: a host reads its hook wiring **once, at startup**, so editing `.claude/settings.json` or `.codex/hooks.json` does not repoint a session already running. Changing a hook's path therefore requires keeping the old file in place, repointing the configuration, restarting every session, and only then deleting the old path. `test_every_wired_hook_script_exists_on_disk` enforces that the configuration never references a missing script, but it cannot observe that a live session is still using superseded wiring; only the restart ordering covers that.
 
 ### Emerging acceptance semantics
 
@@ -122,7 +162,7 @@ A release candidate may be recommended for merge when:
 - the repository-wide automated suite and compile checks pass;
 - P0 = 0 and P1 = 0;
 - Semrush relay-only policy and evidence provenance remain intact;
-- the actual Codex Host smoke passes;
+- Host acceptance passes for every host the release covers;
 - the real-data Emerging Monitor pipeline passes under the semantics above; and
 - any remaining Live source failure is only an `ACCEPTED_ENVIRONMENT_BLOCKER` meeting every condition above.
 

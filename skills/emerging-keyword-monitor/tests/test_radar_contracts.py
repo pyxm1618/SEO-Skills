@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "runtime" / "stage_contracts.json"
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
 SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
 
 
@@ -18,7 +18,7 @@ def load_module(name, path):
 
 def test_contracts_cover_related_timeline_and_radar_run():
     contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
-    hook = load_module("codex_stage_hook_radar_contracts_red", HOOK)
+    hook = load_module("stage_hook_radar_contracts_red", HOOK)
 
     assert {"trends_related", "trends_timeline", "emerging_radar_run"} <= set(contracts)
     assert {"trends_related", "trends_timeline", "emerging_radar_run"} <= set(hook.CANONICAL_STAGES)

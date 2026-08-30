@@ -22,6 +22,35 @@ Read before execution:
 - `references/routing-rules.md` — downstream handoff rules.
 - `references/thresholds.json` — v1 temporal-shape thresholds only.
 
+## Production start and attested pipeline
+
+Start the Emerging run before collecting observations:
+
+```bash
+export SEO_RUN_MANIFEST=.seo-run/active.json
+python3 runtime/start_seo_run.py --route emerging
+```
+
+Run the four stages through the repository runner with one fixed `as_of`:
+
+```bash
+python3 runtime/emerging_pipeline.py \
+  --input observations.json --as-of 2026-08-29T23:59:59Z \
+  --output-dir .seo-run/emerging/20260829T235959Z
+```
+
+The runner writes validated, aggregated, classified, and routed outputs plus
+an `seo-emerging-pipeline/v1` receipt. Record its path as
+`emerging_pipeline_receipt_ref` and the receipt's `outputs.routed.path` as
+`route_handoff_ref` in the same manifest. The Hook checks current source
+hashes and deterministically replays all four stages. A real `no_handoff`,
+`watch`, or `insufficient_evidence` result stays that way; never hand-write a
+`selection_handoff` to force downstream work.
+
+The standalone router accepts a confirmed `emerging`/`breakout` state only
+when the input is a valid, error-free structured output from
+`classify_emergence.py`; it does not promote a hand-written status.
+
 ## Evidence Discipline
 
 `unknown != 0`. Missing values remain unknown; malformed values are invalid. Never invent Volume, KD, CPC, `intitle`, SERP facts, timestamps, first-seen dates, trend values, or growth.
@@ -67,6 +96,18 @@ The live radar CLI may receive repeatable `--semrush-request PATH` options. Each
 Before a live run is considered complete, the runner writes the final summary, validates it against the `emerging_radar_run` contract, and registers `stages.emerging_radar_run.validation_receipt_ref`. A `PASS` summary must have no blockers; a blocked summary must retain a structured blocker.
 
 When running interactively without normalized files, apply the same contracts conceptually. Do not loosen the state machine or routing rules just because evidence was gathered conversationally or from web research.
+
+Optionally mirror the persisted database into a Google Sheet:
+
+```bash
+python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json --dry-run
+python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json \
+  --sheet-id SHEET_ID --credentials ~/.config/seo-sheets/service-account.json
+```
+
+`--dry-run` prints the rows and needs no dependency or credential. A real export needs `gspread` and a Google service-account key whose `client_email` has Editor access on the target sheet; `~` in either path is expanded. Rows are upserted by `(domain, keyword)`, so re-running updates in place instead of appending duplicates.
+
+The Sheet is an export layer, never a data source. The authoritative outputs remain the local JSON/CSV, the export takes part in no stage contract, evidence receipt, or pipeline source hash, and a failed export leaves run validity untouched. `unknown` is exported as `unknown` and is never rendered as an empty cell or `0`. Google's own `Breakout`/rising label is exported in its own source column and is never merged into the classifier's `signal_type` or `status`.
 
 ## Canonical Runtime Contract
 

@@ -26,6 +26,9 @@ PRODUCTION_BINDINGS = {
     "trends_related": "google_trends_related",
     "trends_timeline": "google_trends",
 }
+CANDIDATE_SCOPED_STAGES = frozenset(
+    {"stage6_exact", "intitle_observation", "kgr_intitle", "serp_review", "finalist_trend"}
+)
 
 
 def _binding():
@@ -347,10 +350,30 @@ def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _normalized_keyword(value):
+    return " ".join(str(value or "").split()).casefold()
+
+
 def _write_validation_receipt(report_path, report, candidate_id=None):
     """Bind a PASS report to this validator source and its exact report bytes."""
     report_path = Path(report_path)
     receipt_path = report_path.with_suffix(".receipt.json")
+    candidate_id = str(candidate_id).strip() if candidate_id not in (None, "") else None
+    if candidate_id is not None and report.get("stage") not in CANDIDATE_SCOPED_STAGES:
+        raise ValueError(f"global stage {report.get('stage')} cannot use candidate_id")
+    if candidate_id is not None:
+        rows = report.get("complete")
+        if not isinstance(rows, list) or len(rows) != 1:
+            raise ValueError("candidate-scoped validation requires exactly one complete row")
+        candidate_keyword = _normalized_keyword(rows[0].get("keyword")) if isinstance(rows[0], dict) else ""
+        if not candidate_keyword:
+            raise ValueError("candidate-scoped validation requires a complete row keyword")
+    else:
+        if report.get("candidate_keyword") not in (None, ""):
+            raise ValueError("global validation cannot carry candidate_keyword")
+        candidate_keyword = None
+    report["candidate_id"] = candidate_id
+    report["candidate_keyword"] = candidate_keyword
     report["validation_receipt_ref"] = str(receipt_path)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     receipt = {
@@ -358,6 +381,7 @@ def _write_validation_receipt(report_path, report, candidate_id=None):
         "stage": report["stage"],
         "status": report["status"],
         "candidate_id": candidate_id,
+        "candidate_keyword": candidate_keyword,
         "validator_source_sha256": _sha256(Path(__file__).resolve()),
         "report_ref": str(report_path),
         "report_sha256": _sha256(report_path),
@@ -380,6 +404,11 @@ def main():
         print("BLOCKED: --production requires --report so a validation receipt can be issued", file=sys.stderr)
         return 2
 
+    candidate_id = str(args.candidate_id).strip() if args.candidate_id else None
+    if candidate_id and args.stage not in CANDIDATE_SCOPED_STAGES:
+        print(f"BLOCKED: global stage {args.stage} cannot use --candidate-id", file=sys.stderr)
+        return 2
+
     contracts = json.loads(Path(args.contracts).read_text(encoding="utf-8"))
     data = json.loads(Path(args.input).read_text(encoding="utf-8"))
     complete, blocked = validate_payload(args.stage, data, contracts, production=args.production)
@@ -387,7 +416,8 @@ def main():
         "stage": args.stage,
         "status": batch_status(complete, blocked),
         "production": bool(args.production),
-        "candidate_id": args.candidate_id,
+        "candidate_id": candidate_id,
+        "candidate_keyword": None,
         "complete_count": len(complete),
         "blocked_count": len(blocked),
         "complete": complete,
@@ -400,7 +430,7 @@ def main():
         report_path.parent.mkdir(parents=True, exist_ok=True)
         if args.production and not blocked:
             try:
-                _write_validation_receipt(report_path, report, args.candidate_id)
+                _write_validation_receipt(report_path, report, candidate_id)
             except Exception as exc:
                 receipt_error = str(exc)
                 if not report_path.is_file():

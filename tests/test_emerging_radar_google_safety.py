@@ -199,6 +199,81 @@ def test_related_waits_for_a_delayed_real_payload_before_blocking(monkeypatch):
     assert result["related_queries"][1]["google_rising_label"] == "Breakout"
 
 
+class ErrorPageBody:
+    def inner_text(self, timeout=5000):
+        return (
+            "429. That’s an error.\n\nWe're sorry, but you have sent too many "
+            "requests to us recently. Please try again later. That’s all we know."
+        )
+
+
+class ErrorPage:
+    def __init__(self):
+        self.url = "https://trends.google.com/trends/explore?geo=US&date=today+12-m&q=wedding"
+
+    def on(self, event, callback):
+        assert event == "response"
+
+    def goto(self, url, wait_until=None):
+        self.url = url
+
+    def wait_for_timeout(self, milliseconds):
+        assert milliseconds >= 0
+
+    def locator(self, selector):
+        assert selector == "body"
+        return ErrorPageBody()
+
+
+class ErrorPageContext:
+    def new_page(self):
+        return ErrorPage()
+
+
+def test_related_fails_closed_with_evidence_when_google_returns_an_error_page(monkeypatch, tmp_path):
+    # Reproduces a real live run: Google answered the Trends explore URL with a
+    # 429 "too many requests" page instead of results. The collector must refuse
+    # to yield candidates and must leave both the raw blocker JSON and the
+    # screenshot behind, so the run is auditable as an external blocker rather
+    # than being silently downgraded or filled with invented keywords.
+    google = load_google("google_live_collector_error_page_red")
+    written = {}
+
+    def fake_evidence_json(evidence_dir, name, payload):
+        written[name] = payload
+        return f"{evidence_dir}/{name}"
+
+    def fake_screenshot(page, evidence_dir, name):
+        written[name] = "png-bytes"
+        return f"{evidence_dir}/{name}"
+
+    monkeypatch.setattr(google, "evidence_json", fake_evidence_json)
+    monkeypatch.setattr(google, "screenshot", fake_screenshot)
+    monkeypatch.setattr(google, "now", lambda: "2026-08-30T00:00:00Z")
+    # The wait-for-delayed-payload path has its own test; skip its real 15s
+    # deadline here so this case stays fast.
+    monkeypatch.setattr(google, "_wait_for_related_payload", lambda *args, **kwargs: None)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        google.trends_related(ErrorPageContext(), "wedding", "US", "today 12-m", str(tmp_path))
+
+    message = str(excinfo.value)
+    assert "blocker_evidence_ref=" in message
+    assert "blocker_screenshot_ref=" in message
+
+    json_names = [name for name in written if name.endswith(".json")]
+    png_names = [name for name in written if name.endswith(".png")]
+    assert json_names, "a blocker payload must be written"
+    assert png_names, "a blocker screenshot must be written"
+
+    payload = written[json_names[0]]
+    assert payload["observed_related_payload_count"] == 0
+    assert payload["blocker"] == "related_result_not_confirmed"
+    assert "429" in payload["body_excerpt"]
+    # Nothing that could be mistaken for observed demand may be recorded.
+    assert "related_queries" not in payload
+
+
 def test_google_connection_uses_new_clean_context_without_inheriting_default_cookies(monkeypatch):
     google = load_google("google_live_collector_isolation_red")
     clean = FakeGoogleContext([])

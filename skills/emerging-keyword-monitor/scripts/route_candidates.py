@@ -11,6 +11,7 @@ from typing import Any
 
 CONFIRMED_STATUSES = {"emerging", "breakout"}
 NON_ACTIONABLE_STATUSES = {"mature", "noise", "insufficient_evidence"}
+CANONICAL_SIGNAL_TYPES = {"net_new", "breakout", "emerging_variant", "unknown"}
 SELECTION_FIELDS = (
     "domain",
     "keyword",
@@ -76,6 +77,16 @@ def selection_handoff(candidate: dict[str, Any]) -> dict[str, Any]:
     return handoff
 
 
+def has_valid_classifier_output(candidate: dict[str, Any]) -> bool:
+    """Accept confirmed states only from the structured classifier contract."""
+    if candidate.get("classification_status") != "valid":
+        return False
+    errors = candidate.get("classification_errors")
+    if isinstance(errors, str):
+        return errors.strip() == "[]"
+    return errors == []
+
+
 def root_watch_handoff(candidate: dict[str, Any], reason: Any) -> dict[str, Any]:
     handoff = {
         "keyword": str(candidate.get("keyword") or "").strip(),
@@ -123,6 +134,14 @@ def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 
     if status in NON_ACTIONABLE_STATUSES:
         return result
+
+    if status in CONFIRMED_STATUSES:
+        if not has_valid_classifier_output(candidate):
+            result["route_reason"] = "A confirmed route requires a valid classify_emergence.py output."
+            return result
+        if candidate.get("signal_type") not in CANONICAL_SIGNAL_TYPES - {"unknown"}:
+            result["route_reason"] = "A confirmed route requires a canonical signal_type from classify_emergence.py."
+            return result
 
     if relation == "unresolved":
         result["route"] = "new_root_watchlist"

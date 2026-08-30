@@ -165,6 +165,16 @@ def _host(value):
     return (parsed.hostname or "").lower()
 
 
+def _http_url(value):
+    parsed = urlparse(str(value or ""))
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _google_http_url(value):
+    parsed = urlparse(str(value or ""))
+    return _http_url(value) and parsed.hostname in {"google.com", "www.google.com"}
+
+
 def _assert_png(path):
     if Path(path).read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
         raise EvidenceIntegrityError(f"Google screenshot artifact is not a PNG: {path}")
@@ -321,6 +331,30 @@ def _verify_google_semantics(evidence_type, normalized, role_paths):
         fields = ["keyword", "market", "observed_at", "results"]
         if normalized.get("source") != "Google":
             raise EvidenceIntegrityError("Google SERP source mismatch")
+        results = normalized.get("results")
+        if not isinstance(results, list) or len(results) != 10:
+            raise EvidenceIntegrityError("Google SERP requires exactly 10 organic results")
+        seen_urls = set()
+        for expected_rank, row in enumerate(results, start=1):
+            if not isinstance(row, dict):
+                raise EvidenceIntegrityError(f"Google SERP result {expected_rank} is not an object")
+            if row.get("rank") != expected_rank:
+                raise EvidenceIntegrityError(f"Google SERP result rank is not contiguous at {expected_rank}")
+            url = row.get("url")
+            if not _http_url(url):
+                raise EvidenceIntegrityError(f"Google SERP result {expected_rank} URL is not HTTP(S)")
+            if url in seen_urls:
+                raise EvidenceIntegrityError(f"Google SERP result URL is duplicated at {expected_rank}")
+            seen_urls.add(url)
+            if not str(row.get("title") or "").strip():
+                raise EvidenceIntegrityError(f"Google SERP result {expected_rank} title is missing")
+        page_urls = normalized.get("page_urls")
+        if not isinstance(page_urls, list) or not page_urls:
+            raise EvidenceIntegrityError("Google SERP page URL observations are missing")
+        if any(not _google_http_url(url) for url in page_urls):
+            raise EvidenceIntegrityError("Google SERP page URL observation is not a Google URL")
+        if observation.get("page_urls") != page_urls or observation.get("page_url") != page_urls[-1]:
+            raise EvidenceIntegrityError("Google SERP page URL observations differ from structured observation")
     else:
         raise EvidenceIntegrityError(f"unsupported Google evidence type: {evidence_type}")
     for field in fields:

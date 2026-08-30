@@ -14,11 +14,11 @@ def test_pretooluse_is_scoped_to_bash_and_runs_from_git_root():
     assert group.get("matcher") == "^Bash$"
     command = group["hooks"][0]["command"]
     assert command.startswith('cd "$(git rev-parse --show-toplevel)" && ')
-    assert command.endswith("python3 runtime/codex_stage_hook.py pre")
+    assert command.endswith("python3 runtime/stage_hook.py pre")
 
 
 def test_stop_runs_from_git_root():
     group = _hooks()["Stop"][0]
     command = group["hooks"][0]["command"]
     assert command.startswith('cd "$(git rev-parse --show-toplevel)" && ')
-    assert command.endswith("python3 runtime/codex_stage_hook.py stop")
+    assert command.endswith("python3 runtime/stage_hook.py stop")

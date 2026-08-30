@@ -5,7 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BINDING = ROOT / "runtime" / "evidence_binding.py"
-HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+HOOK = ROOT / "runtime" / "stage_hook.py"
+PIPELINE = ROOT / "runtime" / "emerging_pipeline.py"
 
 
 def load_module(name, path):
@@ -17,6 +18,19 @@ def load_module(name, path):
 
 def load_hook(name="integrity_boundary_hook"):
     return load_module(name, HOOK)
+
+
+def test_pipeline_and_hook_bind_the_same_emerging_scripts():
+    # The pipeline writes the receipt's script hashes and the hook re-verifies
+    # them against its own list. If the two lists drift, a script that shapes
+    # the result (birth_history.py did) is executed but never hash-bound, so
+    # tampering with it would leave a valid-looking receipt.
+    pipeline = load_module("drift_guard_pipeline", PIPELINE)
+    hook = load_hook("drift_guard_hook")
+    assert set(pipeline.SCRIPT_PATHS) == set(hook.EMERGING_SCRIPT_PATHS)
+    for name, path in pipeline.SCRIPT_PATHS.items():
+        assert path.resolve() == hook.EMERGING_SCRIPT_PATHS[name].resolve(), name
+    assert pipeline.THRESHOLDS_PATH.resolve() == hook.EMERGING_THRESHOLDS_PATH.resolve()
 
 
 def test_runtime_has_no_os_broker_dependency():
@@ -114,6 +128,7 @@ def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch
         },
         "candidates": {
             "cand_1": {
+                "keyword": "candidate keyword",
                 "is_finalist": False,
                 "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
                 "intitle_observation": {"status": "PASS", "validation_receipt_ref": "intitle"},
@@ -171,11 +186,13 @@ def test_verified_blocked_candidate_does_not_prevent_completed_batch(monkeypatch
         },
         "candidates": {
             "blocked": {
+                "keyword": "blocked keyword",
                 "terminal_status": "BLOCKED",
                 "blocked_stage": "stage6_exact",
                 "stage6_exact": {"status": "BLOCKED", "blocked_reason": "relay unavailable"},
             },
             "good": {
+                "keyword": "good keyword",
                 "terminal_status": "COMPLETE",
                 "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
                 "intitle_observation": {"status": "PASS", "validation_receipt_ref": "intitle"},
@@ -207,7 +224,10 @@ def test_deterministic_exact_elimination_skips_kgr_and_serp(monkeypatch):
             },
         },
         "candidates": {
-            "eliminated": {"stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"}}
+            "eliminated": {
+                "keyword": "eliminated keyword",
+                "stage6_exact": {"status": "PASS", "validation_receipt_ref": "exact"},
+            }
         },
     }
     valid, reason = hook._verify_completion_requirements(manifest)

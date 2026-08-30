@@ -127,6 +127,10 @@ def test_existing_root_confirmed_candidate_keeps_selection_handoff():
             "estimated_birth_window": "2026-08",
             "birth_source_resolution": "weekly",
             "source_evidence": [{"source": "google_trends", "provenance_status": "verified"}],
+            # A confirmed route is accepted only from real classify_emergence.py
+            # output, so carry the classifier contract fields it emits.
+            "classification_status": "valid",
+            "classification_errors": [],
         }
     )
 
