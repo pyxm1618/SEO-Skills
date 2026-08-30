@@ -1,11 +1,11 @@
 ---
 name: seo-keyword-discovery
-description: Use when reusable demand roots must be turned into concrete keyword candidates through real Google Autocomplete and, when used, current Semrush relay discovery before keyword selection begins.
+description: Use when reusable demand roots must be turned into concrete traditional keyword candidates through real Google Autocomplete, current Semrush relay discovery, and the bounded Discovery Coverage Contract before keyword selection begins.
 ---
 
 # SEO Keyword Discovery
 
-Own the former `seo-keyword-selection` Steps 0–4 only: candidate-domain context, root handoff, Seed generation, real keyword expansion, and low-risk cleaning. Produce a discovery handoff of concrete keywords; do not make final opportunity decisions.
+Own the former `seo-keyword-selection` Steps 0–4 only: candidate-domain context, root handoff, Seed generation, real keyword expansion, low-risk cleaning, and finite traditional-demand branch coverage. Produce a discovery handoff of concrete keywords only after the Coverage Contract passes; do not make final opportunity decisions.
 
 ## Boundaries
 
@@ -28,7 +28,31 @@ Never substitute AI expansion, Bing, generic WebSearch results, or a third-party
 
 ## Semrush discovery
 
-If Semrush Ideas/Related is used, current acquisition must use the authenticated same-origin `sem.3ue.com` relay collector. There is no official API, API-key, connector, Ahrefs, or alternative-provider fallback.
+Default Full Traditional Discovery requires Semrush Ideas/Related for every required Seed and every required Branch Seed. Current acquisition must use the authenticated same-origin `sem.3ue.com` relay collector. Google evidence is retained when Semrush is blocked, but the Full Coverage Contract remains `BLOCKED` and no formal handoff is allowed. An explicitly labelled diagnostic Google-only run is not a Full handoff.
+
+There is no official API, API-key, connector, Ahrefs, or alternative-provider fallback. Historical captures are locator hints only; the current request descriptor, response, schema, and provenance must be re-confirmed in the current authenticated session.
+
+## Competitor organic coverage
+
+Competitor Organic Keywords are a domain/root-cluster coverage source, not a per-Seed requirement. The source is mandatory only when the run explicitly supplies competitor domains. Each configured domain must complete current `sem.3ue.com` relay acquisition; a failure is `BLOCKED`. With no configured domains, record `competitor_sweep=not_configured` rather than inventing a PASS or inventing competitor inputs.
+
+## Demand branch expansion
+
+Branch analysis may promote a keyword only from an already observed candidate. The ledger records the exact existing candidate, parent Seed, source, evidence receipt, analysis reason, and acquisition status. It may not turn an AI-created string into an observed Branch Seed. A required Branch Seed must run the same real Google Autocomplete and Semrush route as a required Seed.
+
+Expansion is by distinct demand branch, not by recursively re-expanding every keyword. The runtime rejects visited/cycle duplicates and enforces configurable depth and branch-count safety limits. Those limits protect execution; they are not SEO opportunity thresholds.
+
+## Discovery Coverage Contract
+
+The final `discovery_coverage` record is the single Full Discovery coverage gate. It retains the complete run ledger and reports at least:
+
+- required Seed count and Google Autocomplete pass count;
+- required Semrush count and pass count, including branch counts;
+- required Branch Seed count and completed branch count;
+- competitor configuration/status and other mandatory-source statuses;
+- explicit blocked/unreviewed reasons and `formal_handoff_allowed`.
+
+Every required item remains in the ledger when it is `BLOCKED`, `NOT_RUN`, or `UNKNOWN`; counts may not be shrunk by deleting failures. Full coverage is `PASS` only when every required Seed has Google and Semrush PASS, every required Branch Seed has both PASS, every configured competitor domain passes, and all other mandatory sources pass. Only then may a `discovery_handoff` be issued and passed to `seo-keyword-selection`.
 
 Historical captured endpoints may help locate the current UI request but are not current evidence. A relay request becomes usable only after current live HTTP/RPC success and response-shape verification.
 
@@ -38,4 +62,6 @@ Preserve `observed`, `calculated`, `analysis`, and `unknown`. Missing, invalid, 
 
 ## Completion
 
-A formal `discovery_handoff` exists only when every mandatory required-Seed acquisition contract passes and any configured mandatory discovery source has current provenance. If a mandatory Seed/source fails, mark the affected discovery batch `BLOCKED`; do not silently shrink the handoff.
+A formal `discovery_handoff` exists only when the production-verified `discovery_coverage` receipt reports `coverage_status=PASS` and `formal_handoff_allowed=true`. If any mandatory Seed, Branch Seed, configured competitor domain, or other mandatory source fails or remains unreviewed, mark the coverage batch `BLOCKED`; preserve the partial evidence and do not silently shrink the handoff.
+
+Selection still owns Ideas-stage recall onward, including all Volume/KD/CPC/KGR/SERP/KDRoi and final opportunity decisions. This skill does not add Trends novelty, birth windows, Rising/breakout classification, long-term monitoring, a second root library, or a Discovery database.

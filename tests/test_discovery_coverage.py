@@ -1,5 +1,9 @@
 import importlib.util
+import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 COVERAGE = ROOT / "runtime" / "discovery_coverage.py"
 STAGE_VALIDATOR = ROOT / "runtime" / "stage_validator.py"
 CONTRACTS = ROOT / "runtime" / "stage_contracts.json"
+HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+GOOGLE_COLLECTOR = ROOT / "runtime" / "collectors" / "google_live_collector.py"
 
 
 def load_module(name, path):
@@ -16,6 +22,10 @@ def load_module(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_hook(name):
+    return load_module(name, HOOK)
 
 
 def _source_status(status="PASS", receipt=None, reason=None):
@@ -35,11 +45,15 @@ def _required_seed(seed, autocomplete="PASS", semrush="PASS"):
 
 
 def _branch(branch_seed, candidate_id, parent_seed="wedding calculator", depth=1, autocomplete="PASS", semrush="PASS"):
+    source = "google_autocomplete" if candidate_id == "candidate-alcohol" else "semrush_ideas"
     item = {
         "branch_seed": branch_seed,
         "parent_seed": parent_seed,
         "originating_candidate_id": candidate_id,
+        "source": source,
+        "evidence_ref": f"evidence/{candidate_id}-{'google' if source == 'google_autocomplete' else 'semrush'}.receipt.json",
         "branch_reason": "distinct observed demand branch",
+        "analysis_status": "required",
         "depth": depth,
         "autocomplete": _source_status(autocomplete, f"evidence/{candidate_id}-google.receipt.json", "branch Google blocked"),
         "semrush": _source_status(semrush, f"evidence/{candidate_id}-semrush.receipt.json", "branch Semrush blocked"),
@@ -130,9 +144,22 @@ def test_full_route_does_not_silently_fallback_when_semrush_is_blocked():
     assert any("semrush" in reason.lower() for reason in summary["blocked_reasons"])
 
 
+def test_explicit_google_only_route_is_not_formal_full_handoff():
+    coverage = load_module("discovery_coverage_diagnostic", COVERAGE)
+    ledger = full_ledger()
+    ledger["discovery_mode"] = "diagnostic_google_only"
+
+    summary = coverage.summarize_coverage(ledger)
+
+    assert summary["coverage_status"] == "BLOCKED"
+    assert summary["formal_handoff_allowed"] is False
+    assert any("not_full" in reason for reason in summary["blocked_reasons"])
+
+
 def test_branch_promotion_derives_exact_keyword_from_observed_candidate():
     coverage = load_module("discovery_coverage_branch_promotion", COVERAGE)
     ledger = full_ledger()
+    ledger["required_branch_seeds"] = []
 
     branch = coverage.add_required_branch_seed(
         ledger,
@@ -152,6 +179,44 @@ def test_branch_promotion_derives_exact_keyword_from_observed_candidate():
             originating_candidate_id="missing-candidate",
             parent_seed="wedding calculator",
             branch_reason="cannot prove this candidate was observed",
+        )
+
+
+def test_branch_promotion_rejects_invalid_safety_configuration():
+    coverage = load_module("discovery_coverage_branch_config", COVERAGE)
+    ledger = full_ledger()
+    ledger["required_branch_seeds"] = []
+    ledger["max_branch_seeds"] = "invalid"
+
+    with pytest.raises(coverage.CoverageContractError, match="branch"):
+        coverage.add_required_branch_seed(
+            ledger,
+            originating_candidate_id="candidate-alcohol",
+            parent_seed="wedding calculator",
+            branch_reason="invalid safety configuration must fail closed",
+        )
+
+
+def test_branch_promotion_enforces_depth_and_visited_parent_guards():
+    coverage = load_module("discovery_coverage_branch_guards", COVERAGE)
+    ledger = full_ledger()
+    ledger["required_branch_seeds"] = []
+
+    with pytest.raises(coverage.CoverageContractError, match="depth"):
+        coverage.add_required_branch_seed(
+            ledger,
+            originating_candidate_id="candidate-alcohol",
+            parent_seed="wedding calculator",
+            branch_reason="depth limit must stop promotion",
+            depth=2,
+        )
+
+    with pytest.raises(coverage.CoverageContractError, match="parent"):
+        coverage.add_required_branch_seed(
+            ledger,
+            originating_candidate_id="candidate-alcohol",
+            parent_seed="unvisited demand branch",
+            branch_reason="unknown parents must not enter the branch queue",
         )
 
 
@@ -247,3 +312,385 @@ def test_stage_validator_emits_computed_coverage_summary():
     assert complete[0]["required_seed_count"] == 3
     assert complete[0]["semrush_total_required_count"] == 5
     assert coverage.validate_coverage(complete[0]) == []
+
+
+def test_production_coverage_rejects_handwritten_source_receipts():
+    coverage = load_module("discovery_coverage_production", COVERAGE)
+
+    errors = coverage.validate_coverage(full_ledger(), production=True)
+
+    assert errors
+    assert any("evidence_receipt_invalid" in error for error in errors)
+
+
+def test_production_coverage_requires_candidate_to_be_in_observed_source_payload(tmp_path):
+    coverage = load_module("discovery_coverage_candidate_observation", COVERAGE)
+    screenshot = tmp_path / "parent-google.png"
+    screenshot.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4"
+        b"\x00\x00\x00\x0aIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    observation = tmp_path / "parent-google.observation.json"
+    observed_at = "2026-08-30T00:00:00+00:00"
+    observation.write_text(
+        json.dumps(
+            {
+                "page_url": "https://www.google.com/search?q=wedding+calculator",
+                "seed": "wedding calculator",
+                "suggestions": ["wedding alcohol calculator"],
+                "country": "US",
+                "language": "en",
+                "observed_at": observed_at,
+            }
+        ),
+        encoding="utf-8",
+    )
+    normalized = tmp_path / "parent-google.json"
+    receipt = tmp_path / "parent-google.receipt.json"
+    normalized.write_text(
+        json.dumps(
+            {
+                "seed": "wedding calculator",
+                "suggestions": ["wedding alcohol calculator"],
+                "country": "US",
+                "language": "en",
+                "observed_at": observed_at,
+                "source": "google_autocomplete",
+                "evidence_ref": str(screenshot),
+                "observation_ref": str(observation),
+                "evidence_receipt_ref": str(receipt),
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema": "seo-observed-evidence/v2",
+                "collector": "google_live_collector",
+                "collector_source_sha256": hashlib.sha256(GOOGLE_COLLECTOR.read_bytes()).hexdigest(),
+                "evidence_type": "google_autocomplete",
+                "normalized_ref": str(normalized),
+                "normalized_sha256": hashlib.sha256(normalized.read_bytes()).hexdigest(),
+                "artifacts": [
+                    {"role": "screenshot", "path": str(screenshot), "sha256": hashlib.sha256(screenshot.read_bytes()).hexdigest()},
+                    {"role": "structured_observation", "path": str(observation), "sha256": hashlib.sha256(observation.read_bytes()).hexdigest()},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ledger = full_ledger()
+    ledger["observed_candidates"][0]["evidence_receipt_ref"] = str(receipt)
+
+    errors = coverage.validate_coverage(ledger, production=True)
+
+    assert errors
+    assert not any("observed_candidate[0]:evidence_identity_mismatch" in error for error in errors)
+
+
+def test_discovery_handoff_contract_requires_coverage_receipt():
+    validator = load_module("discovery_handoff_contract", STAGE_VALIDATOR)
+    contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
+    payload = {
+        "batch_id": "batch-1",
+        "required_seed_count": 1,
+        "autocomplete_pass_count": 1,
+        "status": "PASS",
+    }
+
+    errors = validator.validate_stage("discovery_handoff", payload, contracts)
+
+    assert any("coverage" in error for error in errors)
+
+
+def _write_google_receipt(tmp_path):
+    collector = ROOT / "runtime" / "collectors" / "google_live_collector.py"
+    screenshot = tmp_path / "google.png"
+    screenshot.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4"
+        b"\x00\x00\x00\x0aIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    observed_at = "2026-08-30T00:00:00+00:00"
+    observation = tmp_path / "google.observation.json"
+    observation.write_text(
+        json.dumps(
+            {
+                "page_url": "https://www.google.com/search?q=wedding+calculator",
+                "seed": "wedding calculator",
+                "suggestions": ["wedding alcohol calculator"],
+                "country": "US",
+                "language": "en",
+                "observed_at": observed_at,
+            }
+        ),
+        encoding="utf-8",
+    )
+    normalized = tmp_path / "google.json"
+    receipt = tmp_path / "google.receipt.json"
+    normalized.write_text(
+        json.dumps(
+            {
+                "seed": "wedding calculator",
+                "suggestions": ["wedding alcohol calculator"],
+                "country": "US",
+                "language": "en",
+                "observed_at": observed_at,
+                "source": "google_autocomplete",
+                "evidence_ref": str(screenshot),
+                "observation_ref": str(observation),
+                "evidence_receipt_ref": str(receipt),
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema": "seo-observed-evidence/v2",
+                "collector": "google_live_collector",
+                "collector_source_sha256": hashlib.sha256(collector.read_bytes()).hexdigest(),
+                "evidence_type": "google_autocomplete",
+                "normalized_ref": str(normalized),
+                "normalized_sha256": hashlib.sha256(normalized.read_bytes()).hexdigest(),
+                "artifacts": [
+                    {"role": "screenshot", "path": str(screenshot), "sha256": hashlib.sha256(screenshot.read_bytes()).hexdigest()},
+                    {"role": "structured_observation", "path": str(observation), "sha256": hashlib.sha256(observation.read_bytes()).hexdigest()},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return normalized, receipt
+
+
+def _write_ideas_receipt(tmp_path):
+    semrush_path = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"
+    semrush = load_module("discovery_coverage_ideas_fixture", semrush_path)
+    capture = tmp_path / "semrush.capture.json"
+    capture.write_text(json.dumps({"captured": True}), encoding="utf-8")
+    descriptor = {
+        "path": "/captured/current-path",
+        "method": "POST",
+        "body": {},
+        "capture_observed_at": "2026-08-30T00:00:00+00:00",
+        "capture_evidence_ref": str(capture),
+        "mode": "ideas",
+        "metric_database": "us",
+        "seed": "wedding calculator",
+    }
+    response = {"jsonrpc": "2.0", "result": [{"phrase": "wedding cost calculator", "volume": 900, "difficulty": 22}]}
+    observed_at = "2026-08-30T00:00:01+00:00"
+    raw = tmp_path / "ideas.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "observed_at": observed_at,
+                "relay_origin": "https://sem.3ue.com/",
+                "request_method": descriptor["method"],
+                "request_path": descriptor["path"],
+                "capture_observed_at": descriptor["capture_observed_at"],
+                "capture_evidence_ref": str(capture),
+                "mode": "ideas",
+                "metric_database": "us",
+                "seed": descriptor["seed"],
+                "response": response,
+            }
+        ),
+        encoding="utf-8",
+    )
+    normalized = tmp_path / "ideas.json"
+    receipt = tmp_path / "ideas.receipt.json"
+    normalized.write_text(
+        json.dumps(
+            dict(
+                semrush.normalize_ideas(response, descriptor, observed_at, str(raw)),
+                evidence_receipt_ref=str(receipt),
+            )
+        ),
+        encoding="utf-8",
+    )
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema": "seo-observed-evidence/v2",
+                "collector": "semrush_relay_collector",
+                "collector_source_sha256": hashlib.sha256(semrush_path.read_bytes()).hexdigest(),
+                "evidence_type": "semrush_ideas",
+                "normalized_ref": str(normalized),
+                "normalized_sha256": hashlib.sha256(normalized.read_bytes()).hexdigest(),
+                "artifacts": [
+                    {"role": "relay_raw_response", "path": str(raw), "sha256": hashlib.sha256(raw.read_bytes()).hexdigest()},
+                    {"role": "current_network_capture", "path": str(capture), "sha256": hashlib.sha256(capture.read_bytes()).hexdigest()},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return normalized, receipt
+
+
+def _run_production_stage(stage, input_path, report_path):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(STAGE_VALIDATOR),
+            "--stage",
+            stage,
+            "--input",
+            str(input_path),
+            "--report",
+            str(report_path),
+            "--production",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
+    google_input, google_receipt = _write_google_receipt(tmp_path)
+    _ideas_input, ideas_receipt = _write_ideas_receipt(tmp_path)
+    ledger = {
+        "batch_id": "batch-formal",
+        "discovery_mode": "full",
+        "required_seeds": [
+            {
+                "seed": "wedding calculator",
+                "autocomplete": {"status": "PASS", "evidence_receipt_ref": str(google_receipt)},
+                "semrush": {"status": "PASS", "evidence_receipt_ref": str(ideas_receipt)},
+            }
+        ],
+        "observed_candidates": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "keyword": "wedding alcohol calculator",
+                "source": "google_autocomplete",
+                "evidence_receipt_ref": str(google_receipt),
+            }
+        ],
+        "required_branch_seeds": [],
+        "competitor_sweep": {"configured": False, "domains": [], "status": "not_configured"},
+        "other_mandatory_sources": [],
+        "max_branch_depth": 1,
+        "max_branch_seeds": 5,
+    }
+    ledger_path = tmp_path / "coverage-input.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    autocomplete_report = tmp_path / "autocomplete.report.json"
+    coverage_report = tmp_path / "coverage.report.json"
+    assert _run_production_stage("discovery_autocomplete", google_input, autocomplete_report).returncode == 0
+    assert _run_production_stage("discovery_coverage", ledger_path, coverage_report).returncode == 0
+
+    coverage_receipt = coverage_report.with_suffix(".receipt.json")
+    handoff_input = tmp_path / "handoff-input.json"
+    handoff_input.write_text(
+        json.dumps(
+            {
+                "batch_id": "batch-formal",
+                "required_seed_count": 1,
+                "autocomplete_pass_count": 1,
+                "status": "PASS",
+                "coverage_status": "PASS",
+                "coverage_receipt_ref": str(coverage_receipt),
+            }
+        ),
+        encoding="utf-8",
+    )
+    handoff_report = tmp_path / "handoff.report.json"
+    assert _run_production_stage("discovery_handoff", handoff_input, handoff_report).returncode == 0
+
+    manifest = {
+        "run_id": "formal-coverage-run",
+        "route": "traditional",
+        "status": "COMPLETE",
+        "stages": {
+            "discovery_autocomplete": {
+                "status": "PASS",
+                "validation_receipt_ref": str(autocomplete_report.with_suffix(".receipt.json")),
+            },
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": str(coverage_receipt)},
+            "discovery_handoff": {
+                "status": "PASS",
+                "validation_receipt_ref": str(handoff_report.with_suffix(".receipt.json")),
+                "coverage_receipt_ref": str(coverage_receipt),
+            },
+        },
+        "candidates": {},
+    }
+    manifest_path = tmp_path / "active.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    hook_result = subprocess.run(
+        [sys.executable, str(HOOK), "stop"],
+        input=json.dumps({"hook_event_name": "Stop", "stop_hook_active": False}),
+        cwd=ROOT,
+        env=dict(os.environ, SEO_RUN_MANIFEST=str(manifest_path)),
+        capture_output=True,
+        text=True,
+    )
+
+    assert hook_result.returncode == 0, hook_result.stderr
+
+
+def _handoff_manifest(coverage_receipt_ref="coverage.receipt.json"):
+    return {
+        "run_id": "traditional-coverage-run",
+        "route": "traditional",
+        "status": "COMPLETE",
+        "stages": {
+            "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "autocomplete.receipt.json"},
+            "discovery_coverage": {
+                "status": "PASS",
+                "validation_receipt_ref": "coverage.receipt.json",
+            },
+            "discovery_handoff": {
+                "status": "PASS",
+                "validation_receipt_ref": "handoff.receipt.json",
+                "coverage_status": "PASS",
+                "coverage_receipt_ref": coverage_receipt_ref,
+            },
+        },
+        "candidates": {},
+    }
+
+
+def test_traditional_complete_requires_coverage_stage(monkeypatch):
+    hook = load_hook("discovery_coverage_missing_hook")
+    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    manifest = _handoff_manifest()
+    manifest["stages"].pop("discovery_coverage")
+
+    valid, reason = hook._verify_completion_requirements(manifest)
+
+    assert valid is False
+    assert "discovery_coverage" in reason
+
+
+def test_handoff_cannot_reference_a_different_coverage_receipt(monkeypatch):
+    hook = load_hook("discovery_coverage_binding_hook")
+    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    manifest = _handoff_manifest(coverage_receipt_ref="wrong-coverage.receipt.json")
+
+    valid, reason = hook._verify_completion_requirements(manifest)
+
+    assert valid is False
+    assert "coverage" in reason.lower()
+
+
+def test_protected_handoff_command_requires_coverage_pass(monkeypatch):
+    hook = load_hook("discovery_coverage_pretool_hook")
+    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    manifest = _handoff_manifest()
+    manifest["stages"]["discovery_coverage"] = {
+        "status": "BLOCKED",
+        "blocked_reason": "Semrush Ideas relay unavailable",
+    }
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "python3 runtime/stage_validator.py --stage discovery_handoff --input handoff.json"
+        },
+    }
+
+    assert hook.pre_tool_use(payload, manifest) == 2

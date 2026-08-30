@@ -12,6 +12,7 @@ Observed evidence still has strict production requirements:
 - Semrush observations must come from the authenticated same-origin `sem.3ue.com` relay. Official Semrush API and alternative-provider fallback remain forbidden.
 - Collector receipts bind the expected collector name, the current collector source SHA256, normalized output SHA256, and the exact required artifact roles/hashes.
 - Verification replays Semrush normalization from the saved raw relay response and rechecks Google source URLs, observations, screenshots, and Trends timelines.
+- Traditional Discovery coverage is a separate ledger gate: it reconciles required Seeds, Branch Seeds, configured competitor domains, and other mandatory sources without deleting blocked/unreviewed items. Google source PASS alone cannot satisfy Full Coverage.
 - A plain row containing fields such as `metric_source=Semrush` is never enough; production validation requires the complete evidence receipt and artifacts.
 
 These controls are intended to make the expected path deterministic, auditable, and fail-closed when real observations are unavailable.
@@ -39,6 +40,10 @@ An Emerging run may skip traditional discovery only when `route_handoff_ref` poi
 - matching candidate keyword.
 
 A bare `route=emerging` is insufficient.
+
+## Traditional Discovery handoff
+
+Traditional runs require verified `discovery_autocomplete`, `discovery_coverage`, and `discovery_handoff` stages. The handoff report must point to the exact `discovery_coverage` validation receipt; that receipt must contain a PASS coverage summary with `formal_handoff_allowed=true` and the same `batch_id`. A configured competitor sweep or required Branch Seed that is blocked prevents formal handoff while preserving earlier evidence.
 
 ## Candidate lifecycle
 

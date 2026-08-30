@@ -33,7 +33,7 @@ Rules:
 
 ## Semrush Ideas/Related observation
 
-When used, retain at least:
+For Full Traditional Discovery, retain at least:
 
 `seed | rows | observed_at | metric_source | relay_origin | provenance_ref`
 
@@ -44,6 +44,14 @@ Rules:
 - current HTTP/RPC request and response shape must have been live verified in the authenticated same-origin session;
 - missing metrics remain missing/unknown and do not become zero.
 
+## Semrush competitor organic observation
+
+The domain/cluster competitor sweep uses the existing current relay collector with:
+
+`competitor_domain | rows | observed_at | metric_source | metric_database | metric_stage | relay_origin | provenance_ref`
+
+`metric_stage` is `competitor_organic`; `relay_origin` must be `sem.3ue.com`; rows and any returned metrics remain observed with the raw-response receipt. No competitor domain may be synthesized by the Agent.
+
 ## Candidate handoff fields
 
 Preserve as available:
@@ -52,10 +60,18 @@ Preserve as available:
 
 If Semrush Ideas returned observed fields, those fields may pass through with their provenance. The discovery handoff does not convert them into Exact evidence and does not make selection decisions.
 
-## Batch completion
+## Coverage ledger
 
-For the mandatory Google source retain:
+The run ledger records:
 
-`batch_id | required_seed_count | autocomplete_pass_count | status`
+`batch_id | discovery_mode | required_seeds | observed_candidates | required_branch_seeds | competitor_sweep | other_mandatory_sources | max_branch_depth | max_branch_seeds`
 
-A formal handoff requires `status=PASS` and equality of `required_seed_count` and `autocomplete_pass_count`. Blocked required Seeds must remain visible in the run report with their reason; they may not be silently removed.
+Each required Seed and Branch Seed has nested `autocomplete` and (for Full Discovery) `semrush` records with `status` and an evidence receipt on PASS. Non-PASS records retain a reason. An observed candidate has `candidate_id | keyword | source | evidence_receipt_ref`; a Branch Seed must match one candidate's exact normalized keyword, source, and evidence reference.
+
+## Coverage summary and handoff
+
+The validator computes and exposes:
+
+`required_seed_count | autocomplete_pass_count | semrush_required_count | semrush_pass_count | required_branch_seed_count | branch_seed_pass_count | competitor_sweep_configured | competitor_sweep_status | coverage_status | blocked_reasons | formal_handoff_allowed`
+
+Full Coverage requires equality of every mandatory source total and pass count, a PASS `discovery_coverage` validation receipt, and `formal_handoff_allowed=true`. A formal `discovery_handoff` must carry `coverage_status=PASS` and the exact `coverage_receipt_ref`. Blocked/NOT_RUN/UNKNOWN items remain visible; they may not be silently removed to make counts equal.

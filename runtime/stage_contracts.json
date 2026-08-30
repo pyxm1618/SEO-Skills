@@ -10,9 +10,28 @@
     "host_equals": {"relay_origin": "sem.3ue.com"},
     "list_min": {"rows": 1}
   },
+  "discovery_semrush_competitor_organic": {
+    "required": [
+      "competitor_domain", "rows", "observed_at", "metric_source", "metric_database",
+      "metric_stage", "relay_origin", "provenance_ref"
+    ],
+    "equals": {"metric_source": "Semrush", "metric_database": "us", "metric_stage": "competitor_organic"},
+    "host_equals": {"relay_origin": "sem.3ue.com"},
+    "list_min": {"rows": 1}
+  },
+  "discovery_coverage": {
+    "required": [
+      "batch_id", "discovery_mode", "required_seeds", "observed_candidates",
+      "required_branch_seeds", "competitor_sweep", "other_mandatory_sources",
+      "max_branch_depth", "max_branch_seeds"
+    ]
+  },
   "discovery_handoff": {
-    "required": ["batch_id", "required_seed_count", "autocomplete_pass_count", "status"],
-    "equals": {"status": "PASS"},
+    "required": [
+      "batch_id", "required_seed_count", "autocomplete_pass_count", "status",
+      "coverage_status", "coverage_receipt_ref"
+    ],
+    "equals": {"status": "PASS", "coverage_status": "PASS"},
     "equal_fields": [["required_seed_count", "autocomplete_pass_count"]]
   },
   "stage6_exact": {

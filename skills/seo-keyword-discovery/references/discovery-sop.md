@@ -14,7 +14,7 @@ Obtain roots from `keyword-root-library`. Prefer relevant `verified`/`active` ro
 
 Generate natural demand-entry Seeds. A Seed is a demand starting point, not an opportunity keyword. Avoid mechanical root permutations that create unnatural phrases.
 
-For each run, explicitly record which Seeds are `required`. Every required Seed must pass the Google Autocomplete contract before the batch can produce a formal handoff.
+For each run, explicitly record which Seeds are `required`. Full Traditional Discovery also requires Semrush Ideas/Related for every required Seed. Every required Seed must pass both source contracts before the batch can produce a formal handoff.
 
 ## Step 3 — Expand concrete candidates
 
@@ -32,13 +32,25 @@ Network failure, CAPTCHA, unavailable/unconfirmed DOM, zero visible suggestions,
 
 Do not substitute AI suggestions, Bing, WebSearch snippets/results, or third-party suggestion tools.
 
-### Semrush Ideas / Related when used
+### Semrush Ideas / Related — mandatory for Full Discovery
 
-When the discovery route uses Semrush Ideas/Related, acquire it only through the current authenticated same-origin `sem.3ue.com` relay session. The request shape must be re-confirmed live from the current UI/session; historical captures are locator hints only.
+For the default Full route, acquire Semrush Ideas/Related for every required Seed only through the current authenticated same-origin `sem.3ue.com` relay session. The request shape must be re-confirmed live from the current UI/session; historical captures are locator hints only. A Semrush block preserves any Google observation but blocks Full Coverage and formal handoff.
 
 No official Semrush API, API key, official connector, Ahrefs, or other provider may replace relay failure.
 
-Other real observed sources from the old Step 3 may be retained as optional supporting discovery evidence, but they never satisfy the mandatory Google Autocomplete contract unless they are actual Google Autocomplete observations.
+### Domain/cluster competitor sweep
+
+If the run explicitly configures competitor domains, acquire competitor organic keywords through the same current authenticated `sem.3ue.com` relay and record one status/evidence reference per configured domain. A configured failure is `BLOCKED`. With no domains, record `configured=false`, `status=not_configured`; this is not a fake PASS and does not block the otherwise complete Full route.
+
+Competitor inputs must be user-provided or already verified project inputs. Discovery must not invent domains.
+
+Other real observed sources from the old Step 3 may be retained as supplementary evidence, but they never satisfy the mandatory Google/Semrush contracts unless they are actual observations from the named source.
+
+### Demand branch expansion
+
+After merging the first-round candidate pool, semantic analysis may declare a required Branch Seed only by referencing an existing observed candidate. Record `branch_seed` (the exact candidate keyword), `parent_seed`, `originating_candidate_id`, `source`, `evidence_ref`, `branch_reason`, `analysis_status=required`, and depth. A Branch Seed then runs real Google Autocomplete and Semrush Ideas/Related. A missing or blocked Branch Seed remains in the ledger and blocks Full Coverage.
+
+Do not requeue every keyword. Reject visited/cycle duplicates and enforce configurable maximum branch depth and branch count as execution safety limits.
 
 ## Step 4 — Low-risk cleaning
 
@@ -46,8 +58,10 @@ Deduplicate and remove clear brand/navigation terms and obvious semantic drift. 
 
 AI semantic analysis is allowed here, but it cannot rewrite an AI-created phrase into an `observed` candidate without a real source observation.
 
-## Discovery handoff
+## Discovery Coverage and handoff
 
-The handoff contains concrete keywords and their discovery provenance. It may carry observed Semrush Ideas fields when they were actually returned, but it performs no Step 5 threshold decision.
+Build one `discovery_coverage` ledger for the run. It must reconcile the original required Seed/Branch/competitor totals with explicit PASS, BLOCKED, NOT_RUN, or UNKNOWN records and report the computed counts and blockers. `Google PASS` alone is not Full Coverage. `Semrush BLOCKED`, an incomplete required Branch Seed, or a failed configured competitor sweep makes coverage `BLOCKED` while retaining prior evidence.
+
+Only a production-verified `coverage_status=PASS` record may authorize `discovery_handoff`. The handoff contains concrete keywords and their discovery provenance and points to the exact coverage validation receipt. It may carry observed Semrush Ideas or competitor fields when they were actually returned, but it performs no Step 5 threshold decision.
 
 `seo-keyword-selection` resumes at former Step 5. Rows without Ideas Volume/KD may therefore legitimately enter selection as `pending_metrics` and route to Stage 6 Exact acquisition.

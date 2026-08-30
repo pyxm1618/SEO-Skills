@@ -14,9 +14,11 @@ NOT_APPLICABLE = "not_applicable"
 UNKNOWN = "unknown"
 ROOT = Path(__file__).resolve().parent
 BINDING_PATH = ROOT / "evidence_binding.py"
+COVERAGE_PATH = ROOT / "discovery_coverage.py"
 PRODUCTION_BINDINGS = {
     "discovery_autocomplete": "google_autocomplete",
     "discovery_semrush_ideas": "semrush_ideas",
+    "discovery_semrush_competitor_organic": "semrush_competitor_organic",
     "stage6_exact": "semrush_exact",
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
@@ -26,6 +28,13 @@ PRODUCTION_BINDINGS = {
 
 def _binding():
     spec = importlib.util.spec_from_file_location("seo_evidence_binding", BINDING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _coverage():
+    spec = importlib.util.spec_from_file_location("seo_discovery_coverage_validator", COVERAGE_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -193,12 +202,17 @@ def validate_stage(stage, payload, contracts, production=False):
             if payload.get(field) != expected:
                 errors.append(f"{field}:must_equal:{expected}")
 
+    if stage == "discovery_coverage" and not errors:
+        errors.extend(_coverage().validate_coverage(payload, production=production))
+
     if production and not errors:
         errors.extend(_validate_production_binding(stage, payload))
     return errors
 
 
 def validate_payload(stage, data, contracts, production=False):
+    if stage == "discovery_coverage" and isinstance(data, dict):
+        data = _coverage().enrich_coverage(data)
     # Semrush Ideas is a stage-level envelope whose own contract requires the
     # top-level seed/rows/observed_at/source fields. Its rows are evidence data,
     # not independent stage payloads. Other list-shaped inputs remain batches.
