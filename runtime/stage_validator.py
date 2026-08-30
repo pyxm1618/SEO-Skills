@@ -22,6 +22,7 @@ PRODUCTION_BINDINGS = {
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
     "trends_related": "google_trends_related",
+    "trends_timeline": "google_trends",
 }
 
 

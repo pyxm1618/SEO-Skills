@@ -262,6 +262,12 @@ def _verify_google_semantics(evidence_type, normalized, role_paths):
             "google_trends_market": raw.get("market"),
             "google_trends_observed_at": raw.get("observed_at"),
         }
+        if "requested_timeframe" in normalized and normalized.get("requested_timeframe") != raw.get("requested_timeframe"):
+            raise EvidenceIntegrityError("Google Trends requested timeframe differs from temporal evidence")
+        if "actual_resolution" in normalized and normalized.get("actual_resolution") != raw.get("actual_resolution"):
+            raise EvidenceIntegrityError("Google Trends actual resolution differs from temporal evidence")
+        if "series" in normalized and normalized.get("series") != replayed_series:
+            raise EvidenceIntegrityError("Google Trends series alias differs from temporal evidence")
         for field, expected in checks.items():
             if normalized.get(field) != expected:
                 raise EvidenceIntegrityError(f"Google Trends normalized {field} differs from temporal evidence")
@@ -271,6 +277,12 @@ def _verify_google_semantics(evidence_type, normalized, role_paths):
             raise EvidenceIntegrityError("Google Trends evidence ref mismatch")
         if not _same_path(normalized.get("google_trends_screenshot_ref"), screenshot_path):
             raise EvidenceIntegrityError("Google Trends screenshot ref mismatch")
+        if "source" in normalized and normalized.get("source") != "Google Trends":
+            raise EvidenceIntegrityError("Google Trends normalized source label mismatch")
+        if "source_type" in normalized and normalized.get("source_type") != "google_trends_timeline":
+            raise EvidenceIntegrityError("Google Trends normalized source type mismatch")
+        if "source_url" in normalized and normalized.get("source_url") != raw.get("source_url"):
+            raise EvidenceIntegrityError("Google Trends normalized source URL differs from temporal evidence")
         return
 
     observation_path = role_paths["structured_observation"]

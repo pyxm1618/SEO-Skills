@@ -27,6 +27,17 @@
       "related_queries": ["query", "relation_type", "rank", "is_google_breakout"]
     }
   },
+  "trends_timeline": {
+    "required": [
+      "keyword", "market", "requested_timeframe", "actual_resolution", "series",
+      "observed_at", "source", "source_type", "source_url", "raw_evidence_ref",
+      "screenshot_ref", "evidence_receipt_ref"
+    ],
+    "equals": {"source": "Google Trends", "source_type": "google_trends_timeline"},
+    "host_equals": {"source_url": "trends.google.com"},
+    "list_min": {"series": 2},
+    "items_required": {"series": ["time", "value"]}
+  },
   "stage6_exact": {
     "required": [
       "keyword", "volume", "kd", "cpc", "intent", "competition_level", "trend",

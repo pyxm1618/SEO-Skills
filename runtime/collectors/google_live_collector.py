@@ -10,12 +10,28 @@ import importlib.util
 import json
 import math
 import os
+import random
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 BINDING_PATH = Path(__file__).resolve().parents[1] / "evidence_binding.py"
+GOOGLE_AUTH_COOKIE_NAMES = {
+    "account_chooser",
+    "apisid",
+    "hsid",
+    "lsid",
+    "osid",
+    "sapISID".casefold(),
+    "sid",
+    "ssid",
+    "__host-gaps",
+    "__secure-1psid",
+    "__secure-3psid",
+    "__secure-osid",
+}
 
 
 def _binding():
@@ -38,14 +54,31 @@ def playwright():
 
 
 def connect():
-    cdp = os.environ.get("SEO_BROWSER_CDP_URL")
+    cdp = os.environ.get("SEO_GOOGLE_CDP_URL") or os.environ.get("SEO_BROWSER_CDP_URL")
     if not cdp:
-        raise RuntimeError("SEO_BROWSER_CDP_URL is required; no hosted WebSearch fallback is allowed")
+        raise RuntimeError("SEO_GOOGLE_CDP_URL or SEO_BROWSER_CDP_URL is required; no hosted WebSearch fallback is allowed")
     pw = playwright()().start()
     browser = pw.chromium.connect_over_cdp(cdp)
     if not browser.contexts:
         raise RuntimeError("No browser context available")
-    return pw, browser, browser.contexts[0]
+
+    general_cdp = os.environ.get("SEO_BROWSER_CDP_URL")
+    dedicated_cdp = os.environ.get("SEO_GOOGLE_CDP_URL")
+    if dedicated_cdp and dedicated_cdp != general_cdp:
+        context = browser.contexts[0]
+    else:
+        new_context = getattr(browser, "new_context", None)
+        if not callable(new_context):
+            raise RuntimeError("Google collector requires an isolated browser context or separate profile")
+        context = new_context()
+
+    cookies = context.cookies()
+    for cookie in cookies:
+        domain = str(cookie.get("domain") or "").casefold()
+        name = str(cookie.get("name") or "").casefold()
+        if name in GOOGLE_AUTH_COOKIE_NAMES and "google." in domain:
+            raise RuntimeError("Google collector context contains authenticated Google cookies; logged-out isolation required")
+    return pw, browser, context
 
 
 def assert_google(page):
@@ -246,6 +279,29 @@ def parse_trends_timeline(payload):
     return series
 
 
+def infer_timeline_resolution(series):
+    timestamps = []
+    for point in series:
+        try:
+            timestamp = int(str(point["time"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        timestamps.append(timestamp)
+    differences = [right - left for left, right in zip(timestamps, timestamps[1:]) if right > left]
+    if not differences:
+        return "unknown"
+    seconds = sorted(differences)[len(differences) // 2]
+    if seconds >= 300 * 24 * 60 * 60:
+        return "yearly"
+    if seconds >= 25 * 24 * 60 * 60:
+        return "monthly"
+    if seconds >= 5 * 24 * 60 * 60:
+        return "weekly"
+    if seconds >= 20 * 60 * 60:
+        return "daily"
+    return "subdaily"
+
+
 def _related_group_type(group, index):
     for field in ("relation_type", "title", "name", "type"):
         value = str(group.get(field) or "").strip().lower()
@@ -381,7 +437,7 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
     }
 
 
-def trends(context, keyword, market, evidence_dir):
+def trends_timeline(context, keyword, market, timeframe, evidence_dir):
     page = context.new_page()
     observed_payloads = []
 
@@ -399,7 +455,11 @@ def trends(context, keyword, market, evidence_dir):
             return
 
     page.on("response", capture_temporal_response)
-    page.goto(f"https://trends.google.com/trends/explore?geo={quote_plus(market)}&q={quote_plus(keyword)}", wait_until="domcontentloaded")
+    page.goto(
+        "https://trends.google.com/trends/explore?"
+        f"geo={quote_plus(market)}&date={quote_plus(timeframe)}&q={quote_plus(keyword)}",
+        wait_until="domcontentloaded",
+    )
     page.wait_for_timeout(5000)
     host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
     if host != "trends.google.com":
@@ -419,16 +479,24 @@ def trends(context, keyword, market, evidence_dir):
         {
             "keyword": keyword,
             "market": market,
+            "requested_timeframe": timeframe,
             "observed_at": observed_at,
             "source_url": captured["url"],
             "payload": captured["payload"],
             "series": captured["series"],
+            "actual_resolution": infer_timeline_resolution(captured["series"]),
         },
     )
     screenshot_ref = screenshot(page, evidence_dir, f"trends-{slug}.png")
     return {
         "keyword": keyword,
         "is_finalist": True,
+        "source": "Google Trends",
+        "source_type": "google_trends_timeline",
+        "source_url": captured["url"],
+        "requested_timeframe": timeframe,
+        "actual_resolution": infer_timeline_resolution(captured["series"]),
+        "series": captured["series"],
         "google_trends_source": "Google Trends",
         "google_trends_market": market,
         "google_trends_observed_at": observed_at,
@@ -438,13 +506,35 @@ def trends(context, keyword, market, evidence_dir):
     }
 
 
+def trends(context, keyword, market, evidence_dir):
+    return trends_timeline(context, keyword, market, "today 12-m", evidence_dir)
+
+
+class Throttle:
+    def __init__(self, min_delay_seconds=1.0, jitter_seconds=0.25, sleeper=time.sleep, random_source=random.random):
+        if min_delay_seconds < 0 or jitter_seconds < 0:
+            raise ValueError("throttle delays must be non-negative")
+        self.min_delay_seconds = float(min_delay_seconds)
+        self.jitter_seconds = float(jitter_seconds)
+        self.sleeper = sleeper
+        self.random_source = random_source
+        self._has_waited = False
+
+    def wait(self):
+        if not self._has_waited:
+            self._has_waited = True
+            return
+        delay = self.min_delay_seconds + self.jitter_seconds * float(self.random_source())
+        self.sleeper(delay)
+
+
 def _artifacts_for(mode, result):
     if mode == "trends_related":
         return [
             {"path": result["raw_evidence_ref"], "role": "related_payload"},
             {"path": result["screenshot_ref"], "role": "screenshot"},
         ]
-    if mode == "trends":
+    if mode in {"trends", "trends_timeline"}:
         return [
             {"path": result["google_trends_evidence_ref"], "role": "temporal_payload"},
             {"path": result["google_trends_screenshot_ref"], "role": "screenshot"},
@@ -457,7 +547,7 @@ def _artifacts_for(mode, result):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["autocomplete", "intitle", "serp", "trends", "trends_related"])
+    parser.add_argument("mode", choices=["autocomplete", "intitle", "serp", "trends", "trends_timeline", "trends_related"])
     parser.add_argument("--keyword")
     parser.add_argument("--seed")
     parser.add_argument("--country", default="US")
@@ -484,6 +574,8 @@ def main():
                 result = serp(context, args.keyword, args.market, args.evidence_dir)
             elif args.mode == "trends_related":
                 result = trends_related(context, args.keyword, args.market, args.timeframe, args.evidence_dir)
+            elif args.mode == "trends_timeline":
+                result = trends_timeline(context, args.keyword, args.market, args.timeframe, args.evidence_dir)
             else:
                 result = trends(context, args.keyword, args.market, args.evidence_dir)
         output = Path(args.output)
@@ -492,6 +584,7 @@ def main():
             "intitle": "google_intitle",
             "serp": "google_serp",
             "trends": "google_trends",
+            "trends_timeline": "google_trends",
             "trends_related": "google_trends_related",
         }[args.mode]
         result = _binding().write_observed_output(
