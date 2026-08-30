@@ -246,6 +246,141 @@ def parse_trends_timeline(payload):
     return series
 
 
+def _related_group_type(group, index):
+    for field in ("relation_type", "title", "name", "type"):
+        value = str(group.get(field) or "").strip().lower()
+        if "rising" in value:
+            return "rising"
+        if "top" in value:
+            return "top"
+    return ("top", "rising")[index] if index < 2 else None
+
+
+def _related_value(value):
+    if isinstance(value, bool) or value is None:
+        return None, None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if math.isfinite(number) and number >= 0:
+            return (int(number) if number.is_integer() else number), None
+        return None, None
+    text = str(value).strip()
+    if not text:
+        return None, None
+    try:
+        number = float(text.replace(",", ""))
+    except ValueError:
+        return None, text
+    if not math.isfinite(number) or number < 0:
+        return None, text
+    return (int(number) if number.is_integer() else number), None
+
+
+def parse_trends_related(payload):
+    default = payload.get("default") if isinstance(payload, dict) else None
+    ranked_list = default.get("rankedList") if isinstance(default, dict) else None
+    if not isinstance(ranked_list, list):
+        raise RuntimeError("Google Trends related response missing rankedList")
+
+    rows = []
+    for group_index, group in enumerate(ranked_list):
+        if not isinstance(group, dict):
+            continue
+        relation_type = _related_group_type(group, group_index)
+        if relation_type not in {"top", "rising"}:
+            continue
+        ranked_keywords = group.get("rankedKeyword")
+        if not isinstance(ranked_keywords, list):
+            continue
+        for item in ranked_keywords:
+            if not isinstance(item, dict):
+                continue
+            query = " ".join(str(item.get("query") or "").split()).strip()
+            if not query:
+                continue
+            value, label = _related_value(item.get("value"))
+            if value is None and label is None:
+                formatted = item.get("formattedValue")
+                value, label = _related_value(formatted)
+            rows.append(
+                {
+                    "query": query,
+                    "relation_type": relation_type,
+                    "rank": len([row for row in rows if row["relation_type"] == relation_type]) + 1,
+                    "rising_value": value,
+                    "google_rising_label": label,
+                    "is_google_breakout": isinstance(label, str) and label.casefold() == "breakout",
+                }
+            )
+    return rows
+
+
+def trends_related(context, anchor, country, timeframe, evidence_dir):
+    page = context.new_page()
+    observed_payloads = []
+
+    def capture_related_response(response):
+        try:
+            parsed = urlparse(response.url)
+            if parsed.hostname != "trends.google.com" or "/trends/api/widgetdata/relatedsearches" not in parsed.path:
+                return
+            if response.status != 200:
+                return
+            payload = _decode_trends_payload(response.text())
+            related_queries = parse_trends_related(payload)
+            observed_payloads.append(
+                {"url": response.url, "payload": payload, "related_queries": related_queries}
+            )
+        except Exception:
+            return
+
+    page.on("response", capture_related_response)
+    page.goto(
+        "https://trends.google.com/trends/explore?"
+        f"geo={quote_plus(country)}&date={quote_plus(timeframe)}&q={quote_plus(anchor)}",
+        wait_until="domcontentloaded",
+    )
+    page.wait_for_timeout(5000)
+    host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
+    if host != "trends.google.com":
+        raise RuntimeError(f"wrong Google Trends origin: {host}")
+    body = page.locator("body").inner_text(timeout=5000).lower()
+    if "related" not in body and "关联" not in body and not observed_payloads:
+        raise RuntimeError("Google Trends related result could not be confirmed")
+    if not observed_payloads:
+        raise RuntimeError("Google Trends related payload was not observed; screenshot-only evidence is insufficient")
+
+    captured = observed_payloads[-1]
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", anchor).strip("-")
+    observed_at = now()
+    raw_evidence = evidence_json(
+        evidence_dir,
+        f"trends-related-{slug}.json",
+        {
+            "anchor": anchor,
+            "country": country,
+            "timeframe": timeframe,
+            "observed_at": observed_at,
+            "source_url": captured["url"],
+            "payload": captured["payload"],
+            "related_queries": captured["related_queries"],
+        },
+    )
+    screenshot_ref = screenshot(page, evidence_dir, f"trends-related-{slug}.png")
+    return {
+        "anchor": anchor,
+        "related_queries": captured["related_queries"],
+        "country": country,
+        "timeframe": timeframe,
+        "observed_at": observed_at,
+        "source": "Google Trends",
+        "source_type": "google_trends_related",
+        "source_url": captured["url"],
+        "raw_evidence_ref": raw_evidence,
+        "screenshot_ref": screenshot_ref,
+    }
+
+
 def trends(context, keyword, market, evidence_dir):
     page = context.new_page()
     observed_payloads = []
@@ -304,6 +439,11 @@ def trends(context, keyword, market, evidence_dir):
 
 
 def _artifacts_for(mode, result):
+    if mode == "trends_related":
+        return [
+            {"path": result["raw_evidence_ref"], "role": "related_payload"},
+            {"path": result["screenshot_ref"], "role": "screenshot"},
+        ]
     if mode == "trends":
         return [
             {"path": result["google_trends_evidence_ref"], "role": "temporal_payload"},
@@ -317,12 +457,13 @@ def _artifacts_for(mode, result):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["autocomplete", "intitle", "serp", "trends"])
+    parser.add_argument("mode", choices=["autocomplete", "intitle", "serp", "trends", "trends_related"])
     parser.add_argument("--keyword")
     parser.add_argument("--seed")
     parser.add_argument("--country", default="US")
     parser.add_argument("--language", default="en")
     parser.add_argument("--market", default="US")
+    parser.add_argument("--timeframe", default="today 12-m")
     parser.add_argument("--evidence-dir", default=".seo-run/evidence")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
@@ -341,6 +482,8 @@ def main():
                 result = intitle(context, args.keyword, args.market, args.evidence_dir)
             elif args.mode == "serp":
                 result = serp(context, args.keyword, args.market, args.evidence_dir)
+            elif args.mode == "trends_related":
+                result = trends_related(context, args.keyword, args.market, args.timeframe, args.evidence_dir)
             else:
                 result = trends(context, args.keyword, args.market, args.evidence_dir)
         output = Path(args.output)
@@ -349,6 +492,7 @@ def main():
             "intitle": "google_intitle",
             "serp": "google_serp",
             "trends": "google_trends",
+            "trends_related": "google_trends_related",
         }[args.mode]
         result = _binding().write_observed_output(
             output,

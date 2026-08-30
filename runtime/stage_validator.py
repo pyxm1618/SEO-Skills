@@ -21,6 +21,7 @@ PRODUCTION_BINDINGS = {
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
+    "trends_related": "google_trends_related",
 }
 
 
