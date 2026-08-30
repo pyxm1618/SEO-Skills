@@ -10,6 +10,8 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 DATABASE = SKILL_ROOT / "scripts" / "update_emerging_database.py"
 RUNNER = SKILL_ROOT / "scripts" / "run_emerging_radar.py"
 ROUTER = SKILL_ROOT / "scripts" / "route_candidates.py"
+CONTRACTS = Path(__file__).resolve().parents[3] / "runtime" / "stage_contracts.json"
+VALIDATOR = Path(__file__).resolve().parents[3] / "runtime" / "stage_validator.py"
 
 
 def load_module(name, path):
@@ -130,3 +132,16 @@ def test_existing_root_confirmed_candidate_keeps_selection_handoff():
     assert route["handoff"]["demand_history_type"] == "newly_observed"
     assert route["handoff"]["estimated_birth_window"] == "2026-08"
     assert "do_candidate" not in json.dumps(route)
+
+
+def test_runner_result_has_a_valid_emerging_radar_run_contract():
+    runner = load_module("runner_contract_red", RUNNER)
+
+    result = runner.run_pipeline(
+        lambda anchor: {"related_queries": []},
+        domain="wedding",
+    )
+    validator = load_module("stage_validator_runner_contract_red", VALIDATOR)
+    contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
+
+    assert validator.validate_stage("emerging_radar_run", result, contracts) == []

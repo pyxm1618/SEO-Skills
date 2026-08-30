@@ -300,6 +300,24 @@ def infer_demand_history(
         result["historical_positive_seen"] = True
         result["birth_reason"] = "before_available_history" if old_run[0] == 0 else "quiet_gap_followed_by_persistent_rise"
         result["birth_confidence"] = "low"
+        if old_run[0] > 0:
+            baseline_count = _positive_int(config, "min_baseline_observations")
+            baseline_max = _non_negative_float(config, "baseline_max_signal")
+            baseline_start = old_run[0] - baseline_count
+            has_low_prehistory = baseline_start >= 0 and all(
+                point["value"] <= baseline_max for point in normalized[baseline_start : old_run[0]]
+            )
+            if has_low_prehistory:
+                _set_window_fields(
+                    result,
+                    normalized,
+                    old_run[0],
+                    old_run[1],
+                    source_resolution,
+                    "birth_window",
+                )
+                result["birth_reason"] = "persistent_rise_after_low_baseline_then_quiet_gap"
+                result["birth_confidence"] = "medium"
         _set_window_fields(result, normalized, recent_run[0], recent_run[1], source_resolution, "resurgence_window")
         result["birth_evidence_series"] = _evidence(
             normalized,

@@ -330,6 +330,7 @@ def run_pipeline(
         "aggregate": aggregate_result,
         "database": database,
         "blockers": blockers,
+        "output_artifacts": {},
         "candidate_counts": {
             "discovered": len(discovered_candidates),
             "supplemental": len(supplemental_candidates),

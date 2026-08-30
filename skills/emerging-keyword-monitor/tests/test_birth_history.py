@@ -106,6 +106,19 @@ def test_series_starting_with_demand_is_before_available_history(thresholds):
     assert result["estimated_birth_window"] is None
 
 
+def test_resurgent_with_observed_low_prehistory_reports_historical_birth_window(thresholds):
+    birth = load_module("birth_history_resurgent_birth_red", BIRTH)
+
+    result = birth.infer_demand_history(
+        weekly_points([0, 0, 1, 0, 12, 15, 18, 0, 0, 0, 20, 25, 30]), thresholds, "weekly"
+    )
+
+    assert result["demand_history_type"] == "resurgent"
+    assert result["estimated_birth_window"] == "2025-05 ~ 2025-06"
+    assert result["birth_window_start"] == "2025-05"
+    assert result["birth_window_end"] == "2025-06"
+
+
 def test_timeframes_are_not_combined_for_growth():
     aggregate = load_module("aggregate_timeframe_isolation_red", AGGREGATE)
     rows = []
