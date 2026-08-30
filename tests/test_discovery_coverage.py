@@ -67,15 +67,45 @@ def full_ledger():
             "candidate_id": "candidate-alcohol",
             "keyword": "wedding alcohol calculator",
             "source": "google_autocomplete",
+            "source_seed": "wedding calculator",
             "evidence_receipt_ref": "evidence/candidate-alcohol-google.receipt.json",
         },
         {
             "candidate_id": "candidate-timeline",
             "keyword": "wedding timeline calculator",
             "source": "semrush_ideas",
+            "source_seed": "wedding calculator",
             "evidence_receipt_ref": "evidence/candidate-timeline-semrush.receipt.json",
         },
     ]
+    upstream_input = {
+        "schema": "seo-discovery-input/v1",
+        "batch_id": "batch-1",
+        "root_handoff_receipt_ref": "evidence/root-handoff.receipt.json",
+        "root_handoff_receipt_sha256": "0" * 64,
+        "seed_plan": {
+            "original_seed_count": 3,
+            "seeds": ["wedding calculator", "wedding planner", "wedding budget"],
+        },
+        "candidate_inventory": {
+            "original_candidate_count": len(observed),
+            "candidates": [dict(candidate) for candidate in observed],
+        },
+        "candidate_analysis": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "analysis_status": "COMPLETE",
+                "branch_required": True,
+                "analysis_reason": "distinct observed demand branch",
+            },
+            {
+                "candidate_id": "candidate-timeline",
+                "analysis_status": "COMPLETE",
+                "branch_required": True,
+                "analysis_reason": "distinct observed demand branch",
+            },
+        ],
+    }
     return {
         "batch_id": "batch-1",
         "discovery_mode": "full",
@@ -85,6 +115,21 @@ def full_ledger():
             _required_seed("wedding budget"),
         ],
         "observed_candidates": observed,
+        "upstream_input": upstream_input,
+        "candidate_analysis": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "analysis_status": "COMPLETE",
+                "branch_required": True,
+                "analysis_reason": "distinct observed demand branch",
+            },
+            {
+                "candidate_id": "candidate-timeline",
+                "analysis_status": "COMPLETE",
+                "branch_required": True,
+                "analysis_reason": "distinct observed demand branch",
+            },
+        ],
         "required_branch_seeds": [
             _branch("wedding alcohol calculator", "candidate-alcohol"),
             _branch("wedding timeline calculator", "candidate-timeline"),
@@ -256,6 +301,170 @@ def test_required_branch_blocked_cannot_be_removed_to_make_counts_pass():
     assert len(ledger["required_branch_seeds"]) == 2
 
 
+def test_coverage_cannot_shrink_below_upstream_seed_and_candidate_inventory():
+    coverage = load_module("discovery_coverage_upstream_inventory", COVERAGE)
+    ledger = full_ledger()
+    upstream_candidates = [dict(candidate) for candidate in ledger["observed_candidates"]]
+    ledger["upstream_input"] = {
+        "batch_id": "batch-1",
+        "schema": "seo-discovery-input/v1",
+        "root_handoff_receipt_ref": "evidence/root-handoff.receipt.json",
+        "root_handoff_receipt_sha256": "0" * 64,
+        "seed_plan": {
+            "original_seed_count": 3,
+            "seeds": ["wedding calculator", "wedding planner", "wedding budget"],
+        },
+        "candidate_inventory": {
+            "original_candidate_count": len(upstream_candidates),
+            "candidates": upstream_candidates,
+        },
+        "candidate_analysis": [
+            {
+                "candidate_id": candidate["candidate_id"],
+                "analysis_status": "COMPLETE",
+                "branch_required": True,
+                "analysis_reason": "distinct observed demand branch",
+            }
+            for candidate in upstream_candidates
+        ],
+    }
+    ledger["candidate_analysis"] = [
+        {
+            "candidate_id": candidate["candidate_id"],
+            "analysis_status": "COMPLETE",
+            "branch_required": True,
+            "analysis_reason": "distinct observed demand branch",
+        }
+        for candidate in upstream_candidates
+    ]
+    ledger["required_seeds"] = ledger["required_seeds"][:1]
+    ledger["observed_candidates"] = []
+    ledger["required_branch_seeds"] = []
+
+    errors = coverage.validate_coverage(ledger)
+
+    assert errors
+    assert any("upstream" in error.lower() or "inventory" in error.lower() for error in errors)
+
+
+def test_branch_parent_must_match_candidate_source_seed_and_self_cycle_is_denied():
+    coverage = load_module("discovery_coverage_branch_parent_provenance", COVERAGE)
+    ledger = full_ledger()
+    ledger["required_branch_seeds"][0]["parent_seed"] = "wedding planner"
+
+    errors = coverage.validate_coverage(ledger)
+
+    assert errors
+    assert any("parent" in error.lower() or "provenance" in error.lower() for error in errors)
+
+    cycle_ledger = full_ledger()
+    cycle_ledger["required_branch_seeds"][0]["branch_seed"] = "wedding alcohol calculator"
+    cycle_ledger["required_branch_seeds"][0]["parent_seed"] = "wedding alcohol calculator"
+
+    cycle_errors = coverage.validate_coverage(cycle_ledger)
+
+    assert cycle_errors
+    assert any("cycle" in error.lower() or "parent" in error.lower() for error in cycle_errors)
+
+
+def test_candidate_analysis_branch_decision_cannot_be_rewritten_in_coverage_ledger():
+    coverage = load_module("discovery_coverage_authoritative_analysis", COVERAGE)
+    ledger = full_ledger()
+    ledger["candidate_analysis"][0]["branch_required"] = False
+
+    errors = coverage.validate_coverage(ledger)
+
+    assert errors
+    assert any("authoritative" in error.lower() for error in errors)
+
+
+def test_production_other_mandatory_source_must_have_verifiable_receipt():
+    coverage = load_module("discovery_coverage_other_source_receipt", COVERAGE)
+    ledger = full_ledger()
+    ledger["other_mandatory_sources"] = [
+        {
+            "source_id": "related-searches",
+            "evidence_type": "google_autocomplete",
+            "status": "PASS",
+            "evidence_receipt_ref": "does-not-exist.receipt.json",
+        }
+    ]
+
+    errors = coverage.validate_coverage(ledger, production=True)
+
+    assert errors
+    assert any("other_mandatory_source" in error and "evidence" in error for error in errors)
+
+
+def test_production_input_manifest_binds_root_receipt_to_seed_plan(tmp_path):
+    coverage = load_module("discovery_input_root_receipt", COVERAGE)
+    root_receipt = tmp_path / "root.receipt.json"
+    root_receipt.write_text(
+        json.dumps(
+            {
+                "schema": "seo-root-natural-seeds/v1",
+                "status": "PASS",
+                "batch_id": "batch-1",
+                "seed_plan": {"original_seed_count": 1, "seeds": ["different seed"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = {
+        "schema": "seo-discovery-input/v1",
+        "batch_id": "batch-1",
+        "root_handoff_receipt_ref": str(root_receipt),
+        "root_handoff_receipt_sha256": hashlib.sha256(root_receipt.read_bytes()).hexdigest(),
+        "seed_plan": {"original_seed_count": 1, "seeds": ["wedding calculator"]},
+        "candidate_inventory": {"original_candidate_count": 0, "candidates": []},
+        "candidate_analysis": [],
+    }
+
+    errors = coverage.validate_input_manifest(manifest, production=True)
+
+    assert any("root_handoff_receipt_ref:seed_plan_mismatch" in error for error in errors)
+
+
+def test_production_handoff_rejects_nonexistent_coverage_receipt():
+    validator = load_module("discovery_handoff_receipt_validation", STAGE_VALIDATOR)
+    contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
+    payload = {
+        "batch_id": "batch-1",
+        "required_seed_count": 1,
+        "autocomplete_pass_count": 1,
+        "status": "PASS",
+        "coverage_status": "PASS",
+        "coverage_receipt_ref": "does-not-exist.receipt.json",
+    }
+
+    errors = validator.validate_stage("discovery_handoff", payload, contracts, production=True)
+
+    assert errors
+    assert any("coverage" in error.lower() and "receipt" in error.lower() for error in errors)
+
+
+def test_competitor_stage_validator_keeps_top_level_envelope_intact():
+    validator = load_module("competitor_stage_envelope", STAGE_VALIDATOR)
+    contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
+    payload = {
+        "competitor_domain": "competitor.example",
+        "rows": [{"keyword": "wedding timeline"}],
+        "observed_at": "2026-08-30T00:00:00Z",
+        "metric_source": "Semrush",
+        "metric_database": "us",
+        "metric_stage": "competitor_organic",
+        "relay_origin": "https://sem.3ue.com/",
+        "provenance_ref": "capture.json",
+    }
+
+    complete, blocked = validator.validate_payload(
+        "discovery_semrush_competitor_organic", payload, contracts
+    )
+
+    assert complete == [payload]
+    assert blocked == []
+
+
 def test_branch_cycles_duplicates_and_configured_budget_are_blocked():
     coverage = load_module("discovery_coverage_branch_safety", COVERAGE)
     ledger = full_ledger()
@@ -321,6 +530,7 @@ def test_production_coverage_rejects_handwritten_source_receipts():
 
     assert errors
     assert any("evidence_receipt_invalid" in error for error in errors)
+    assert any("upstream_input:validation_receipt_ref:required_for_production" in error for error in errors)
 
 
 def test_production_coverage_requires_candidate_to_be_in_observed_source_payload(tmp_path):
@@ -549,9 +759,61 @@ def _run_production_stage(stage, input_path, report_path):
     )
 
 
+def _write_input_manifest_receipt(tmp_path, manifest):
+    root_receipt = tmp_path / "root-handoff.receipt.json"
+    root_receipt.write_text(
+        json.dumps(
+            {
+                "schema": "seo-root-natural-seeds/v1",
+                "status": "PASS",
+                "batch_id": manifest["batch_id"],
+                "seed_plan": manifest["seed_plan"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest["root_handoff_receipt_sha256"] = hashlib.sha256(root_receipt.read_bytes()).hexdigest()
+    manifest_path = tmp_path / "input-manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    report_path = tmp_path / "input-manifest.report.json"
+    result = _run_production_stage("discovery_input_manifest", manifest_path, report_path)
+    assert result.returncode == 0, result.stderr
+    return manifest_path, report_path.with_suffix(".receipt.json")
+
+
 def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
     google_input, google_receipt = _write_google_receipt(tmp_path)
     _ideas_input, ideas_receipt = _write_ideas_receipt(tmp_path)
+    input_manifest = {
+        "schema": "seo-discovery-input/v1",
+        "batch_id": "batch-formal",
+        "root_handoff_receipt_ref": str(tmp_path / "root-handoff.receipt.json"),
+        "seed_plan": {
+            "original_seed_count": 1,
+            "seeds": ["wedding calculator"],
+        },
+        "candidate_inventory": {
+            "original_candidate_count": 1,
+            "candidates": [
+                {
+                    "candidate_id": "candidate-alcohol",
+                    "keyword": "wedding alcohol calculator",
+                    "source": "google_autocomplete",
+                    "source_seed": "wedding calculator",
+                    "evidence_receipt_ref": str(google_receipt),
+                }
+            ],
+        },
+        "candidate_analysis": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
+            }
+        ],
+    }
+    _manifest_path, input_manifest_receipt = _write_input_manifest_receipt(tmp_path, input_manifest)
     ledger = {
         "batch_id": "batch-formal",
         "discovery_mode": "full",
@@ -567,7 +829,17 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
                 "candidate_id": "candidate-alcohol",
                 "keyword": "wedding alcohol calculator",
                 "source": "google_autocomplete",
+                "source_seed": "wedding calculator",
                 "evidence_receipt_ref": str(google_receipt),
+            }
+        ],
+        "upstream_input": dict(input_manifest, validation_receipt_ref=str(input_manifest_receipt)),
+        "candidate_analysis": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
             }
         ],
         "required_branch_seeds": [],
@@ -631,6 +903,20 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
     )
 
     assert hook_result.returncode == 0, hook_result.stderr
+
+
+def test_production_candidate_source_seed_must_match_observed_receipt(tmp_path):
+    coverage = load_module("discovery_coverage_candidate_source_seed", COVERAGE)
+    _google_input, google_receipt = _write_google_receipt(tmp_path)
+    ledger = full_ledger()
+    candidate = ledger["observed_candidates"][0]
+    candidate["source_seed"] = "wedding planner"
+    candidate["evidence_receipt_ref"] = str(google_receipt)
+    ledger["upstream_input"]["candidate_inventory"]["candidates"][0] = dict(candidate)
+
+    errors = coverage.validate_coverage(ledger, production=True)
+
+    assert any("observed_candidate[0]:evidence_identity_mismatch" in error for error in errors)
 
 
 def _handoff_manifest(coverage_receipt_ref="coverage.receipt.json"):

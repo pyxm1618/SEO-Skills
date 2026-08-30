@@ -1,4 +1,8 @@
 {
+  "discovery_input_manifest": {
+    "required": ["schema", "batch_id", "root_handoff_receipt_ref", "root_handoff_receipt_sha256", "seed_plan", "candidate_inventory", "candidate_analysis"],
+    "equals": {"schema": "seo-discovery-input/v1"}
+  },
   "discovery_autocomplete": {
     "required": ["seed", "suggestions", "country", "language", "observed_at", "source", "evidence_ref"],
     "equals": {"source": "google_autocomplete"},
@@ -23,7 +27,7 @@
     "required": [
       "batch_id", "discovery_mode", "required_seeds", "observed_candidates",
       "required_branch_seeds", "competitor_sweep", "other_mandatory_sources",
-      "max_branch_depth", "max_branch_seeds"
+      "max_branch_depth", "max_branch_seeds", "upstream_input", "candidate_analysis"
     ]
   },
   "discovery_handoff": {

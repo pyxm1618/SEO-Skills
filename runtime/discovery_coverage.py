@@ -8,12 +8,15 @@ are observed candidates, and that a complete ledger is eligible for handoff.
 """
 
 import copy
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
 BINDING_PATH = ROOT / "evidence_binding.py"
+STAGE_VALIDATOR_PATH = ROOT / "stage_validator.py"
 
 PASS = "PASS"
 BLOCKED = "BLOCKED"
@@ -27,6 +30,9 @@ DEFAULT_MAX_BRANCH_DEPTH = 1
 DEFAULT_MAX_BRANCH_SEEDS = 20
 VALID_ACQUISITION_STATUSES = frozenset({PASS, BLOCKED, NOT_RUN, UNKNOWN})
 VALID_DISCOVERY_MODES = frozenset({FULL_DISCOVERY, DIAGNOSTIC_DISCOVERY})
+INPUT_MANIFEST_SCHEMA = "seo-discovery-input/v1"
+ROOT_HANDOFF_SCHEMA = "seo-root-natural-seeds/v1"
+VALID_ANALYSIS_STATUSES = frozenset({"COMPLETE", BLOCKED, NOT_RUN, UNKNOWN})
 
 SOURCE_EVIDENCE_TYPES = {
     "google_autocomplete": "google_autocomplete",
@@ -69,6 +75,26 @@ def _candidate_receipt_ref(candidate):
     return _text(candidate.get("evidence_receipt_ref") or candidate.get("evidence_ref"))
 
 
+def _candidate_fingerprint(candidate):
+    return (
+        _text(candidate.get("candidate_id")),
+        _norm_keyword(candidate.get("keyword")),
+        _text(candidate.get("source")),
+        _norm_keyword(candidate.get("source_seed")),
+        _text(candidate.get("competitor_domain")).casefold(),
+        _candidate_receipt_ref(candidate),
+    )
+
+
+def _analysis_fingerprint(analysis):
+    return (
+        _text(analysis.get("candidate_id")),
+        _text(analysis.get("analysis_status")).upper(),
+        analysis.get("branch_required"),
+        _text(analysis.get("analysis_reason")),
+    )
+
+
 def _positive_int(value, default, label, issue):
     if value is None:
         return default
@@ -94,6 +120,20 @@ def _strict_positive_integer(value):
     return number
 
 
+def _strict_nonnegative_integer(value):
+    if isinstance(value, bool):
+        raise ValueError("value must be a non-negative integer")
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        number = int(value.strip())
+    else:
+        raise ValueError("value must be a non-negative integer")
+    if number < 0:
+        raise ValueError("value must be a non-negative integer")
+    return number
+
+
 def _binding():
     spec = importlib.util.spec_from_file_location("seo_discovery_coverage_binding", BINDING_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -105,6 +145,170 @@ def _observed_keywords(normalized, evidence_type):
     if evidence_type == "google_autocomplete":
         return [_norm_keyword(value) for value in normalized.get("suggestions", [])]
     return [_norm_keyword(row.get("keyword")) for row in normalized.get("rows", []) if isinstance(row, dict)]
+
+
+def _file_sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _validate_root_handoff_receipt(manifest):
+    receipt_path = Path(_text(manifest.get("root_handoff_receipt_ref")))
+    if not receipt_path.is_file():
+        return ["input_manifest.root_handoff_receipt_ref:file_missing"]
+    expected_hash = _text(manifest.get("root_handoff_receipt_sha256"))
+    try:
+        actual_hash = _file_sha256(receipt_path)
+    except OSError as exc:
+        return [f"input_manifest.root_handoff_receipt_ref:unreadable:{exc}"]
+    if actual_hash != expected_hash:
+        return ["input_manifest.root_handoff_receipt_sha256:hash_mismatch"]
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"input_manifest.root_handoff_receipt_ref:invalid_json:{exc}"]
+    if not isinstance(receipt, dict):
+        return ["input_manifest.root_handoff_receipt_ref:must_be_object"]
+    issues = []
+    if receipt.get("schema") != ROOT_HANDOFF_SCHEMA:
+        issues.append("input_manifest.root_handoff_receipt_ref:schema_mismatch")
+    if receipt.get("status") != PASS:
+        issues.append("input_manifest.root_handoff_receipt_ref:status_must_be_PASS")
+    if _norm_keyword(receipt.get("batch_id")) != _norm_keyword(manifest.get("batch_id")):
+        issues.append("input_manifest.root_handoff_receipt_ref:batch_id_mismatch")
+    if receipt.get("seed_plan") != manifest.get("seed_plan"):
+        issues.append("input_manifest.root_handoff_receipt_ref:seed_plan_mismatch")
+    return issues
+
+
+def validate_input_manifest(manifest, production=False):
+    """Validate the finite Root/Natural Seeds handoff consumed by Coverage."""
+
+    issues = []
+
+    def issue(message):
+        if message not in issues:
+            issues.append(message)
+
+    if not isinstance(manifest, dict):
+        return ["input_manifest:must_be_object"]
+    if _text(manifest.get("schema")) != INPUT_MANIFEST_SCHEMA:
+        issue(f"input_manifest.schema:must_equal:{INPUT_MANIFEST_SCHEMA}")
+    if not _text(manifest.get("batch_id")):
+        issue("input_manifest.batch_id:required")
+    root_receipt_ref = _text(manifest.get("root_handoff_receipt_ref"))
+    if not root_receipt_ref:
+        issue("input_manifest.root_handoff_receipt_ref:required")
+    elif production:
+        for error in _validate_root_handoff_receipt(manifest):
+            issue(error)
+    root_receipt_hash = _text(manifest.get("root_handoff_receipt_sha256"))
+    if len(root_receipt_hash) != 64 or any(character not in "0123456789abcdefABCDEF" for character in root_receipt_hash):
+        issue("input_manifest.root_handoff_receipt_sha256:must_be_sha256")
+
+    seed_plan = manifest.get("seed_plan")
+    if not isinstance(seed_plan, dict):
+        issue("input_manifest.seed_plan:must_be_object")
+    else:
+        try:
+            original_seed_count = _strict_positive_integer(seed_plan.get("original_seed_count"))
+        except (TypeError, ValueError):
+            original_seed_count = None
+            issue("input_manifest.seed_plan.original_seed_count:must_be_positive_integer")
+        seeds = seed_plan.get("seeds")
+        if not isinstance(seeds, list):
+            issue("input_manifest.seed_plan.seeds:must_be_list")
+            seeds = []
+        if original_seed_count is not None and len(seeds) != original_seed_count:
+            issue("input_manifest.seed_plan:original_seed_count_mismatch")
+        seen_seeds = set()
+        for index, seed in enumerate(seeds):
+            seed_key = _norm_keyword(seed)
+            if not seed_key:
+                issue(f"input_manifest.seed_plan.seeds[{index}]:must_be_nonempty")
+            elif seed_key in seen_seeds:
+                issue(f"input_manifest.seed_plan.seeds[{index}]:duplicate")
+            else:
+                seen_seeds.add(seed_key)
+
+    candidate_inventory = manifest.get("candidate_inventory")
+    inventory_candidates = []
+    if not isinstance(candidate_inventory, dict):
+        issue("input_manifest.candidate_inventory:must_be_object")
+    else:
+        try:
+            original_candidate_count = _strict_nonnegative_integer(
+                candidate_inventory.get("original_candidate_count")
+            )
+        except (TypeError, ValueError):
+            original_candidate_count = None
+            issue("input_manifest.candidate_inventory.original_candidate_count:must_be_nonnegative_integer")
+        inventory_candidates = candidate_inventory.get("candidates")
+        if not isinstance(inventory_candidates, list):
+            issue("input_manifest.candidate_inventory.candidates:must_be_list")
+            inventory_candidates = []
+        if original_candidate_count is not None and len(inventory_candidates) != original_candidate_count:
+            issue("input_manifest.candidate_inventory:original_candidate_count_mismatch")
+        seen_candidate_ids = set()
+        for index, candidate in enumerate(inventory_candidates):
+            label = f"input_manifest.candidate_inventory.candidates[{index}]"
+            if not isinstance(candidate, dict):
+                issue(f"{label}:must_be_object")
+                continue
+            candidate_id = _text(candidate.get("candidate_id"))
+            keyword = _norm_keyword(candidate.get("keyword"))
+            source = _text(candidate.get("source"))
+            source_seed = _norm_keyword(candidate.get("source_seed"))
+            receipt_ref = _candidate_receipt_ref(candidate)
+            if not candidate_id:
+                issue(f"{label}.candidate_id:required")
+            elif candidate_id in seen_candidate_ids:
+                issue(f"{label}.candidate_id:duplicate")
+            else:
+                seen_candidate_ids.add(candidate_id)
+            if not keyword:
+                issue(f"{label}.keyword:required")
+            if source not in SOURCE_EVIDENCE_TYPES:
+                issue(f"{label}.source:must_be_real_observed_source")
+            if not source_seed:
+                issue(f"{label}.source_seed:required")
+            if source == "semrush_competitor_organic" and not _text(candidate.get("competitor_domain")):
+                issue(f"{label}.competitor_domain:required")
+            if not receipt_ref:
+                issue(f"{label}.evidence_receipt_ref:required")
+
+    candidate_analysis = manifest.get("candidate_analysis")
+    if not isinstance(candidate_analysis, list):
+        issue("input_manifest.candidate_analysis:must_be_list")
+    else:
+        expected_ids = {
+            _text(candidate.get("candidate_id"))
+            for candidate in inventory_candidates
+            if isinstance(candidate, dict) and _text(candidate.get("candidate_id"))
+        }
+        seen_analysis_ids = set()
+        for index, analysis in enumerate(candidate_analysis):
+            label = f"input_manifest.candidate_analysis[{index}]"
+            if not isinstance(analysis, dict):
+                issue(f"{label}:must_be_object")
+                continue
+            candidate_id = _text(analysis.get("candidate_id"))
+            status = _text(analysis.get("analysis_status")).upper()
+            if not candidate_id:
+                issue(f"{label}.candidate_id:required")
+            elif candidate_id in seen_analysis_ids:
+                issue(f"{label}.candidate_id:duplicate")
+            else:
+                seen_analysis_ids.add(candidate_id)
+            if status not in VALID_ANALYSIS_STATUSES:
+                issue(f"{label}.analysis_status:invalid_status:{status or 'missing'}")
+            if not isinstance(analysis.get("branch_required"), bool):
+                issue(f"{label}.branch_required:must_be_boolean")
+            if not _text(analysis.get("analysis_reason")):
+                issue(f"{label}.analysis_reason:required")
+        if seen_analysis_ids != expected_ids:
+            issue("input_manifest.candidate_analysis:must_cover_exact_candidate_inventory")
+
+    return issues
 
 
 def _verify_receipt(ref, evidence_type, identity_field, identity, label, issue):
@@ -125,6 +329,192 @@ def _verify_receipt(ref, evidence_type, identity_field, identity, label, issue):
         if not matches:
             issue(f"{label}:evidence_identity_mismatch")
     return normalized
+
+
+def _load_verified_input_manifest(receipt_ref, issue):
+    """Load the exact production validator report for the upstream manifest."""
+
+    receipt_path = Path(_text(receipt_ref))
+    if not receipt_path.is_file():
+        issue("upstream_input:validation_receipt:file_missing")
+        return None
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        issue(f"upstream_input:validation_receipt:invalid_json:{exc}")
+        return None
+    if not isinstance(receipt, dict):
+        issue("upstream_input:validation_receipt:must_be_object")
+        return None
+    if receipt.get("schema") != "seo-stage-validation/v1":
+        issue("upstream_input:validation_receipt:schema_mismatch")
+        return None
+    if receipt.get("stage") != "discovery_input_manifest" or receipt.get("status") != PASS:
+        issue("upstream_input:validation_receipt:stage_or_status_mismatch")
+        return None
+    if receipt.get("candidate_id") not in (None, ""):
+        issue("upstream_input:validation_receipt:must_be_global")
+        return None
+    try:
+        if receipt.get("validator_source_sha256") != _file_sha256(STAGE_VALIDATOR_PATH):
+            issue("upstream_input:validation_receipt:validator_source_mismatch")
+            return None
+        report_path = Path(_text(receipt.get("report_ref")))
+        if not report_path.is_file():
+            issue("upstream_input:validation_receipt:report_file_missing")
+            return None
+        if receipt.get("report_sha256") != _file_sha256(report_path):
+            issue("upstream_input:validation_receipt:report_hash_mismatch")
+            return None
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        issue(f"upstream_input:validation_receipt:report_invalid:{exc}")
+        return None
+    if not isinstance(report, dict):
+        issue("upstream_input:validation_receipt:report_must_be_object")
+        return None
+    if report.get("stage") != "discovery_input_manifest" or report.get("status") != PASS:
+        issue("upstream_input:validation_receipt:report_stage_or_status_mismatch")
+        return None
+    if report.get("production") is not True:
+        issue("upstream_input:validation_receipt:report_must_be_production")
+        return None
+    if report.get("validation_receipt_ref") != str(receipt_path):
+        issue("upstream_input:validation_receipt:report_receipt_ref_mismatch")
+        return None
+    complete = report.get("complete")
+    if report.get("complete_count") != 1 or report.get("blocked_count") != 0:
+        issue("upstream_input:validation_receipt:report_must_contain_one_complete_row")
+        return None
+    if not isinstance(complete, list) or len(complete) != 1 or not isinstance(complete[0], dict):
+        issue("upstream_input:validation_receipt:complete_row_missing")
+        return None
+    manifest = complete[0]
+    manifest_errors = validate_input_manifest(manifest, production=True)
+    for error in manifest_errors:
+        issue(f"upstream_input:receipt_manifest:{error}")
+    return manifest if not manifest_errors else None
+
+
+def _authoritative_input(ledger, production, issue):
+    upstream = ledger.get("upstream_input")
+    if not isinstance(upstream, dict):
+        issue("upstream_input:authoritative_root_natural_seed_manifest_required")
+        return None
+    manifest = upstream
+    if production:
+        receipt_ref = _text(upstream.get("validation_receipt_ref"))
+        if not receipt_ref:
+            issue("upstream_input:validation_receipt_ref:required_for_production")
+        else:
+            verified_manifest = _load_verified_input_manifest(receipt_ref, issue)
+            if verified_manifest is not None:
+                embedded = {key: value for key, value in upstream.items() if key != "validation_receipt_ref"}
+                if embedded != verified_manifest:
+                    issue("upstream_input:embedded_manifest_differs_from_verified_receipt")
+                manifest = verified_manifest
+    for error in validate_input_manifest(manifest, production=production):
+        issue(f"upstream_input:{error}")
+    if _norm_keyword(manifest.get("batch_id")) != _norm_keyword(ledger.get("batch_id")):
+        issue("upstream_input.batch_id:must_match_coverage_batch_id")
+    return manifest
+
+
+def _validate_authoritative_inventory(manifest, ledger, required_seeds, observed_candidates, branches, issue):
+    if not isinstance(manifest, dict):
+        return
+    seed_plan = manifest.get("seed_plan")
+    if isinstance(seed_plan, dict) and isinstance(seed_plan.get("seeds"), list):
+        expected_seed_keys = [_norm_keyword(seed) for seed in seed_plan["seeds"]]
+        actual_seed_keys = [
+            _norm_keyword(item.get("seed")) for item in required_seeds if isinstance(item, dict)
+        ]
+        if len(required_seeds) != len(expected_seed_keys):
+            issue("required_seeds:count_below_upstream_original_seed_count")
+        if actual_seed_keys != expected_seed_keys:
+            issue("required_seeds:must_match_upstream_seed_inventory")
+
+    candidate_inventory = manifest.get("candidate_inventory")
+    if isinstance(candidate_inventory, dict) and isinstance(candidate_inventory.get("candidates"), list):
+        expected_candidates = candidate_inventory["candidates"]
+        actual_fingerprints = [_candidate_fingerprint(candidate) for candidate in observed_candidates if isinstance(candidate, dict)]
+        expected_fingerprints = [_candidate_fingerprint(candidate) for candidate in expected_candidates if isinstance(candidate, dict)]
+        if len(observed_candidates) != len(expected_candidates):
+            issue("observed_candidates:count_below_upstream_original_candidate_count")
+        if actual_fingerprints != expected_fingerprints:
+            issue("observed_candidates:must_match_upstream_candidate_inventory")
+
+        expected_ids = {
+            _text(candidate.get("candidate_id"))
+            for candidate in expected_candidates
+            if isinstance(candidate, dict) and _text(candidate.get("candidate_id"))
+        }
+        authoritative_analyses = manifest.get("candidate_analysis")
+        if not isinstance(authoritative_analyses, list):
+            issue("candidate_analysis:authoritative_complete_inventory_state_required")
+            authoritative_analyses = []
+        authoritative_by_id = {}
+        for analysis in authoritative_analyses:
+            if isinstance(analysis, dict) and _text(analysis.get("candidate_id")):
+                authoritative_by_id[_text(analysis.get("candidate_id"))] = analysis
+        if set(authoritative_by_id) != expected_ids:
+            issue("candidate_analysis:authoritative_state_must_cover_exact_upstream_inventory")
+
+        analyses = ledger.get("candidate_analysis")
+        if not isinstance(analyses, list):
+            issue("candidate_analysis:complete_inventory_state_required")
+            analyses = []
+        analysis_by_id = {}
+        for index, analysis in enumerate(analyses):
+            label = f"candidate_analysis[{index}]"
+            if not isinstance(analysis, dict):
+                issue(f"{label}:must_be_object")
+                continue
+            candidate_id = _text(analysis.get("candidate_id"))
+            if not candidate_id:
+                issue(f"{label}.candidate_id:required")
+            elif candidate_id in analysis_by_id:
+                issue(f"{label}.candidate_id:duplicate")
+            else:
+                analysis_by_id[candidate_id] = analysis
+        if set(analysis_by_id) != expected_ids:
+            issue("candidate_analysis:must_cover_exact_upstream_candidate_inventory")
+        if set(authoritative_by_id) == expected_ids and set(analysis_by_id) == expected_ids:
+            authoritative_fingerprints = [_analysis_fingerprint(analysis) for analysis in authoritative_analyses]
+            current_fingerprints = [_analysis_fingerprint(analysis) for analysis in analyses]
+            if current_fingerprints != authoritative_fingerprints:
+                issue("candidate_analysis:must_match_authoritative_state_order_and_values")
+            for candidate_id in expected_ids:
+                if _analysis_fingerprint(analysis_by_id[candidate_id]) != _analysis_fingerprint(
+                    authoritative_by_id[candidate_id]
+                ):
+                    issue(f"candidate_analysis[{candidate_id}]:differs_from_authoritative_state")
+
+        branches_by_candidate = {}
+        for branch in branches:
+            if isinstance(branch, dict):
+                branches_by_candidate.setdefault(_text(branch.get("originating_candidate_id")), []).append(branch)
+        for candidate_id in expected_ids:
+            label = f"candidate_analysis[{candidate_id}]"
+            analysis = authoritative_by_id.get(candidate_id)
+            if analysis is None:
+                continue
+            status = _text(analysis.get("analysis_status")).upper()
+            if status not in VALID_ANALYSIS_STATUSES:
+                issue(f"{label}.analysis_status:invalid_status:{status or 'missing'}")
+            if status != "COMPLETE":
+                issue(f"{label}.analysis_status:must_be_COMPLETE")
+            branch_required = analysis.get("branch_required")
+            if not isinstance(branch_required, bool):
+                issue(f"{label}.branch_required:must_be_boolean")
+                continue
+            if not _text(analysis.get("analysis_reason")):
+                issue(f"{label}.analysis_reason:required")
+            candidate_branches = branches_by_candidate.get(candidate_id, [])
+            if branch_required and len(candidate_branches) != 1:
+                issue(f"{label}.branch_required:must_have_exactly_one_branch_record")
+            if not branch_required and candidate_branches:
+                issue(f"{label}.branch_required:false_but_branch_record_present")
 
 
 def _check_acquisition(item, key, label, evidence_type, identity_field, identity, production, issue):
@@ -192,6 +582,7 @@ def _analyze(ledger, production=False):
     if mode != FULL_DISCOVERY:
         issue("discovery_mode:is_not_full; formal handoff is denied")
     full_route = mode == FULL_DISCOVERY
+    authoritative_manifest = _authoritative_input(ledger, production, issue)
 
     required_seeds = ledger.get("required_seeds")
     if not isinstance(required_seeds, list):
@@ -262,6 +653,7 @@ def _analyze(ledger, production=False):
         candidate_id = _text(candidate.get("candidate_id"))
         keyword = _text(candidate.get("keyword"))
         source = _text(candidate.get("source"))
+        source_seed = _text(candidate.get("source_seed"))
         ref = _candidate_receipt_ref(candidate)
         if not candidate_id:
             issue(f"{label}.candidate_id:required")
@@ -273,14 +665,17 @@ def _analyze(ledger, production=False):
             issue(f"{label}.keyword:required")
         if source not in SOURCE_EVIDENCE_TYPES:
             issue(f"{label}.source:must_be_real_observed_source")
+        if not source_seed:
+            issue(f"{label}.source_seed:required")
         if not ref:
             issue(f"{label}.evidence_receipt_ref:required")
         normalized = None
         if production and source in SOURCE_EVIDENCE_TYPES and ref:
-            identity_field = "competitor_domain" if source == "semrush_competitor_organic" else None
-            identity = candidate.get("competitor_domain") if identity_field else None
-            if identity_field and not _text(identity):
-                issue(f"{label}.competitor_domain:required")
+            identity_field = "competitor_domain" if source == "semrush_competitor_organic" else "seed"
+            identity = candidate.get("competitor_domain") if identity_field == "competitor_domain" else source_seed
+            if not _text(identity):
+                field = "competitor_domain" if identity_field == "competitor_domain" else "source_seed"
+                issue(f"{label}.{field}:required")
             normalized = _verify_receipt(
                 ref,
                 SOURCE_EVIDENCE_TYPES[source],
@@ -325,17 +720,19 @@ def _analyze(ledger, production=False):
         source = _text(branch.get("source"))
         branch_ref = _text(branch.get("evidence_ref"))
         depth = branch.get("depth")
+        parent_is_visited = parent_key in root_seed_keys or parent_key in seen_branch_keys
+        branch_is_new = bool(branch_key) and branch_key not in root_seed_keys and branch_key not in seen_branch_keys
         if not branch_key:
             issue(f"{label}.branch_seed:required")
         elif branch_key in root_seed_keys:
             issue(f"{label}.branch_seed:cycle_or_duplicate_with_required_seed")
         elif branch_key in seen_branch_keys:
             issue(f"{label}.branch_seed:duplicate")
-        else:
-            seen_branch_keys.add(branch_key)
+        elif branch_key == parent_key:
+            issue(f"{label}.branch_seed:cycle_with_parent_seed")
         if not parent_key:
             issue(f"{label}.parent_seed:required")
-        elif parent_key not in root_seed_keys and parent_key not in seen_branch_keys:
+        elif not parent_is_visited:
             issue(f"{label}.parent_seed:not_in_visited_seed_set")
         if not candidate_id or candidate_id not in candidate_by_id:
             issue(f"{label}.originating_candidate_id:must_resolve_to_observed_candidate")
@@ -361,6 +758,7 @@ def _analyze(ledger, production=False):
         if candidate is not None:
             candidate_keyword = _text(candidate.get("keyword"))
             candidate_source = _text(candidate.get("source"))
+            candidate_source_seed = _text(candidate.get("source_seed"))
             candidate_ref = _candidate_receipt_ref(candidate)
             if _norm_keyword(candidate_keyword) != branch_key:
                 issue(f"{label}:branch_seed_not_equal_to_observed_candidate_keyword")
@@ -368,6 +766,12 @@ def _analyze(ledger, production=False):
                 issue(f"{label}.source:provenance_mismatch")
             if branch_ref != candidate_ref:
                 issue(f"{label}.evidence_ref:provenance_mismatch")
+            if not candidate_source_seed:
+                issue(f"{label}.candidate_source_seed:required")
+            elif _norm_keyword(candidate_source_seed) != parent_key:
+                issue(f"{label}.parent_seed:provenance_mismatch_with_candidate_source_seed")
+        if branch_is_new and parent_is_visited:
+            seen_branch_keys.add(branch_key)
         autocomplete_status = _check_acquisition(
             branch,
             "autocomplete",
@@ -469,6 +873,15 @@ def _analyze(ledger, production=False):
                 f"competitor_sweep.status:mismatch:{_text(competitor.get('status')) or 'missing'}!={computed_competitor_status}"
             )
 
+    _validate_authoritative_inventory(
+        authoritative_manifest,
+        ledger,
+        required_seeds,
+        observed_candidates,
+        branches,
+        issue,
+    )
+
     other_sources = ledger.get("other_mandatory_sources")
     if not isinstance(other_sources, list):
         issue("other_mandatory_sources:must_be_list")
@@ -480,13 +893,20 @@ def _analyze(ledger, production=False):
             issue(f"{label}:must_be_object")
             continue
         source_id = _text(source.get("source_id"))
+        evidence_type = _text(source.get("evidence_type"))
         status = _status(source)
         if not source_id:
             issue(f"{label}.source_id:required")
+        if evidence_type not in SOURCE_EVIDENCE_TYPES:
+            issue(f"{label}.evidence_type:must_be_supported_observed_source")
         if status not in VALID_ACQUISITION_STATUSES:
             issue(f"{label}.status:invalid_status:{status or 'missing'}")
-        elif status == PASS and not _receipt_ref(source):
-            issue(f"{label}:PASS_requires_evidence_receipt")
+        elif status == PASS:
+            receipt_ref = _receipt_ref(source)
+            if not receipt_ref:
+                issue(f"{label}:PASS_requires_evidence_receipt")
+            elif production and evidence_type in SOURCE_EVIDENCE_TYPES:
+                _verify_receipt(receipt_ref, evidence_type, None, None, label, issue)
         elif status != PASS:
             reason = _reason(source)
             if not reason:

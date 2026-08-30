@@ -44,7 +44,8 @@ STAGE_EVIDENCE_TYPES = {
     "finalist_trend": "google_trends",
 }
 CANONICAL_STAGES = frozenset(
-    set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_coverage", "discovery_handoff"}
+    set(STAGE_EVIDENCE_TYPES)
+    | {"kgr_intitle", "discovery_input_manifest", "discovery_coverage", "discovery_handoff"}
 )
 TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_coverage", "discovery_handoff")
 EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})

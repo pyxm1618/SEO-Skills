@@ -56,17 +56,27 @@ The domain/cluster competitor sweep uses the existing current relay collector wi
 
 Preserve as available:
 
-`keyword | domain | root | parent_seed | source | source_detail | observed_at | evidence_ref`
+`candidate_id | keyword | domain | root | parent_seed | source_seed | source | source_detail | observed_at | evidence_ref | evidence_receipt_ref`
 
 If Semrush Ideas returned observed fields, those fields may pass through with their provenance. The discovery handoff does not convert them into Exact evidence and does not make selection decisions.
+
+## Upstream input manifest
+
+Before a Full Coverage ledger is evaluated, the Root/Natural Seeds handoff is frozen as a `seo-discovery-input/v1` manifest and receives a production `discovery_input_manifest` validation receipt. It contains:
+
+`schema | batch_id | root_handoff_receipt_ref | root_handoff_receipt_sha256 | seed_plan | candidate_inventory | candidate_analysis`
+
+`seed_plan` contains `original_seed_count` and the complete ordered `seeds` list. `candidate_inventory` contains `original_candidate_count` and the complete observed Candidate records, including `candidate_id`, `keyword`, `source`, `source_seed`, and `evidence_receipt_ref`. `candidate_analysis` contains exactly one record per Candidate: `candidate_id | analysis_status | branch_required | analysis_reason`. The referenced Root/Natural Seeds receipt must be a `seo-root-natural-seeds/v1` PASS object whose `batch_id` and exact `seed_plan` match the manifest. Coverage compares the current ledger to this receipt; missing, extra, reordered, or rewritten items are blocked. Production also requires the manifest/report hashes and validator source hash to match.
 
 ## Coverage ledger
 
 The run ledger records:
 
-`batch_id | discovery_mode | required_seeds | observed_candidates | required_branch_seeds | competitor_sweep | other_mandatory_sources | max_branch_depth | max_branch_seeds`
+`batch_id | discovery_mode | upstream_input | required_seeds | observed_candidates | candidate_analysis | required_branch_seeds | competitor_sweep | other_mandatory_sources | max_branch_depth | max_branch_seeds`
 
-Each required Seed and Branch Seed has nested `autocomplete` and (for Full Discovery) `semrush` records with `status` and an evidence receipt on PASS. Non-PASS records retain a reason. An observed candidate has `candidate_id | keyword | source | evidence_receipt_ref`; a Branch Seed must match one candidate's exact normalized keyword, source, and evidence reference.
+Each required Seed and Branch Seed has nested `autocomplete` and (for Full Discovery) `semrush` records with `status` and an evidence receipt on PASS. Non-PASS records retain a reason. `source_seed` binds an observed Candidate to the Seed that produced its receipt; production validation checks that receipt's original Seed. A Branch Seed must match one Candidate's exact normalized keyword, source, and evidence reference, and its `parent_seed` must equal that Candidate's `source_seed`. A Branch cannot be its own parent, point to a future/unvisited node, or bypass the authoritative `branch_required` decision.
+
+Each `other_mandatory_sources` PASS record must declare a supported `evidence_type` and a receipt. Production verifies the receipt's file, evidence type, collector, collector source hash, normalized hash, and required artifacts through the existing evidence binding.
 
 ## Coverage summary and handoff
 

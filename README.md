@@ -60,7 +60,8 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 - Google Autocomplete、intitle、SERP、Google Trends 必须是当前真实 Google evidence；拿不到就 BLOCKED。
 - Full Traditional Discovery 的 required Seed 与 required Branch Seed 都必须完成 Google Autocomplete + Semrush Ideas/Related；Google PASS 不等于 Coverage PASS。
 - Competitor Organic 是 domain/root-cluster 级补漏来源，仅在显式配置 competitor domains 时 mandatory；未配置记录 `not_configured`，配置后失败则 BLOCKED。
-- `discovery_handoff` 只能绑定 production-verified `discovery_coverage` PASS receipt；partial evidence 保留，失败项不能从 ledger 删除。
+- `discovery_coverage` 必须绑定 production-verified `discovery_input_manifest`，并逐项核对 Root/Natural Seeds 原始总数、Candidate inventory 与完整 Candidate analysis；partial evidence 保留，失败项不能从 ledger 删除。
+- `discovery_handoff` 只能在 validator 签发时重新验证 exact production `discovery_coverage` PASS receipt；不存在或被篡改的 receipt 不能生成 PASS handoff。
 
 ## 仓库结构
 
