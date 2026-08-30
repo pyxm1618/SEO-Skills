@@ -20,7 +20,7 @@ If any are missing, `provenance_status=incomplete`. The row may still be structu
 
 Aggregation/classification may preserve:
 
-`keyword | root_id | signal_type | variant_subtype | first_observed_at | estimated_birth_window | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | kgr_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
+`keyword | root_id | signal_type | variant_subtype | demand_history_type | first_observed_at | estimated_birth_window | birth_window_start | birth_window_end | birth_source_resolution | birth_confidence | birth_reason | birth_evidence_series | resurgence_window | long_history_positive_seen | long_history_positive_observations | long_history_positive_windows | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | kgr_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
 
 Fields are optional unless a rule explicitly requires them. Unknown fields stay unknown.
 
@@ -59,6 +59,10 @@ The classifier prefers the shortest recent window that satisfies the configured 
 
 A missing window remains unknown. Missing days are not filled with zero.
 
+### Google timeframe-local normalization
+
+Google Trends `5y`, `12m`, `90d`, `30d`, and `7d` indexes have separate normalization contexts. Each observation retains its `time_window`, source URL, requested timeframe, actual bucket resolution, and evidence reference. The comparable-series key keeps these windows separate, so a `5y` value cannot be compared with a `90d` value and points from different windows are never concatenated. Birth/history inference consumes only one long (`5y`) series. The medium window describes shape; recent windows describe persistence and acceleration.
+
 ## Freshness and coverage
 
 Each comparable series exposes, when calculable:
@@ -90,6 +94,8 @@ These remain relative source observations. A zero novelty baseline does **not** 
 For incremental runs, if an input observation/candidate carries a prior `first_observed_at`, aggregation takes the minimum of that carried timestamp and current observation timestamps. A daily incremental input therefore must not reset the first-seen date or `age_days`.
 
 `estimated_birth_window` is optional and must be evidence-backed. It must not be synthesized from the first non-zero Google Trends point alone.
+
+Birth/history analysis also preserves `birth_window_start`, `birth_window_end`, `birth_source_resolution`, `birth_confidence`, `birth_reason`, and `birth_evidence_series`. Weekly/monthly source buckets are reported at bucket/month precision rather than fabricated day precision. `demand_history_type` is `newly_observed`, `preexisting`, `resurgent`, or `unknown`; a sustained positive series beginning at the first available bucket is `preexisting`/`before_available_history`. A quiet gap followed by a later persistent rise is `resurgent`. An isolated spike is not a high-confidence birth.
 
 ## Metric provenance and compatibility
 
