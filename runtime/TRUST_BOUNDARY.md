@@ -14,6 +14,7 @@ Observed evidence still has strict production requirements:
 - Verification replays Semrush normalization from the saved raw relay response and rechecks Google source URLs, observations, screenshots, and Trends timelines.
 - Google Trends timeframe indexes are verified and retained as separate comparable series; the long (`5y`) series may support history/birth analysis, while medium and recent windows remain independent evidence.
 - A Google Related/Rising `Breakout` label is an observed source fact only. Canonical `breakout` remains an independent classifier result.
+- Traditional Discovery coverage is a separate ledger gate: it consumes a production-verified `discovery_input_manifest` for the Root/Natural Seeds original totals, Candidate inventory, and complete Candidate analysis, then reconciles required Seeds, Branch Seeds, configured competitor domains, and other mandatory sources without deleting blocked/unreviewed items. Google source PASS alone cannot satisfy Full Coverage.
 - A plain row containing fields such as `metric_source=Semrush` is never enough; production validation requires the complete evidence receipt and artifacts.
 
 These controls are intended to make the expected path deterministic, auditable, and fail-closed when real observations are unavailable.
@@ -51,6 +52,10 @@ Every routed `selection_handoff` candidate must have exactly one manifest candid
 - matching candidate keyword.
 
 Only `net_new`, `breakout`, `emerging_variant`, and `unknown` are canonical `signal_type` values; a confirmed handoff must carry a non-`unknown` canonical value. A complete pipeline that honestly produces `no_handoff` is valid monitor evidence and must remain `no_handoff`; it does not require a fabricated candidate. A bare `route=emerging` or a direct `status=emerging` input is insufficient.
+
+## Traditional Discovery handoff
+
+Traditional runs require verified `discovery_autocomplete`, `discovery_coverage`, and `discovery_handoff` stages. The handoff report must point to the exact `discovery_coverage` validation receipt; the handoff validator verifies that receipt and its report before issuing PASS. That report must contain a PASS coverage summary with `formal_handoff_allowed=true` and the same `batch_id`. A configured competitor sweep or required Branch Seed that is blocked prevents formal handoff while preserving earlier evidence.
 
 ## Candidate lifecycle
 

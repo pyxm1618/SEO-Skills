@@ -68,7 +68,7 @@ def test_start_seo_run_does_not_overwrite_active_in_progress_manifest(tmp_path):
 @pytest.mark.parametrize(
     ("command", "stage"),
     [
-        ("python3 runtime/stage_validator.py --stage discovery_handoff --input handoff.json", "discovery_autocomplete"),
+        ("python3 runtime/stage_validator.py --stage discovery_handoff --input handoff.json", "discovery_coverage"),
         ("python3 runtime/collectors/google_live_collector.py intitle --keyword example --output out.json", "stage6_exact"),
         ("python3 runtime/kgr_evidence_merge.py --exact exact.json --intitle intitle.json", "stage6_exact"),
         ("python3 skills/seo-keyword-selection/scripts/evaluate_candidates.py --stage exact --input rows.json", "stage6_exact"),

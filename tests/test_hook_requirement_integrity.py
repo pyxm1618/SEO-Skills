@@ -72,9 +72,10 @@ def test_traditional_route_only_autocomplete_and_exact_is_denied(monkeypatch):
         "run_id": "r_trad_partial",
         "route": "traditional",
         "status": "COMPLETE",
-        "stages": {
-            "discovery_autocomplete": {"status": "PASS"},
-            "discovery_handoff": {"status": "PASS"},
+            "stages": {
+                "discovery_autocomplete": {"status": "PASS"},
+                "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+                "discovery_handoff": {"status": "PASS", "coverage_receipt_ref": "coverage"},
         },
         "candidates": {
             "cand": {"keyword": "candidate keyword", "stage6_exact": {"status": "PASS"}}
@@ -112,9 +113,10 @@ def test_finalist_without_trends_is_denied(monkeypatch):
         "run_id": "r_trad_finalist_missing_trends",
         "route": "traditional",
         "status": "COMPLETE",
-        "stages": {
-            "discovery_autocomplete": {"status": "PASS"},
-            "discovery_handoff": {"status": "PASS"},
+            "stages": {
+                "discovery_autocomplete": {"status": "PASS"},
+                "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+                "discovery_handoff": {"status": "PASS", "coverage_receipt_ref": "coverage"},
         },
         "candidates": {
             "cand_1": {

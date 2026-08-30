@@ -121,7 +121,10 @@ def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
         },
         "candidates": {
             "cand_1": {
@@ -148,7 +151,10 @@ def test_candidate_specific_stages_must_not_fallback_to_global_receipts(monkeypa
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
             "stage6_exact": {"status": "PASS", "validation_receipt_ref": "global-exact"},
             "intitle_observation": {"status": "PASS", "validation_receipt_ref": "global-intitle"},
             "kgr_intitle": {"status": "PASS", "validation_receipt_ref": "global-kgr"},
@@ -173,7 +179,10 @@ def test_verified_blocked_candidate_does_not_prevent_completed_batch(monkeypatch
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
         },
         "candidates": {
             "blocked": {
@@ -209,7 +218,10 @@ def test_deterministic_exact_elimination_skips_kgr_and_serp(monkeypatch):
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
         },
         "candidates": {
             "eliminated": {

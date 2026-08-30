@@ -23,7 +23,7 @@
 | Skill | 它负责什么 | 最简单的调用方式 |
 | --- | --- | --- |
 | [`keyword-root-library`](skills/keyword-root-library/SKILL.md) | 找、查、维护可复用的 SEO **需求词根库** | `使用 keyword-root-library，帮我找并整理 [行业] 的需求词根。` |
-| [`seo-keyword-discovery`](skills/seo-keyword-discovery/SKILL.md) | 把 domain/root/Seed 通过真实 Google Autocomplete 与允许的真实发现来源扩展为 **concrete candidates** | `使用 seo-keyword-discovery，从这些 roots 和 Seeds 发现候选关键词。` |
+| [`seo-keyword-discovery`](skills/seo-keyword-discovery/SKILL.md) | 把 domain/root/Seed 通过真实 Google + Semrush 及显式配置的补漏来源扩展为 **concrete candidates**，并验证成熟需求覆盖 | `使用 seo-keyword-discovery，从这些 roots 和 Seeds 发现候选关键词。` |
 | [`emerging-keyword-monitor`](skills/emerging-keyword-monitor/SKILL.md) | 从时间序列证据中发现 **正在形成、加速或出现新表达的搜索需求** | `使用 emerging-keyword-monitor，分析这批趋势数据里有哪些新兴关键词。` |
 | [`seo-keyword-selection`](skills/seo-keyword-selection/SKILL.md) | 用真实指标、KGR、SERP 等证据 **筛选值得继续做的 SEO 关键词机会** | `使用 seo-keyword-selection，筛选这批候选关键词，告诉我哪些值得继续做。` |
 | [`seo-page-keyword-mapping`](skills/seo-page-keyword-mapping/SKILL.md) | 把已确认的搜索需求 **分配给已知/规划页面**，确定 Primary / Secondary keyword 和页面归属 | `使用 seo-page-keyword-mapping，把这批关键词映射到这些页面。` |
@@ -34,7 +34,7 @@
 
 ```text
 keyword-root-library
-  -> seo-keyword-discovery
+  -> seo-keyword-discovery (Full Coverage)
   -> seo-keyword-selection
   -> seo-page-keyword-mapping
 ```
@@ -58,6 +58,10 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 - `missing`、`invalid`、numeric `0`、`not_applicable`、`unknown` 必须区分。
 - 当前 Semrush acquisition 只允许项目 `sem.3ue.com` authenticated same-origin relay；失败时不切换 official API、Ahrefs 或其他 provider。
 - Google Autocomplete、intitle、SERP、Google Trends 必须是当前真实 Google evidence；拿不到就 BLOCKED。
+- Full Traditional Discovery 的 required Seed 与 required Branch Seed 都必须完成 Google Autocomplete + Semrush Ideas/Related；Google PASS 不等于 Coverage PASS。
+- Competitor Organic 是 domain/root-cluster 级补漏来源，仅在显式配置 competitor domains 时 mandatory；未配置记录 `not_configured`，配置后失败则 BLOCKED。
+- `discovery_coverage` 必须绑定 production-verified `discovery_input_manifest`，并逐项核对 Root/Natural Seeds 原始总数、Candidate inventory 与完整 Candidate analysis；partial evidence 保留，失败项不能从 ledger 删除。
+- `discovery_handoff` 只能在 validator 签发时重新验证 exact production `discovery_coverage` PASS receipt；不存在或被篡改的 receipt 不能生成 PASS handoff。
 
 ## 真实采集浏览器
 
@@ -119,6 +123,7 @@ skills/
   seo-page-keyword-mapping/
 runtime/
   collectors/
+  discovery_coverage.py
   stage_contracts.json
   stage_validator.py
   codex_stage_hook.py
@@ -161,3 +166,5 @@ python3 -m pytest skills/seo-page-keyword-mapping/tests -q
 python3 -m pytest -q
 python3 -m compileall -q skills runtime
 ```
+
+`discovery_coverage.py` is a finite run ledger/validator, not a long-term Discovery database or a recursive keyword crawler. Branch safety limits are execution guards, not SEO decision thresholds.
