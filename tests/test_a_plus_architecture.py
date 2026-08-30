@@ -19,6 +19,22 @@ def test_discovery_does_not_own_final_opportunity_decision():
     assert "does not own Exact qualification, KGR, SERP upgrade, KDRoi" in text
 
 
+def test_full_discovery_requires_coverage_contract_and_semrush():
+    text = read("skills/seo-keyword-discovery/SKILL.md")
+    assert "Default Full Traditional Discovery requires Semrush Ideas/Related" in text
+    assert "single Full Discovery coverage gate" in text
+    assert "Google evidence is retained when Semrush is blocked" in text
+    assert "Full Coverage Contract remains `BLOCKED`" in text
+
+
+def test_discovery_branch_and_competitor_boundaries_are_explicit():
+    text = read("skills/seo-keyword-discovery/SKILL.md")
+    assert "already observed candidate" in text
+    assert "Competitor Organic Keywords are a domain/root-cluster coverage source" in text
+    assert "competitor_sweep=not_configured" in text
+    assert "does not add Trends novelty" in text
+
+
 def test_emerging_confirmed_route_skips_discovery():
     text = read("skills/emerging-keyword-monitor/references/routing-rules.md")
     assert "enters `seo-keyword-selection` **directly**" in text

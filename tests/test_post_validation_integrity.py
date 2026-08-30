@@ -103,7 +103,8 @@ def test_complete_control_flow_allows_valid_candidate_lifecycle_when_verifiers_p
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS"},
-            "discovery_handoff": {"status": "PASS"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {"status": "PASS", "coverage_receipt_ref": "coverage"},
         },
         "candidates": {
             "candidate-1": {

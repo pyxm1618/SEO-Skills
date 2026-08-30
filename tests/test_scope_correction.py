@@ -132,7 +132,10 @@ def test_explicit_finalist_review_false_does_not_require_external_attestation(mo
         "status": "COMPLETE",
         "stages": {
             "discovery_autocomplete": {"status": "PASS", "validation_receipt_ref": "auto"},
-            "discovery_handoff": {"status": "PASS", "validation_receipt_ref": "handoff"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {
+                "status": "PASS", "validation_receipt_ref": "handoff", "coverage_receipt_ref": "coverage"
+            },
         },
         "candidates": {
             "cand_1": {

@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 COLLECTOR_FILES = {
     "semrush_ideas": ROOT / "collectors" / "semrush_relay_collector.py",
     "semrush_exact": ROOT / "collectors" / "semrush_relay_collector.py",
+    "semrush_competitor_organic": ROOT / "collectors" / "semrush_relay_collector.py",
     "google_autocomplete": ROOT / "collectors" / "google_live_collector.py",
     "google_intitle": ROOT / "collectors" / "google_live_collector.py",
     "google_serp": ROOT / "collectors" / "google_live_collector.py",
@@ -28,6 +29,7 @@ COLLECTOR_FILES = {
 EXPECTED_COLLECTORS = {
     "semrush_ideas": "semrush_relay_collector",
     "semrush_exact": "semrush_relay_collector",
+    "semrush_competitor_organic": "semrush_relay_collector",
     "google_autocomplete": "google_live_collector",
     "google_intitle": "google_live_collector",
     "google_serp": "google_live_collector",
@@ -37,6 +39,7 @@ EXPECTED_COLLECTORS = {
 REQUIRED_ARTIFACT_ROLES = {
     "semrush_ideas": {"relay_raw_response", "current_network_capture"},
     "semrush_exact": {"relay_raw_response", "current_network_capture"},
+    "semrush_competitor_organic": {"relay_raw_response", "current_network_capture"},
     "google_autocomplete": {"screenshot", "structured_observation"},
     "google_intitle": {"screenshot", "structured_observation"},
     "google_serp": {"screenshot", "structured_observation"},
@@ -177,7 +180,12 @@ def _verify_semrush_semantics(evidence_type, normalized, role_paths):
     raw_path = role_paths["relay_raw_response"]
     capture_path = role_paths["current_network_capture"]
     raw = _json_read(raw_path, "Semrush raw relay evidence")
-    mode = "ideas" if evidence_type == "semrush_ideas" else "exact"
+    modes = {
+        "semrush_ideas": "ideas",
+        "semrush_exact": "exact",
+        "semrush_competitor_organic": "competitor_organic",
+    }
+    mode = modes[evidence_type]
     required = [
         "observed_at", "relay_origin", "request_method", "request_path", "capture_observed_at",
         "capture_evidence_ref", "mode", "metric_database", "response",
@@ -191,7 +199,11 @@ def _verify_semrush_semantics(evidence_type, normalized, role_paths):
         raise EvidenceIntegrityError("Semrush raw evidence relay origin mismatch")
     if not _same_path(raw.get("capture_evidence_ref"), capture_path):
         raise EvidenceIntegrityError("Semrush raw evidence is not bound to the receipt network capture")
-    identity_field = "seed" if mode == "ideas" else "keyword"
+    identity_field = {
+        "ideas": "seed",
+        "exact": "keyword",
+        "competitor_organic": "competitor_domain",
+    }[mode]
     if raw.get(identity_field) in (None, ""):
         raise EvidenceIntegrityError(f"Semrush raw evidence missing {identity_field}")
     descriptor = {
