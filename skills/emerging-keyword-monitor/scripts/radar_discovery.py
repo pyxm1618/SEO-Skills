@@ -147,6 +147,8 @@ def _candidate_from_row(domain: str, parent: dict[str, Any], row: dict[str, Any]
     candidate = {
         "keyword": " ".join(str(row.get("query") or row.get("keyword") or "").split()),
         "domain": domain,
+        "root_id": parent.get("root_id"),
+        "root_relation": "existing_root" if parent.get("root_verified") else "root_candidate" if parent.get("root_status") == "candidate" else "unresolved",
         "parent_anchor": parent["keyword"],
         "discovery_depth": int(parent["discovery_depth"]) + 1,
         "discovery_source": "google_trends_rising",
