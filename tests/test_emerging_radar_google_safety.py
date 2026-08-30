@@ -72,6 +72,56 @@ class FakeContext:
         return FakePage()
 
 
+class DelayedRelatedResponse:
+    status = 200
+    url = "https://trends.google.com/trends/api/widgetdata/relatedsearches?req=related"
+
+    def text(self):
+        payload = {
+            "default": {
+                "rankedList": [
+                    {"rankedKeyword": [{"query": "wedding budget", "value": 100}]},
+                    {"rankedKeyword": [{"query": "wedding budget template", "value": "Breakout"}]},
+                ]
+            }
+        }
+        return ")]}'\n" + json.dumps(payload)
+
+
+class DelayedRelatedBody:
+    def inner_text(self, timeout=5000):
+        return "Related queries"
+
+
+class DelayedRelatedPage:
+    def __init__(self):
+        self.url = "https://trends.google.com/trends/explore"
+        self._listeners = []
+        self.wait_calls = 0
+
+    def on(self, event, callback):
+        assert event == "response"
+        self._listeners.append(callback)
+
+    def goto(self, url, wait_until=None):
+        self.url = url
+
+    def wait_for_timeout(self, milliseconds):
+        self.wait_calls += 1
+        if self.wait_calls == 2:
+            for callback in self._listeners:
+                callback(DelayedRelatedResponse())
+
+    def locator(self, selector):
+        assert selector == "body"
+        return DelayedRelatedBody()
+
+
+class DelayedRelatedContext:
+    def new_page(self):
+        return DelayedRelatedPage()
+
+
 class FakeGoogleContext:
     def __init__(self, cookies):
         self.cookies_seen = cookies
@@ -136,6 +186,17 @@ def test_timeline_result_uses_the_canonical_contract_field_names(monkeypatch):
     contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
 
     assert validator.validate_stage("trends_timeline", result, contracts) == []
+
+
+def test_related_waits_for_a_delayed_real_payload_before_blocking(monkeypatch):
+    google = load_google("google_live_collector_related_wait_red")
+    monkeypatch.setattr(google, "screenshot", lambda *args, **kwargs: "related.png")
+    monkeypatch.setattr(google, "evidence_json", lambda *args, **kwargs: "related.json")
+    monkeypatch.setattr(google, "now", lambda: "2026-08-30T00:00:00Z")
+
+    result = google.trends_related(DelayedRelatedContext(), "wedding", "US", "today 12-m", ".")
+
+    assert result["related_queries"][1]["google_rising_label"] == "Breakout"
 
 
 def test_google_connection_uses_new_clean_context_without_inheriting_default_cookies(monkeypatch):

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Live Google collectors using an existing browser session over CDP.
 
-Requires SEO_BROWSER_CDP_URL and Playwright in the live Codex environment.
+Requires SEO_GOOGLE_CDP_URL for a dedicated Google browser/profile, or
+SEO_BROWSER_CDP_URL when a clean isolated context can be created safely.
+Playwright is required in the live Codex environment.
 No HTTP/search API fallback is implemented by design.
 """
 
@@ -380,6 +382,12 @@ def parse_trends_related(payload):
     return rows
 
 
+def _wait_for_related_payload(page, observed_payloads, timeout_seconds=15.0):
+    deadline = time.monotonic() + timeout_seconds
+    while not observed_payloads and time.monotonic() < deadline:
+        page.wait_for_timeout(500)
+
+
 def trends_related(context, anchor, country, timeframe, evidence_dir):
     page = context.new_page()
     observed_payloads = []
@@ -405,7 +413,7 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
         f"geo={quote_plus(country)}&date={quote_plus(timeframe)}&q={quote_plus(anchor)}",
         wait_until="domcontentloaded",
     )
-    page.wait_for_timeout(5000)
+    _wait_for_related_payload(page, observed_payloads)
     host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
     if host != "trends.google.com":
         raise RuntimeError(f"wrong Google Trends origin: {host}")
