@@ -11,12 +11,23 @@ from typing import Any
 
 CONFIRMED_STATUSES = {"emerging", "breakout"}
 NON_ACTIONABLE_STATUSES = {"mature", "noise", "insufficient_evidence"}
+CANONICAL_SIGNAL_TYPES = {"net_new", "breakout", "emerging_variant", "unknown"}
 SELECTION_FIELDS = (
+    "domain",
     "keyword",
     "root_id",
     "signal_type",
     "variant_subtype",
+    "demand_history_type",
     "first_observed_at",
+    "estimated_birth_window",
+    "birth_window_start",
+    "birth_window_end",
+    "birth_source_resolution",
+    "birth_confidence",
+    "birth_reason",
+    "birth_evidence_series",
+    "resurgence_window",
     "age_days",
     "growth_rate",
     "persistence",
@@ -34,6 +45,11 @@ SELECTION_FIELDS = (
     "supply_signal",
     "status",
     "confidence",
+    "discovery_depth",
+    "parent_anchor",
+    "discovery_source",
+    "domain_relation",
+    "google_rising_label",
 )
 
 
@@ -61,8 +77,18 @@ def selection_handoff(candidate: dict[str, Any]) -> dict[str, Any]:
     return handoff
 
 
+def has_valid_classifier_output(candidate: dict[str, Any]) -> bool:
+    """Accept confirmed states only from the structured classifier contract."""
+    if candidate.get("classification_status") != "valid":
+        return False
+    errors = candidate.get("classification_errors")
+    if isinstance(errors, str):
+        return errors.strip() == "[]"
+    return errors == []
+
+
 def root_watch_handoff(candidate: dict[str, Any], reason: Any) -> dict[str, Any]:
-    return {
+    handoff = {
         "keyword": str(candidate.get("keyword") or "").strip(),
         "signal_type": candidate.get("signal_type"),
         "status": candidate.get("status"),
@@ -70,6 +96,21 @@ def root_watch_handoff(candidate: dict[str, Any], reason: Any) -> dict[str, Any]
         "source_evidence": candidate.get("source_evidence"),
         "root_watch_reason": reason,
     }
+    for field in (
+        "domain",
+        "demand_history_type",
+        "estimated_birth_window",
+        "birth_reason",
+        "resurgence_window",
+        "discovery_depth",
+        "parent_anchor",
+        "discovery_source",
+        "domain_relation",
+        "google_rising_label",
+    ):
+        if field in candidate:
+            handoff[field] = candidate.get(field)
+    return handoff
 
 
 def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -93,6 +134,14 @@ def route_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 
     if status in NON_ACTIONABLE_STATUSES:
         return result
+
+    if status in CONFIRMED_STATUSES:
+        if not has_valid_classifier_output(candidate):
+            result["route_reason"] = "A confirmed route requires a valid classify_emergence.py output."
+            return result
+        if candidate.get("signal_type") not in CANONICAL_SIGNAL_TYPES - {"unknown"}:
+            result["route_reason"] = "A confirmed route requires a canonical signal_type from classify_emergence.py."
+            return result
 
     if relation == "unresolved":
         result["route"] = "new_root_watchlist"

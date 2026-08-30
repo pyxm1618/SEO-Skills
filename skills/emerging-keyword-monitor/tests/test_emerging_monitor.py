@@ -1,4 +1,5 @@
 import json, subprocess, sys
+from datetime import date, timedelta
 from pathlib import Path
 import pytest
 
@@ -18,7 +19,7 @@ def obs(**kw):
     r.update(kw); return r
 
 def cand(**kw):
-    r={'keyword':'candidate query','root_id':'candidate','first_observed_at':'2026-07-01','estimated_birth_window':None,'age_days':53,'baseline_signal':0.0,'recent_signal':30.0,'growth_rate':None,'growth_status':'from_observed_zero_baseline','acceleration':None,'persistence':1.0,'persistence_observations':4,'source_count':2,'source_evidence':[{'source':'google_trends','provenance_status':'verified'},{'source':'semrush_export','provenance_status':'verified'}],'primary_series':{'source':'google_trends','provenance_status':'verified','baseline_observations':3,'recent_observations':4,'observation_count':7,'peak_signal':30.0,'latest_signal':30.0},'anchor_event':None,'anchor_event_date':None,'anchor_event_source':None,'volume':None,'kd':None,'cpc':None,'intitle_results':None,'metric_status':'incomplete','observed_at':'2026-08-23'}
+    r={'keyword':'candidate query','root_id':'candidate','first_observed_at':'2026-07-01','estimated_birth_window':None,'age_days':53,'baseline_signal':0.0,'recent_signal':30.0,'growth_rate':None,'growth_status':'from_observed_zero_baseline','acceleration':None,'persistence':1.0,'persistence_observations':4,'source_count':2,'source_evidence':[{'source':'google_trends','provenance_status':'verified'},{'source':'semrush_export','provenance_status':'verified'}],'primary_series':{'source':'google_trends','provenance_status':'verified','baseline_observations':3,'recent_observations':4,'observation_count':7,'peak_signal':30.0,'latest_signal':30.0},'anchor_event':None,'anchor_event_date':None,'anchor_event_source':None,'volume':None,'kd':None,'cpc':None,'intitle_results':None,'metric_status':'incomplete','observed_at':'2026-08-23','classification_status':'valid','classification_errors':[]}
     r.update(kw); return r
 
 def classify(tmp,row): return run(CLASSIFY,tmp,{'candidates':[row]},'--as-of','2026-08-23')['candidates'][0]
@@ -195,3 +196,30 @@ def test_code_never_generates_final_selection_states():
     text='\n'.join(p.read_text() for p in (VALIDATE,AGGREGATE,CLASSIFY,ROUTE))
     assert "'do_candidate'" not in text and '"do_candidate"' not in text
     assert "'principle_eliminate'" not in text and '"principle_eliminate"' not in text
+
+
+def test_aggregate_uses_recent_series_for_current_classification(tmp_path):
+    as_of = date(2026, 8, 23)
+    long_history = [
+        obs(
+            keyword="timeframe split",
+            observed_at=(as_of - timedelta(days=7 * index)).isoformat(),
+            signal_value=5,
+            time_window="5y",
+        )
+        for index in range(260)
+    ]
+    recent = [
+        obs(
+            keyword="timeframe split",
+            observed_at=(as_of - timedelta(days=index)).isoformat(),
+            signal_value=30,
+            time_window="90d",
+        )
+        for index in range(90)
+    ]
+
+    candidate = run(AGGREGATE, tmp_path, long_history + recent, "--as-of", as_of.isoformat())["candidates"][0]
+
+    assert candidate["primary_series"]["time_window"] == "90d"
+    assert candidate["recent_signal"] == 30

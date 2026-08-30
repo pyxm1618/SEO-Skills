@@ -1,10 +1,10 @@
 # Workflow
 
-Resume from the earliest unfinished stage. Do not redo verified work merely because a batch starts midstream.
+Resume from the earliest unfinished stage. Do not redo verified work merely because a batch starts midstream. Mapping starts only after a selection-confirmed opportunity exists and the page universe is known.
 
 ## Stage 1 — Scope Contract
 
-Define the mapping universe before keyword research:
+Define the mapping universe before page-scoped keyword evidence work:
 
 - `page_id`, planned URL, entity/category name, aliases;
 - target language(s), script(s), market(s), and business geography;
@@ -13,15 +13,17 @@ Define the mapping universe before keyword research:
 
 No page inventory means this is not yet a page-mapping task.
 
-## Stage 2 — Wide Discovery
+## Stage 2 — Page-scoped keyword evidence / normalization / ownership expansion
 
-Use multiple seeds and, when useful, multiple markets to discover how users refer to each entity and what intent modifiers recur. Preserve `source_seed`, source database, timestamp, and raw row.
+Use the confirmed opportunity plus known page/entity aliases and, when useful, multiple markets to normalize page-scoped query evidence and expand plausible ownership candidates. Preserve `source_seed`, source database, timestamp, and raw row.
 
-**Rule:** `source_seed` is discovery provenance only; it never establishes page ownership. Cross-page line queries, hubs/lists, brands, and semantic drift must not be assigned because they happened to appear under one seed.
+This stage is **not** the owner of generic domain/root/Seed discovery. New reusable demand discovery routes through `seo-keyword-discovery`/`keyword-root-library`, not back into mapping.
+
+**Rule:** `source_seed` is provenance only; it never establishes page ownership. Cross-page line queries, hubs/lists, brands, and semantic drift must not be assigned merely because they appeared under one seed.
 
 ## Stage 3 — Ownership Classification + Core Compression + SERP Fast Check
 
-Compress the discovery pool into:
+Compress the page-scoped pool into:
 
 - `core` — plausible page-identity query;
 - `intent` — same entity plus a task/modifier that can live in the cluster;
@@ -35,7 +37,7 @@ Every final Core Candidate gets a **SERP Fast Check**: inspect enough live resul
 
 Acquire observed metrics only: query demand, market demand, KD, CPC/bids if available, and SERP facts. `unknown` stays unknown; it is not zero.
 
-Metric provenance must identify source, market/language scope, date, and method. Do not combine incompatible scopes silently.
+If a new/current Semrush acquisition is needed, it may use only the authenticated same-origin `sem.3ue.com` project collector. Metric provenance must identify source, market/language scope, date, and method. Do not combine incompatible scopes silently.
 
 ## Stage 5 — Demand Modeling
 
