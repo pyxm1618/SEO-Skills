@@ -31,7 +31,7 @@ The Stop/PreToolUse hook reloads the report and reruns production evidence valid
 
 ## Emerging route handoff
 
-An Emerging Radar run is a separate canonical stage. Its report must record the domain, anchor pool, Rising-only recursive-edge policy, supplemental-source non-recursion, candidate counts, blockers, and output artifact paths. A blocked Google or relay stage remains `BLOCKED`; the runner never substitutes synthetic or alternate-provider evidence.
+An Emerging Radar run is a separate canonical stage. Its report must record the domain, anchor pool, Rising-only recursive-edge policy, supplemental-source non-recursion, candidate counts, blockers, and output artifact paths. The live runner validates the final summary and registers `stages.emerging_radar_run` with a validation receipt for a PASS summary; a PASS summary has no blockers, while a blocked summary retains the matching structured blocker. A blocked Google or relay stage remains `BLOCKED`; the runner never substitutes synthetic or alternate-provider evidence.
 
 Traditional runs require their verified discovery stages.
 

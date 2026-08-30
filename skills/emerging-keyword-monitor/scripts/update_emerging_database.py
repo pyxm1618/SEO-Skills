@@ -63,9 +63,9 @@ def _route_index(routes: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str
     return indexed
 
 
-def _history_entry(record: dict[str, Any], discovered_at: str, route: dict[str, Any] | None) -> dict[str, Any]:
+def _history_entry(record: dict[str, Any], route: dict[str, Any] | None) -> dict[str, Any]:
     entry = {
-        "observed_at": discovered_at,
+        "observed_at": record.get("last_seen_at") or record.get("observed_at"),
         "status": record.get("status"),
         "signal_type": record.get("signal_type"),
         "confidence": record.get("confidence"),
@@ -122,7 +122,7 @@ def merge_database(
             record["previous_source_evidence"] = previous.get("source_evidence")
             history = list(previous.get("status_history") or [])
             if not is_missing(previous.get("status")):
-                history.append(_history_entry(previous, discovered_at, route))
+                history.append(_history_entry(previous, route))
             record["status_history"] = history
 
         record["last_seen_at"] = discovered_at

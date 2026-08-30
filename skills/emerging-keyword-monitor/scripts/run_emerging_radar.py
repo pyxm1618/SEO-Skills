@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 import subprocess
@@ -45,6 +46,12 @@ def _call(fetcher: Callable[..., Any], args: tuple[Any, ...], throttle: Any = No
     if throttle is not None:
         throttle.wait()
     return fetcher(*args)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _relation(relation_gate: Callable[[str, str, str], Any] | None, domain: str, keyword: str, parent: str) -> tuple[str, str]:
@@ -234,6 +241,8 @@ def run_pipeline(
         for anchor in anchors:
             try:
                 payload = _call(fetcher, (anchor["keyword"],), throttle)
+                if payload is None:
+                    continue
                 supplemental_evidence.append(
                     {
                         "source": source,
@@ -347,7 +356,10 @@ def load_root_rows(path: Path) -> list[dict[str, Any]]:
 
 
 def _slug(value: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9]+", "-", value).strip("-").lower() or "item"
+    text = str(value or "").strip()
+    readable = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    return f"{readable}-{digest}" if readable else f"item-{digest}"
 
 
 def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
@@ -362,6 +374,155 @@ def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError("collector output must be a JSON object")
     return payload
+
+
+def load_semrush_request_map(paths: list[str | Path]) -> dict[str, Path]:
+    """Index current Ideas descriptors by their captured seed without rewriting them."""
+    indexed: dict[str, Path] = {}
+    for raw_path in paths:
+        path = Path(raw_path)
+        if not path.is_file():
+            raise ValueError(f"Semrush request descriptor is missing: {path}")
+        try:
+            descriptor = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Semrush request descriptor is invalid JSON: {path}") from exc
+        if not isinstance(descriptor, dict) or descriptor.get("mode") != "ideas":
+            raise ValueError(f"Semrush request descriptor must be an Ideas capture: {path}")
+        seed = canonical_keyword(descriptor.get("seed"))
+        if not seed:
+            raise ValueError(f"Semrush Ideas descriptor seed is missing: {path}")
+        previous = indexed.get(seed)
+        if previous is not None and previous != path:
+            raise ValueError(f"duplicate Semrush Ideas descriptor seed: {seed}")
+        indexed[seed] = path
+    return indexed
+
+
+def _validated_semrush_fetcher(
+    *,
+    request_map: dict[str, Path],
+    collector: Path,
+    validator: Path,
+    run_dir: Path,
+    stage_results: list[dict[str, Any]],
+    counter: list[int],
+) -> Callable[[str], dict[str, Any] | None]:
+    def fetch(anchor: str) -> dict[str, Any] | None:
+        request = request_map.get(canonical_keyword(anchor))
+        if request is None:
+            return None
+
+        counter[0] += 1
+        prefix = f"{counter[0]:03d}-{_slug(anchor)}-discovery_semrush_ideas"
+        output = run_dir / f"{prefix}.json"
+        raw_output = run_dir / f"{prefix}.raw.json"
+        report = run_dir / f"{prefix}.validation.json"
+        payload = _collector_payload(
+            [
+                sys.executable,
+                str(collector),
+                "--request",
+                str(request),
+                "--output",
+                str(output),
+                "--raw-output",
+                str(raw_output),
+            ],
+            output,
+        )
+        validation = subprocess.run(
+            [
+                sys.executable,
+                str(validator),
+                "--stage",
+                "discovery_semrush_ideas",
+                "--input",
+                str(output),
+                "--report",
+                str(report),
+                "--production",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        try:
+            validation_payload = json.loads(report.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"stage validation report is unavailable: {report}") from exc
+        stage_results.append(validation_payload)
+        if validation.returncode != 0 or validation_payload.get("status") != "PASS":
+            detail = (validation.stderr or validation.stdout or "stage contract blocked").strip()
+            raise RuntimeError(f"stage discovery_semrush_ideas BLOCKED: {detail[-2000:]}")
+        return payload
+
+    return fetch
+
+
+def _run_blocker_reason(result: dict[str, Any]) -> str:
+    for blocker in result.get("blockers") or []:
+        if isinstance(blocker, dict) and str(blocker.get("reason") or "").strip():
+            return str(blocker["reason"]).strip()
+    return "emerging radar run is blocked"
+
+
+def write_validated_run_summary(
+    result: dict[str, Any],
+    summary_path: Path,
+    *,
+    validator_path: Path | None = None,
+) -> dict[str, Any]:
+    """Write the final radar summary and register its canonical stage receipt."""
+    summary_path = Path(summary_path)
+    report_path = summary_path.with_name(f"{summary_path.stem}.validation.json")
+    receipt_path = report_path.with_suffix(".receipt.json")
+    artifacts = dict(result.get("output_artifacts") or {})
+    artifacts["run_summary"] = str(summary_path)
+    artifacts["emerging_radar_run_validation"] = str(report_path)
+    result["output_artifacts"] = artifacts
+
+    stage_record: dict[str, Any] = {"status": result.get("status")}
+    if result.get("status") == "PASS":
+        stage_record["validation_receipt_ref"] = str(receipt_path)
+    else:
+        stage_record["blocked_reason"] = _run_blocker_reason(result)
+    stages = dict(result.get("stages") or {})
+    stages["emerging_radar_run"] = stage_record
+    result["stages"] = stages
+    _write_json(summary_path, result)
+
+    validator = Path(validator_path) if validator_path else REPO_ROOT / "runtime" / "stage_validator.py"
+    command = [
+        sys.executable,
+        str(validator),
+        "--stage",
+        "emerging_radar_run",
+        "--input",
+        str(summary_path),
+        "--report",
+        str(report_path),
+    ]
+    if result.get("status") == "PASS":
+        command.append("--production")
+    validation = subprocess.run(command, text=True, capture_output=True)
+    try:
+        report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"emerging_radar_run validation report is unavailable: {report_path}") from exc
+    if validation.returncode != 0 or report_payload.get("status") != "PASS":
+        detail = (validation.stderr or validation.stdout or "emerging_radar_run contract blocked").strip()
+        if result.get("status") == "PASS":
+            reason = f"emerging_radar_run validation failed: {detail[-2000:]}"
+            result["status"] = "BLOCKED"
+            result.setdefault("blockers", []).append(
+                {"status": "BLOCKED", "stage": "emerging_radar_run", "reason": reason}
+            )
+            result["stages"]["emerging_radar_run"] = {"status": "BLOCKED", "blocked_reason": reason}
+            _write_json(summary_path, result)
+        raise RuntimeError(detail[-2000:])
+    if result.get("status") == "PASS" and not receipt_path.is_file():
+        raise RuntimeError(f"emerging_radar_run validation receipt is unavailable: {receipt_path}")
+    return report_payload
 
 
 def _validated_collector_fetcher(
@@ -460,6 +621,17 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
             counter=counter,
         )
 
+    semrush_fetcher = None
+    if args.semrush_request:
+        semrush_fetcher = _validated_semrush_fetcher(
+            request_map=load_semrush_request_map(args.semrush_request),
+            collector=REPO_ROOT / "runtime" / "collectors" / "semrush_relay_collector.py",
+            validator=validator,
+            run_dir=run_dir,
+            stage_results=stage_results,
+            counter=counter,
+        )
+
     def timeline_fetcher(keyword: str, requested_timeframe: str) -> dict[str, Any]:
         return _validated_collector_fetcher(
             collector=collector,
@@ -479,7 +651,7 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
     result = run_pipeline(
         related_fetcher,
         autocomplete_fetcher,
-        None,
+        semrush_fetcher,
         domain=args.domain,
         explicit_anchors=args.anchor,
         root_rows=root_rows,
@@ -505,8 +677,7 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
         "csv": str(run_dir / "emerging-keywords.csv"),
         "evidence_dir": str(evidence_dir),
     }
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_validated_run_summary(result, Path(args.output), validator_path=validator)
     return result
 
 
@@ -525,6 +696,12 @@ def main() -> int:
     parser.add_argument("--max-candidates", type=int, default=200)
     parser.add_argument("--root-library")
     parser.add_argument("--with-autocomplete", action="store_true")
+    parser.add_argument(
+        "--semrush-request",
+        action="append",
+        default=[],
+        help="current authenticated Semrush Ideas descriptor; repeat once per captured seed",
+    )
     parser.add_argument("--run-dir", default=".seo-run/emerging-radar-live")
     parser.add_argument("--output", default=".seo-run/emerging-radar-live/run-summary.json")
     args = parser.parse_args()

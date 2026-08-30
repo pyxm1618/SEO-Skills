@@ -15,7 +15,7 @@ Google Trends index values remain relative 0–100 values. A Google source label
 - `radar_discovery.py` contains pure anchor-pool and breadth-first traversal logic. Root-library rows are read-only bootstrap hints. Initial anchors may come from the domain, explicit user anchors, active/verified relevant roots, and candidate roots marked unverified. Only `relation_type=rising` Trends rows enqueue the next BFS layer by default. Autocomplete and Semrush Ideas are supplemental evidence and never recursive edges unless an explicit policy flag is supplied.
 - `birth_history.py` contains deterministic long-series analysis. It consumes one actual long-history series at a time and never concatenates 5y, 12m, 90d, 30d, or 7d normalized indexes. It produces `estimated_birth_window`, `birth_window_start`, `birth_window_end`, `birth_source_resolution`, `birth_confidence`, `birth_reason`, `birth_evidence_series`, and `demand_history_type`.
 - `update_emerging_database.py` maintains a JSON database and CSV export under `.seo-run/`. It preserves the earliest `first_observed_at`, prior status/evidence, and current unknowns without manufacturing values. It writes route/handoff records but does not invoke selection logic.
-- `run_emerging_radar.py` is a thin orchestration CLI. Live collector calls are made through the collector CLI so collector receipts remain direct-CLI-bound. The runner records stage payloads, validation results, blockers, candidate counts, and output references.
+- `run_emerging_radar.py` is a thin orchestration CLI. Live collector calls are made through the collector CLI so collector receipts remain direct-CLI-bound. It accepts current Semrush Ideas descriptors as optional supplemental inputs, records stage payloads/validation results/blockers/candidate counts/output references, and validates/registers the final `emerging_radar_run` summary before returning.
 
 ## Workflow
 
@@ -35,7 +35,7 @@ dedupe + domain relation gate + brand/navigation stop reasons
         v
 Rising-only BFS (default depth 2, per-anchor limit 10, global cap 200)
         |
-        +--> optional Autocomplete/Semrush supplemental evidence
+        +--> optional Autocomplete/Semrush supplemental evidence (descriptor-bound)
         v
 independent Google timeline series: 5y | 12m | 90d (actual resolution retained)
         |

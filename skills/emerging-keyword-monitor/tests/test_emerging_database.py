@@ -33,6 +33,7 @@ def test_database_merge_preserves_first_seen_and_previous_state(tmp_path):
                 "domain": "wedding",
                 "keyword": "micro wedding",
                 "first_observed_at": "2026-08-01",
+                "last_seen_at": "2026-08-29T00:00:00Z",
                 "status": "watch",
                 "source_evidence": ["old.json"],
             }
@@ -61,6 +62,7 @@ def test_database_merge_preserves_first_seen_and_previous_state(tmp_path):
     assert record["status"] == "emerging"
     assert record["volume"] is None
     assert record["status_history"][-1]["status"] == "watch"
+    assert record["status_history"][-1]["observed_at"] == "2026-08-29T00:00:00Z"
     assert record["previous_source_evidence"] == ["old.json"]
 
     database_path = tmp_path / ".seo-run" / "emerging-keywords.json"
@@ -145,3 +147,79 @@ def test_runner_result_has_a_valid_emerging_radar_run_contract():
     contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
 
     assert validator.validate_stage("emerging_radar_run", result, contracts) == []
+
+
+def test_runner_slug_does_not_collapse_unicode_only_keywords():
+    runner = load_module("runner_unicode_slug_red", RUNNER)
+
+    assert runner._slug("婚礼预算") != runner._slug("易经")
+
+
+def test_runner_registers_and_validates_the_final_summary_stage(tmp_path):
+    runner = load_module("runner_summary_stage_red", RUNNER)
+    result = runner.run_pipeline(lambda anchor: {"related_queries": []}, domain="wedding")
+    result["output_artifacts"] = {
+        "run_summary": str(tmp_path / "run-summary.json"),
+        "database": str(tmp_path / "emerging-keywords.json"),
+        "csv": str(tmp_path / "emerging-keywords.csv"),
+        "evidence_dir": str(tmp_path / "evidence"),
+    }
+
+    summary = tmp_path / "run-summary.json"
+    runner.write_validated_run_summary(result, summary)
+    payload = json.loads(summary.read_text(encoding="utf-8"))
+    stage = payload["stages"]["emerging_radar_run"]
+
+    assert stage["status"] == "PASS"
+    assert Path(stage["validation_receipt_ref"]).is_file()
+
+
+def test_runner_loads_current_semrush_ideas_descriptors_for_supplemental_use(tmp_path):
+    runner = load_module("runner_semrush_descriptor_red", RUNNER)
+    descriptor = tmp_path / "semrush-ideas-request.json"
+    descriptor.write_text(
+        json.dumps({"mode": "ideas", "seed": "wedding planner"}),
+        encoding="utf-8",
+    )
+
+    request_map = runner.load_semrush_request_map([descriptor])
+
+    assert request_map["wedding planner"] == descriptor
+
+
+def test_unmapped_semrush_supplemental_anchor_remains_optional():
+    runner = load_module("runner_optional_semrush_red", RUNNER)
+
+    result = runner.run_pipeline(
+        lambda anchor: {"related_queries": []},
+        semrush_fetcher=lambda anchor: None,
+        domain="wedding",
+    )
+
+    assert result["status"] == "PASS"
+    assert not [blocker for blocker in result["blockers"] if blocker["stage"] == "semrush_ideas"]
+
+
+def test_production_radar_contract_rejects_pass_with_blockers():
+    validator = load_module("stage_validator_radar_blocker_red", VALIDATOR)
+    contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
+    payload = {
+        "domain": "wedding",
+        "status": "PASS",
+        "recursive_edge_policy": "google_trends_rising_only",
+        "supplemental_recursive": False,
+        "anchor_pool": [{"keyword": "wedding", "anchor_source": "domain", "discovery_depth": 0}],
+        "candidate_counts": {},
+        "blockers": [{"status": "BLOCKED", "reason": "unexpected blocker"}],
+        "output_artifacts": {
+            "run_summary": "summary.json",
+            "database": "database.json",
+            "csv": "database.csv",
+            "evidence_dir": "evidence",
+            "emerging_radar_run_validation": "summary.validation.json",
+        },
+    }
+
+    errors = validator.validate_stage("emerging_radar_run", payload, contracts, production=True)
+
+    assert any("blocker" in error.lower() for error in errors)

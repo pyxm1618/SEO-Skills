@@ -90,3 +90,14 @@ def test_trends_related_stage_requires_real_payload_fields():
     errors = validator.validate_stage("trends_related", payload, contracts)
 
     assert errors == []
+
+
+def test_evidence_keys_keep_unicode_anchors_and_timeframes_distinct():
+    google = load_module("google_evidence_key_red", GOOGLE)
+
+    chinese_anchor = google._evidence_slug("婚礼预算", "US", "today 5-y")
+    second_chinese_anchor = google._evidence_slug("易经", "US", "today 5-y")
+    recent_timeframe = google._evidence_slug("婚礼预算", "US", "today 90-d")
+
+    assert chinese_anchor != second_chinese_anchor
+    assert chinese_anchor != recent_timeframe

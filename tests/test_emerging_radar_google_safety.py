@@ -6,10 +6,19 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 GOOGLE = ROOT / "runtime" / "collectors" / "google_live_collector.py"
+VALIDATOR = ROOT / "runtime" / "stage_validator.py"
+CONTRACTS = ROOT / "runtime" / "stage_contracts.json"
 
 
 def load_google(name="google_live_collector_safety_red"):
     spec = importlib.util.spec_from_file_location(name, GOOGLE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -113,6 +122,20 @@ def test_timeline_preserves_requested_timeframe_and_infers_actual_resolution(mon
     assert result["requested_timeframe"] == "today 5-y"
     assert result["actual_resolution"] == "weekly"
     assert result["google_trends_series"] == result["series"]
+
+
+def test_timeline_result_uses_the_canonical_contract_field_names(monkeypatch):
+    google = load_google("google_live_collector_timeline_contract_red")
+    monkeypatch.setattr(google, "screenshot", lambda *args, **kwargs: "timeline.png")
+    monkeypatch.setattr(google, "evidence_json", lambda *args, **kwargs: "timeline.json")
+    monkeypatch.setattr(google, "now", lambda: "2026-08-30T00:00:00Z")
+
+    result = google.trends_timeline(FakeContext(), "wedding", "US", "today 5-y", ".")
+    result["evidence_receipt_ref"] = "timeline.receipt.json"
+    validator = load_module("stage_validator_timeline_contract_red", VALIDATOR)
+    contracts = json.loads(CONTRACTS.read_text(encoding="utf-8"))
+
+    assert validator.validate_stage("trends_timeline", result, contracts) == []
 
 
 def test_google_connection_uses_new_clean_context_without_inheriting_default_cookies(monkeypatch):

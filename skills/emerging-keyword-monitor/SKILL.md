@@ -62,6 +62,10 @@ python scripts/route_candidates.py --input classified.json --format json
 
 For a domain-level radar, start with a domain/anchor pool and use Trends Rising as the recursive edge. Autocomplete and Semrush Ideas may be supplemental evidence but are not recursive BFS edges by default. Persist radar records and handoffs under `.seo-run/`; the monitor still does not invoke selection decisions.
 
+The live radar CLI may receive repeatable `--semrush-request PATH` options. Each path must be a current authenticated same-origin Semrush Ideas request descriptor for its captured seed; unmatched anchors remain without Semrush supplemental evidence, and any attempted relay/schema failure is a blocker. The CLI never constructs a Semrush endpoint or falls back to an API/provider.
+
+Before a live run is considered complete, the runner writes the final summary, validates it against the `emerging_radar_run` contract, and registers `stages.emerging_radar_run.validation_receipt_ref`. A `PASS` summary must have no blockers; a blocked summary must retain a structured blocker.
+
 When running interactively without normalized files, apply the same contracts conceptually. Do not loosen the state machine or routing rules just because evidence was gathered conversationally or from web research.
 
 ## Canonical Runtime Contract

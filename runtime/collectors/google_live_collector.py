@@ -6,6 +6,7 @@ No HTTP/search API fallback is implemented by design.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import math
@@ -43,6 +44,14 @@ def _binding():
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _evidence_slug(*values):
+    parts = [str(value or "").strip() for value in values]
+    identity = "\x1f".join(parts)
+    readable = re.sub(r"[^a-zA-Z0-9]+", "-", "-".join(parts)).strip("-").lower()
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"{readable}-{digest}" if readable else f"item-{digest}"
 
 
 def playwright():
@@ -401,12 +410,12 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
     if host != "trends.google.com":
         raise RuntimeError(f"wrong Google Trends origin: {host}")
     body = page.locator("body").inner_text(timeout=5000).lower()
+    evidence_key = _evidence_slug(anchor, country, timeframe)
     if "related" not in body and "关联" not in body and not observed_payloads:
-        slug = re.sub(r"[^a-zA-Z0-9]+", "-", anchor).strip("-")
         blocker_observed_at = now()
         blocker_evidence = evidence_json(
             evidence_dir,
-            f"trends-related-{slug}-blocked.json",
+            f"trends-related-{evidence_key}-blocked.json",
             {
                 "anchor": anchor,
                 "country": country,
@@ -418,17 +427,16 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
                 "blocker": "related_result_not_confirmed",
             },
         )
-        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{slug}-blocked.png")
+        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-blocked.png")
         raise RuntimeError(
             "Google Trends related result could not be confirmed; "
             f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
         )
     if not observed_payloads:
-        slug = re.sub(r"[^a-zA-Z0-9]+", "-", anchor).strip("-")
         blocker_observed_at = now()
         blocker_evidence = evidence_json(
             evidence_dir,
-            f"trends-related-{slug}-payload-blocked.json",
+            f"trends-related-{evidence_key}-payload-blocked.json",
             {
                 "anchor": anchor,
                 "country": country,
@@ -440,18 +448,17 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
                 "blocker": "related_payload_not_observed",
             },
         )
-        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{slug}-payload-blocked.png")
+        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-payload-blocked.png")
         raise RuntimeError(
             "Google Trends related payload was not observed; screenshot-only evidence is insufficient; "
             f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
         )
 
     captured = observed_payloads[-1]
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", anchor).strip("-")
     observed_at = now()
     raw_evidence = evidence_json(
         evidence_dir,
-        f"trends-related-{slug}.json",
+        f"trends-related-{evidence_key}.json",
         {
             "anchor": anchor,
             "country": country,
@@ -462,7 +469,7 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
             "related_queries": captured["related_queries"],
         },
     )
-    screenshot_ref = screenshot(page, evidence_dir, f"trends-related-{slug}.png")
+    screenshot_ref = screenshot(page, evidence_dir, f"trends-related-{evidence_key}.png")
     return {
         "anchor": anchor,
         "related_queries": captured["related_queries"],
@@ -511,11 +518,11 @@ def trends_timeline(context, keyword, market, timeframe, evidence_dir):
         raise RuntimeError("Google Trends real temporal payload was not observed; screenshot-only evidence is insufficient")
 
     captured = observed_payloads[-1]
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", keyword).strip("-")
+    evidence_key = _evidence_slug(keyword, market, timeframe)
     observed_at = now()
     raw_evidence = evidence_json(
         evidence_dir,
-        f"trends-{slug}.json",
+        f"trends-{evidence_key}.json",
         {
             "keyword": keyword,
             "market": market,
@@ -527,16 +534,20 @@ def trends_timeline(context, keyword, market, timeframe, evidence_dir):
             "actual_resolution": infer_timeline_resolution(captured["series"]),
         },
     )
-    screenshot_ref = screenshot(page, evidence_dir, f"trends-{slug}.png")
+    screenshot_ref = screenshot(page, evidence_dir, f"trends-{evidence_key}.png")
     return {
         "keyword": keyword,
         "is_finalist": True,
         "source": "Google Trends",
         "source_type": "google_trends_timeline",
         "source_url": captured["url"],
+        "market": market,
         "requested_timeframe": timeframe,
         "actual_resolution": infer_timeline_resolution(captured["series"]),
         "series": captured["series"],
+        "observed_at": observed_at,
+        "raw_evidence_ref": raw_evidence,
+        "screenshot_ref": screenshot_ref,
         "google_trends_source": "Google Trends",
         "google_trends_market": market,
         "google_trends_observed_at": observed_at,

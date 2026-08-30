@@ -292,7 +292,7 @@ def _infer_canonical_required_stages(manifest):
         valid, reason = _verify_route_attestation(manifest)
         if not valid:
             return None, reason
-        return [], ""
+        return ["emerging_radar_run"], ""
     return None, f"COMPLETE has unknown or missing route: {route or 'missing'}"
 
 

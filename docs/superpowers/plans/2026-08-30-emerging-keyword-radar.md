@@ -17,7 +17,7 @@
 - New/current Semrush data remains authenticated same-origin relay-only at `https://sem.3ue.com/`; no official API, API keys, units, Ahrefs, or alternative provider.
 - Google Trends 5y, 12m, 90d, 30d, and 7d indexes are separate comparable series and are never concatenated or compared arithmetically across timeframes.
 - Google `Breakout` is preserved as `google_rising_label` and never directly becomes canonical `signal_type=breakout` or `status=breakout`.
-- Only Trends `relation_type=rising` is a recursive BFS edge by default; Autocomplete and Semrush Ideas are supplemental evidence.
+- Only Trends `relation_type=rising` is a recursive BFS edge by default; Autocomplete and Semrush Ideas are supplemental evidence. The live runner accepts repeatable `--semrush-request` paths only for current authenticated Ideas descriptors captured from the existing relay context; unmatched anchors remain optional and relay/schema failures block.
 - Existing signal types, states, routes, selection thresholds, `root-library.csv`, and downstream selection ownership remain unchanged.
 - No PostgreSQL, Supabase, OAuth, workflow framework, proxy farm, or other Skill refactor is introduced.
 
@@ -305,7 +305,7 @@ git commit -m "feat: infer emerging demand history from long trends"
 **Interfaces:**
 - `merge_database(existing, classified_candidates, routes, discovered_at) -> dict` keys records by `(domain, canonical keyword)`, preserves earliest `first_observed_at`, and stores prior status/evidence history.
 - `write_database(database, database_path, csv_path) -> None` writes `.seo-run/emerging-keywords.json` and importable CSV with unknowns blank/null rather than zero.
-- `run_emerging_radar.py` accepts `--domain`, repeatable `--anchor`, `--country`, `--max-depth`, `--per-anchor-limit`, `--max-candidates`, and output paths; live collector calls execute as direct collector CLIs so evidence receipts remain valid.
+- `run_emerging_radar.py` accepts `--domain`, repeatable `--anchor`, `--country`, `--max-depth`, `--per-anchor-limit`, `--max-candidates`, repeatable `--semrush-request`, and output paths; live collector calls execute as direct collector CLIs so evidence receipts remain valid.
 - Router handoffs retain discovery/history fields and continue to emit only canonical existing routes; confirmed existing-root candidates retain complete `selection_handoff`.
 
 - [ ] **Step 1: Write failing persistence and routing tests**
@@ -346,7 +346,7 @@ Expected: FAIL because persistence and runner APIs are absent and router does no
 
 - [ ] **Step 3: Implement persistence and orchestration**
 
-Persist current records plus explicit previous-state fields and history; do not treat absent current values as zero. The runner builds the read-only anchor pool, invokes serial throttled Related/Rising collection, optionally records Autocomplete/Semrush supplemental evidence without using it as a recursive edge, collects independent `today 5-y`, `today 12-m`, and `today 90-d` timelines, validates each payload against its stage contract, analyzes the long series, classifies using a recent comparable series, routes, and writes report/database/CSV/handoff artifacts. A collector or contract blocker is recorded as `BLOCKED` and never reported as PASS.
+Persist current records plus explicit previous-state fields and history; do not treat absent current values as zero. The runner builds the read-only anchor pool, invokes serial throttled Related/Rising collection, optionally records Autocomplete/Semrush supplemental evidence without using it as a recursive edge, collects independent `today 5-y`, `today 12-m`, and `today 90-d` timelines, validates each payload against its stage contract, analyzes the long series, classifies using a recent comparable series, routes, and writes report/database/CSV/handoff artifacts. Before returning, it validates and registers the final `emerging_radar_run` summary; a collector or contract blocker is recorded as `BLOCKED` and never reported as PASS.
 
 - [ ] **Step 4: Run focused persistence/routing tests GREEN**
 

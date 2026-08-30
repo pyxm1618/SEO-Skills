@@ -81,6 +81,22 @@ def test_emerging_route_cannot_be_self_declared_without_monitor_handoff():
     assert "handoff" in error.lower() or "route" in error.lower()
 
 
+def test_emerging_completion_requires_a_validated_radar_run_stage(monkeypatch):
+    hook = load_hook("emerging_run_stage_required_red")
+    monkeypatch.setattr(hook, "_verify_route_attestation", lambda *args, **kwargs: (True, ""))
+
+    stages, error = hook._infer_canonical_required_stages(
+        {
+            "run_id": "r-emerging",
+            "route": "emerging",
+            "status": "COMPLETE",
+            "candidates": {"cand_1": {"keyword": "new demand"}},
+        }
+    )
+
+    assert stages == ["emerging_radar_run"], error
+
+
 def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch):
     hook = load_hook("finalist_self_report_rejected")
     monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))

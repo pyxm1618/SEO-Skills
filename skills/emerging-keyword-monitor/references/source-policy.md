@@ -10,6 +10,8 @@ This source-policy change does **not** alter the emerging thresholds or state ma
 
 Whenever the monitor needs a **new/current** Semrush observation, the only allowed transport is the current authenticated same-origin session at `https://sem.3ue.com/` through the project relay collector.
 
+The live radar accepts repeatable `--semrush-request PATH` inputs for current Ideas descriptors captured from that relay. The runner indexes descriptors by their captured seed and invokes the existing Semrush collector CLI only for matching anchors; no descriptor is rewritten, and anchors without a descriptor remain supplemental-unknown rather than using another source.
+
 Do not fall back to an official Semrush API, API key/units, official connector, Ahrefs, another provider, or an AI estimate. Historical Semrush exports/evidence may still be evaluated for compatibility/freshness as existing evidence; they are not permission to create a different live acquisition path.
 
 ## No embedded authentication

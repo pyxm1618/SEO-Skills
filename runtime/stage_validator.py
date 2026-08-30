@@ -112,6 +112,34 @@ def _validate_number_range(field, value, rule):
 def _validate_production_binding(stage, payload):
     if stage == "finalist_trend" and payload.get("is_finalist") is not True:
         return []
+    if stage == "emerging_radar_run":
+        errors = []
+        if payload.get("status") not in {"PASS", "BLOCKED"}:
+            errors.append("status:must_be_PASS_or_BLOCKED")
+        blockers = payload.get("blockers")
+        if not isinstance(blockers, list):
+            errors.append("blockers:must_be_list")
+        elif payload.get("status") == "PASS" and blockers:
+            errors.append("blockers:PASS_run_must_be_empty")
+        elif payload.get("status") == "BLOCKED" and not blockers:
+            errors.append("blockers:BLOCKED_run_requires_entry")
+        if not isinstance(payload.get("candidate_counts"), dict):
+            errors.append("candidate_counts:must_be_object")
+        artifacts = payload.get("output_artifacts")
+        if not isinstance(artifacts, dict):
+            errors.append("output_artifacts:must_be_object")
+        else:
+            for field in ("run_summary", "database", "csv", "evidence_dir", "emerging_radar_run_validation"):
+                if value_state(artifacts.get(field)) != "value":
+                    errors.append(f"output_artifacts.{field}:required")
+        stages = payload.get("stages")
+        stage_record = stages.get("emerging_radar_run") if isinstance(stages, dict) else None
+        if payload.get("status") == "PASS":
+            if not isinstance(stage_record, dict) or stage_record.get("status") != "PASS":
+                errors.append("stages.emerging_radar_run:PASS_registration_required")
+            elif value_state(stage_record.get("validation_receipt_ref")) != "value":
+                errors.append("stages.emerging_radar_run.validation_receipt_ref:required")
+        return errors
     binding = _binding()
     try:
         if stage == "kgr_intitle":

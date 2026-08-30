@@ -171,6 +171,21 @@ def is_long_history_window(value: Any) -> bool:
     return normalized in {"5y", "5year", "5years", "today5y", "past5years"}
 
 
+def classification_window_rank(value: Any) -> int:
+    normalized = "".join(character for character in str(value or "").strip().lower() if character.isalnum())
+    if normalized in {"7d", "7day", "7days", "past7d", "recent7d", "today7d"}:
+        return 0
+    if normalized in {"30d", "30day", "30days", "past30d", "recent30d", "today30d"}:
+        return 1
+    if normalized in {"90d", "90day", "90days", "3m", "3month", "3months", "past90d", "recent90d", "today90d"}:
+        return 2
+    if normalized in {"12m", "12month", "12months", "1y", "1year", "today12m", "past12months"}:
+        return 3
+    if is_long_history_window(value):
+        return 4
+    return 5
+
+
 def metric_compatibility_status(records: dict[str, dict[str, Any] | None]) -> str:
     """Check whether core keyword metrics share provider, database, and market context."""
     present = [record for record in records.values() if isinstance(record, dict)]
@@ -379,7 +394,12 @@ def choose_primary(series: list[dict[str, Any]]) -> dict[str, Any] | None:
         last, _ = parse_iso(item.get("last_observed_at"))
         timestamp = last.timestamp() if last else 0.0
         identity = tuple(str(item.get(field) or "") for field in SERIES_FIELDS)
-        return (-int(item.get("observation_count") or 0), -timestamp, identity)
+        return (
+            classification_window_rank(item.get("time_window")),
+            -timestamp,
+            -int(item.get("observation_count") or 0),
+            identity,
+        )
 
     return sorted(series, key=sort_key)[0]
 

@@ -34,7 +34,7 @@ The aggregator computes each series independently. It never adds Google Trends i
 
 Source-reported aggregation windows are part of comparability. For example, a Google Trends `Past 24h` search-count observation and a `Past 48h` search-count observation are different measurement windows, not two persistence observations, even if captured at the same time for the same query.
 
-A deterministic primary series is selected only to expose compatibility fields. All series remain in `source_evidence`. Classification may select a different verified fresh series when the deterministic primary is explicitly ended or stale; that choice is exposed as `classification_primary_series`.
+A deterministic primary series exposes the current classification-compatible series: recent `7d`/`30d`/`90d` windows rank ahead of medium `12m`, which ranks ahead of long `5y` and unknown windows. All series remain in `source_evidence`; the long series is still independently selected for history/birth inference. Classification may select a different verified fresh series when the selected primary is explicitly ended or stale; that choice is exposed as `classification_primary_series`.
 
 ## Time windows and persistence evidence
 
