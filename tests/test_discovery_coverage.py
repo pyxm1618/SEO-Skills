@@ -905,6 +905,59 @@ def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
     assert hook_result.returncode == 0, hook_result.stderr
 
 
+def test_production_coverage_cannot_shrink_a_verified_upstream_inventory(tmp_path):
+    coverage = load_module("discovery_coverage_production_inventory", COVERAGE)
+    _google_input, google_receipt = _write_google_receipt(tmp_path)
+    input_manifest = {
+        "schema": "seo-discovery-input/v1",
+        "batch_id": "batch-shrink",
+        "root_handoff_receipt_ref": str(tmp_path / "root-handoff.receipt.json"),
+        "seed_plan": {
+            "original_seed_count": 1,
+            "seeds": ["wedding calculator"],
+        },
+        "candidate_inventory": {
+            "original_candidate_count": 1,
+            "candidates": [
+                {
+                    "candidate_id": "candidate-alcohol",
+                    "keyword": "wedding alcohol calculator",
+                    "source": "google_autocomplete",
+                    "source_seed": "wedding calculator",
+                    "evidence_receipt_ref": str(google_receipt),
+                }
+            ],
+        },
+        "candidate_analysis": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
+            }
+        ],
+    }
+    _manifest_path, manifest_receipt = _write_input_manifest_receipt(tmp_path, input_manifest)
+    ledger = {
+        "batch_id": "batch-shrink",
+        "discovery_mode": "full",
+        "upstream_input": dict(input_manifest, validation_receipt_ref=str(manifest_receipt)),
+        "required_seeds": [],
+        "observed_candidates": [],
+        "candidate_analysis": [],
+        "required_branch_seeds": [],
+        "competitor_sweep": {"configured": False, "domains": [], "status": "not_configured"},
+        "other_mandatory_sources": [],
+        "max_branch_depth": 1,
+        "max_branch_seeds": 5,
+    }
+
+    errors = coverage.validate_coverage(ledger, production=True)
+
+    assert any("required_seeds:count_below_upstream" in error for error in errors)
+    assert any("observed_candidates:count_below_upstream" in error for error in errors)
+
+
 def test_production_candidate_source_seed_must_match_observed_receipt(tmp_path):
     coverage = load_module("discovery_coverage_candidate_source_seed", COVERAGE)
     _google_input, google_receipt = _write_google_receipt(tmp_path)
