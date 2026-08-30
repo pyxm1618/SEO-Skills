@@ -259,29 +259,43 @@ def _validate_source_receipts(manifest, inventory_candidates, production, issue)
         issue("input_manifest.candidate_inventory:row_ledger_required_for_source_receipts")
         return
 
-    ledger_by_ref = {}
+    prefix = "input_manifest.candidate_inventory.row_ledger"
+    ledger_by_ref = _index_row_ledger(row_ledger, prefix, issue)
+    kept_candidate_ids = _reconcile_row_ledger(
+        normalized_by_ref, ledger_by_ref, candidates_by_id, prefix, issue
+    )
+    if set(candidates_by_id) - kept_candidate_ids:
+        issue("input_manifest.candidate_inventory:candidates_without_a_kept_source_row")
+
+
+def _index_row_ledger(row_ledger, prefix, issue):
+    indexed = {}
     for index, record in enumerate(row_ledger):
-        label = f"input_manifest.candidate_inventory.row_ledger[{index}]"
+        label = f"{prefix}[{index}]"
         if not isinstance(record, dict):
             issue(f"{label}:must_be_object")
             continue
         ref = _text(record.get("evidence_receipt_ref"))
         if not ref:
             issue(f"{label}.evidence_receipt_ref:required")
-        elif ref in ledger_by_ref:
+        elif ref in indexed:
             issue(f"{label}.evidence_receipt_ref:duplicate")
         else:
-            ledger_by_ref[ref] = record
+            indexed[ref] = record
+    return indexed
 
-    if set(ledger_by_ref) != set(normalized_by_ref):
-        issue("input_manifest.candidate_inventory.row_ledger:must_cover_exact_source_receipt_set")
+
+def _reconcile_row_ledger(normalized_by_ref, ledger_by_ref, candidates_by_id, prefix, issue):
+    """Account for every observed row exactly once and return the kept candidate ids."""
 
     kept_candidate_ids = set()
+    if set(ledger_by_ref) != set(normalized_by_ref):
+        issue(f"{prefix}:must_cover_exact_source_receipt_set")
     for ref, (evidence_type, normalized) in normalized_by_ref.items():
         record = ledger_by_ref.get(ref)
         if record is None:
             continue
-        label = f"input_manifest.candidate_inventory.row_ledger[{ref}]"
+        label = f"{prefix}[{ref}]"
         observed = _observed_keywords(normalized, SOURCE_EVIDENCE_TYPES[evidence_type])
         rows = record.get("rows")
         if not isinstance(rows, list):
@@ -320,9 +334,7 @@ def _validate_source_receipts(manifest, inventory_candidates, production, issue)
                     issue(f"{row_label}.candidate_id:kept_more_than_once")
                 else:
                     kept_candidate_ids.add(_text(row.get("candidate_id")))
-
-    if set(candidates_by_id) - kept_candidate_ids:
-        issue("input_manifest.candidate_inventory:candidates_without_a_kept_source_row")
+    return kept_candidate_ids
 
 
 def validate_input_manifest(manifest, production=False):
@@ -704,26 +716,31 @@ def _validate_first_round_receipt_binding(manifest, required_seeds, competitor, 
 
 
 def _check_acquisition(item, key, label, evidence_type, identity_field, identity, production, issue):
+    """Return the acquisition status and, in production, its verified payload."""
+
     record = item.get(key) if isinstance(item, dict) else None
     if not isinstance(record, dict):
         issue(f"{label}:{key}:record_required")
-        return ""
+        return "", None
     status = _status(record)
+    normalized = None
     if status not in VALID_ACQUISITION_STATUSES:
         issue(f"{label}:{key}:invalid_status:{status or 'missing'}")
-        return status
+        return status, None
     if status == PASS:
         ref = _receipt_ref(record)
         if not ref:
             issue(f"{label}:{key}:PASS_requires_evidence_receipt")
         elif production:
-            _verify_receipt(ref, evidence_type, identity_field, identity, f"{label}:{key}", issue)
+            normalized = _verify_receipt(
+                ref, evidence_type, identity_field, identity, f"{label}:{key}", issue
+            )
     else:
         reason = _reason(record)
         if not reason:
             issue(f"{label}:{key}:{status}_requires_blocked_reason")
         issue(f"{label}:{key}:status={status or 'missing'}:{reason or 'unreviewed'}")
-    return status
+    return status, normalized
 
 
 def _analyze(ledger, production=False):
@@ -743,6 +760,7 @@ def _analyze(ledger, production=False):
         "semrush_pass_count": 0,
         "required_branch_seed_count": 0,
         "branch_seed_pass_count": 0,
+        "branch_candidate_count": 0,
         "branch_autocomplete_pass_count": 0,
         "branch_semrush_required_count": 0,
         "branch_semrush_pass_count": 0,
@@ -795,7 +813,7 @@ def _analyze(ledger, production=False):
             issue(f"{label}.seed:duplicate")
         else:
             root_seed_keys.add(seed_key)
-        autocomplete_status = _check_acquisition(
+        autocomplete_status, _autocomplete_evidence = _check_acquisition(
             item,
             "autocomplete",
             label,
@@ -808,7 +826,7 @@ def _analyze(ledger, production=False):
         if autocomplete_status == PASS:
             root_autocomplete_pass += 1
         if full_route:
-            semrush_status = _check_acquisition(
+            semrush_status, _semrush_evidence = _check_acquisition(
                 item,
                 "semrush",
                 label,
@@ -893,6 +911,15 @@ def _analyze(ledger, production=False):
 
     seen_branch_keys = set()
     depth_by_seed = {seed_key: 0 for seed_key in root_seed_keys}
+    branch_normalized_by_ref = {}
+
+    def _record_branch_evidence(record, evidence_type, normalized):
+        if normalized is None or not isinstance(record, dict):
+            return
+        ref = _receipt_ref(record)
+        if ref:
+            branch_normalized_by_ref[ref] = (evidence_type, normalized)
+
     branch_autocomplete_pass = 0
     branch_semrush_pass = 0
     for index, branch in enumerate(branches):
@@ -961,7 +988,7 @@ def _analyze(ledger, production=False):
             seen_branch_keys.add(branch_key)
             if effective_depth is not None:
                 depth_by_seed[branch_key] = effective_depth
-        autocomplete_status = _check_acquisition(
+        autocomplete_status, autocomplete_evidence = _check_acquisition(
             branch,
             "autocomplete",
             label,
@@ -973,8 +1000,11 @@ def _analyze(ledger, production=False):
         )
         if autocomplete_status == PASS:
             branch_autocomplete_pass += 1
+            _record_branch_evidence(
+                branch.get("autocomplete"), "google_autocomplete", autocomplete_evidence
+            )
         if full_route:
-            semrush_status = _check_acquisition(
+            semrush_status, semrush_evidence = _check_acquisition(
                 branch,
                 "semrush",
                 label,
@@ -986,6 +1016,7 @@ def _analyze(ledger, production=False):
             )
             if semrush_status == PASS:
                 branch_semrush_pass += 1
+                _record_branch_evidence(branch.get("semrush"), "semrush_ideas", semrush_evidence)
         else:
             semrush_status = _status(branch.get("semrush"))
             if semrush_status == PASS:
@@ -1004,6 +1035,54 @@ def _analyze(ledger, production=False):
         summary["semrush_required_count"] + summary["branch_semrush_required_count"]
     )
     summary["semrush_total_pass_count"] = summary["semrush_pass_count"] + summary["branch_semrush_pass_count"]
+
+    # Branch acquisitions produce their own observed rows. They are reconciled here,
+    # after the freeze, because a Branch Seed does not exist when the manifest is signed.
+    branch_candidates = ledger.get("branch_candidates", [])
+    if not isinstance(branch_candidates, list):
+        issue("branch_candidates:must_be_list")
+        branch_candidates = []
+    branch_candidate_by_id = {}
+    for index, candidate in enumerate(branch_candidates):
+        label = f"branch_candidate[{index}]"
+        if not isinstance(candidate, dict):
+            issue(f"{label}:must_be_object")
+            continue
+        candidate_id = _text(candidate.get("candidate_id"))
+        source_seed = _norm_keyword(candidate.get("source_seed"))
+        if not candidate_id:
+            issue(f"{label}.candidate_id:required")
+        elif candidate_id in candidate_by_id or candidate_id in branch_candidate_by_id:
+            issue(f"{label}.candidate_id:duplicate")
+        else:
+            branch_candidate_by_id[candidate_id] = candidate
+        if not _norm_keyword(candidate.get("keyword")):
+            issue(f"{label}.keyword:required")
+        if _text(candidate.get("source")) not in SOURCE_EVIDENCE_TYPES:
+            issue(f"{label}.source:must_be_real_observed_source")
+        if not source_seed:
+            issue(f"{label}.source_seed:required")
+        elif source_seed not in seen_branch_keys:
+            issue(f"{label}.source_seed:must_be_a_completed_branch_seed")
+        if not _candidate_receipt_ref(candidate):
+            issue(f"{label}.evidence_receipt_ref:required")
+    summary["branch_candidate_count"] = len(branch_candidates)
+
+    if production and (branch_normalized_by_ref or branch_candidate_by_id):
+        branch_row_ledger = ledger.get("branch_row_ledger")
+        if not isinstance(branch_row_ledger, list):
+            issue("branch_row_ledger:required_for_branch_acquisitions")
+        else:
+            indexed = _index_row_ledger(branch_row_ledger, "branch_row_ledger", issue)
+            kept = _reconcile_row_ledger(
+                branch_normalized_by_ref,
+                indexed,
+                {**candidate_by_id, **branch_candidate_by_id},
+                "branch_row_ledger",
+                issue,
+            )
+            if set(branch_candidate_by_id) - kept:
+                issue("branch_candidates:without_a_kept_branch_source_row")
 
     competitor = ledger.get("competitor_sweep")
     if not isinstance(competitor, dict):
@@ -1116,6 +1195,7 @@ def _analyze(ledger, production=False):
         "semrush_pass_count",
         "required_branch_seed_count",
         "branch_seed_pass_count",
+        "branch_candidate_count",
         "branch_autocomplete_pass_count",
         "branch_semrush_required_count",
         "branch_semrush_pass_count",
@@ -1164,9 +1244,9 @@ def enrich_coverage(ledger):
 def validate_handoff_keywords(coverage_row, keywords):
     """Require the handoff word list to be exactly the verified Coverage candidates.
 
-    Branch Seeds prove that a demand branch was really explored; the keywords they
-    observe belong to a later Discovery round with its own frozen manifest, not to
-    this handoff. So the handoff may neither invent a keyword nor drop one.
+    That is the first-round inventory frozen in the manifest plus the Branch
+    candidates reconciled against the branch acquisitions, so the handoff can
+    neither drop a keyword Coverage verified nor add one it never saw.
     """
 
     if not isinstance(coverage_row, dict):
@@ -1174,13 +1254,16 @@ def validate_handoff_keywords(coverage_row, keywords):
     candidates = coverage_row.get("observed_candidates")
     if not isinstance(candidates, list):
         return ["coverage_row.observed_candidates:must_be_list"]
+    branch_candidates = coverage_row.get("branch_candidates", [])
+    if not isinstance(branch_candidates, list):
+        return ["coverage_row.branch_candidates:must_be_list"]
     if not isinstance(keywords, list) or not keywords:
         return ["keywords:complete_candidate_list_required"]
 
     errors = []
     expected = {
         _text(candidate.get("candidate_id")): _candidate_fingerprint(candidate)
-        for candidate in candidates
+        for candidate in list(candidates) + list(branch_candidates)
         if isinstance(candidate, dict) and _text(candidate.get("candidate_id"))
     }
     actual = {}

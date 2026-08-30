@@ -39,7 +39,7 @@ Competitor Organic Keywords are a domain/root-cluster coverage source, not a per
 
 ## Demand branch expansion
 
-Branch analysis may promote a keyword only from an already observed candidate. The ledger records the exact existing candidate, parent Seed, source, evidence receipt, analysis reason, and acquisition status. It may not turn an AI-created string into an observed Branch Seed. A required Branch Seed must run the same real Google Autocomplete and Semrush route as a required Seed.
+Branch analysis may promote a keyword only from an already observed candidate. The ledger records the exact existing candidate, parent Seed, source, evidence receipt, analysis reason, and acquisition status. It may not turn an AI-created string into an observed Branch Seed. A required Branch Seed must run the same real Google Autocomplete and Semrush route as a required Seed, and the rows that acquisition returns are accounted for in the branch row ledger and delivered with the handoff.
 
 Expansion is by distinct demand branch, not by recursively re-expanding every keyword. The runtime rejects visited/cycle duplicates, derives each Branch Seed's depth from its visited parent chain rather than from a declared value, and enforces configurable depth and branch-count safety limits. Those limits protect execution; they are not SEO opportunity thresholds.
 
@@ -63,6 +63,6 @@ Preserve `observed`, `calculated`, `analysis`, and `unknown`. Missing, invalid, 
 
 ## Completion
 
-A formal `discovery_handoff` exists only when the production validator itself re-verifies the exact `discovery_coverage` receipt, whose report has `coverage_status=PASS` and `formal_handoff_allowed=true`, and when the handoff `keywords` list reconciles exactly against that verified Candidate inventory. A Branch Seed's own acquisition proves the branch was explored; its observed keywords reach selection through a further Discovery round, not through this handoff. If any mandatory Seed, Branch Seed, configured competitor domain, or other mandatory source fails or remains unreviewed, mark the coverage batch `BLOCKED`; preserve the partial evidence and do not silently shrink the handoff.
+A formal `discovery_handoff` exists only when the production validator itself re-verifies the exact `discovery_coverage` receipt, whose report has `coverage_status=PASS` and `formal_handoff_allowed=true`, and when the handoff `keywords` list reconciles exactly against the verified first-round Candidates plus the reconciled Branch candidates. If any mandatory Seed, Branch Seed, configured competitor domain, or other mandatory source fails or remains unreviewed, mark the coverage batch `BLOCKED`; preserve the partial evidence and do not silently shrink the handoff.
 
 Selection still owns Ideas-stage recall onward, including all Volume/KD/CPC/KGR/SERP/KDRoi and final opportunity decisions. This skill does not add Trends novelty, birth windows, Rising/breakout classification, long-term monitoring, a second root library, or a Discovery database.

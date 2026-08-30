@@ -70,7 +70,7 @@ Before a Full Coverage ledger is evaluated, the Root/Natural Seeds handoff is fr
 
 ## Source receipts and the row ledger
 
-`source_receipts` is the complete set of first-round acquisition receipts the manifest is signed against. Each record carries `evidence_type`, the acquisition identity (`seed`, or `competitor_domain` for a competitor sweep), and `evidence_receipt_ref`. The binding is enforced in both directions: every Candidate's `evidence_receipt_ref` must appear in this set, and Coverage requires every passing first-round acquisition — each required Seed's Google and Semrush receipt, plus each configured competitor domain's receipt — to be frozen here too. Otherwise a whole source could pass on its own receipt while its rows escaped reconciliation. Branch Seed receipts are deliberately excluded: branches are explored after the freeze.
+`source_receipts` is the complete set of first-round acquisition receipts the manifest is signed against. Each record carries `evidence_type`, the acquisition identity (`seed`, or `competitor_domain` for a competitor sweep), and `evidence_receipt_ref`. The binding is enforced in both directions: every Candidate's `evidence_receipt_ref` must appear in this set, and Coverage requires every passing first-round acquisition — each required Seed's Google and Semrush receipt, plus each configured competitor domain's receipt — to be frozen here too. Otherwise a whole source could pass on its own receipt while its rows escaped reconciliation. Branch Seed receipts are not in this set, because a Branch Seed does not exist when the manifest is signed; they are reconciled in the Coverage ledger instead.
 
 `candidate_inventory.row_ledger` accounts for **every row those receipts actually returned**. It holds one record per receipt with an ordered `rows` list that must equal the receipt's observed rows exactly, in order. Each row declares one `disposition`:
 
@@ -86,7 +86,9 @@ The Candidate inventory is the denominator for the whole run. Because the row le
 
 The run ledger records:
 
-`batch_id | discovery_mode | upstream_input | required_seeds | observed_candidates | candidate_analysis | required_branch_seeds | competitor_sweep | other_mandatory_sources | max_branch_depth | max_branch_seeds`
+`batch_id | discovery_mode | upstream_input | required_seeds | observed_candidates | candidate_analysis | required_branch_seeds | branch_candidates | branch_row_ledger | competitor_sweep | other_mandatory_sources | max_branch_depth | max_branch_seeds`
+
+`observed_candidates` stays exactly equal to the frozen manifest inventory. Branch acquisitions happen after the freeze, so their output lives in `branch_candidates`, reconciled by `branch_row_ledger` under the same row-accounting rules as the manifest: every row a branch receipt returned is `kept`, `dedupe_of` an existing candidate, or `excluded` under a supported `rule_code`, and every Branch candidate must be the `kept` target of a real branch row. Each Branch candidate's `source_seed` must be a Branch Seed that completed in this run. A Branch may still only originate from a first-round Candidate carrying an authoritative `branch_required=true`.
 
 Each required Seed and Branch Seed has nested `autocomplete` and (for Full Discovery) `semrush` records with `status` and an evidence receipt on PASS. Non-PASS records retain a reason. `source_seed` binds an observed Candidate to the Seed that produced its receipt; production validation checks that receipt's original Seed. A Branch Seed must match one Candidate's exact normalized keyword, source, and evidence reference, and its `parent_seed` must equal that Candidate's `source_seed`. A Branch cannot be its own parent, point to a future/unvisited node, or bypass the authoritative `branch_required` decision.
 
@@ -96,8 +98,6 @@ Each `other_mandatory_sources` PASS record must declare a supported `evidence_ty
 
 The validator computes and exposes:
 
-`required_seed_count | autocomplete_pass_count | semrush_required_count | semrush_pass_count | required_branch_seed_count | branch_seed_pass_count | competitor_sweep_configured | competitor_sweep_status | coverage_status | blocked_reasons | formal_handoff_allowed`
+`required_seed_count | autocomplete_pass_count | semrush_required_count | semrush_pass_count | required_branch_seed_count | branch_seed_pass_count | branch_candidate_count | competitor_sweep_configured | competitor_sweep_status | coverage_status | blocked_reasons | formal_handoff_allowed`
 
-Full Coverage requires equality of every mandatory source total and pass count, a PASS `discovery_coverage` validation receipt, and `formal_handoff_allowed=true`. A formal `discovery_handoff` must carry `coverage_status=PASS`, the exact `coverage_receipt_ref`, and a `keywords` list whose items each declare `candidate_id | keyword | source | source_seed | evidence_receipt_ref`. Production reconciles that list against the verified Coverage record: it must cover the observed Candidate inventory exactly, so the handoff can neither drop a Candidate nor introduce a keyword Coverage never verified. Blocked/NOT_RUN/UNKNOWN items remain visible; they may not be silently removed to make counts equal.
-
-Branch Seeds prove that a demand branch was really explored. The keywords their acquisition observes are not part of this handoff; feeding them to selection requires a further Discovery round with its own frozen manifest.
+Full Coverage requires equality of every mandatory source total and pass count, a PASS `discovery_coverage` validation receipt, and `formal_handoff_allowed=true`. A formal `discovery_handoff` must carry `coverage_status=PASS`, the exact `coverage_receipt_ref`, and a `keywords` list whose items each declare `candidate_id | keyword | source | source_seed | evidence_receipt_ref`. Production reconciles that list against the verified Coverage record: it must cover the first-round Candidate inventory **and** the reconciled Branch candidates exactly, so the handoff can neither drop a Candidate nor introduce a keyword Coverage never verified. Blocked/NOT_RUN/UNKNOWN items remain visible; they may not be silently removed to make counts equal.

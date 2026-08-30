@@ -672,21 +672,21 @@ def test_discovery_handoff_contract_requires_coverage_receipt():
     assert any("coverage" in error for error in errors)
 
 
-def _write_google_receipt(tmp_path, suggestions=None):
+def _write_google_receipt(tmp_path, suggestions=None, seed="wedding calculator", name="google"):
     collector = ROOT / "runtime" / "collectors" / "google_live_collector.py"
-    screenshot = tmp_path / "google.png"
+    screenshot = tmp_path / f"{name}.png"
     screenshot.write_bytes(
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4"
         b"\x00\x00\x00\x0aIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     observed_at = "2026-08-30T00:00:00+00:00"
     suggestions = suggestions or ["wedding alcohol calculator"]
-    observation = tmp_path / "google.observation.json"
+    observation = tmp_path / f"{name}.observation.json"
     observation.write_text(
         json.dumps(
             {
-                "page_url": "https://www.google.com/search?q=wedding+calculator",
-                "seed": "wedding calculator",
+                "page_url": "https://www.google.com/search?q=" + seed.replace(" ", "+"),
+                "seed": seed,
                 "suggestions": suggestions,
                 "country": "US",
                 "language": "en",
@@ -695,12 +695,12 @@ def _write_google_receipt(tmp_path, suggestions=None):
         ),
         encoding="utf-8",
     )
-    normalized = tmp_path / "google.json"
-    receipt = tmp_path / "google.receipt.json"
+    normalized = tmp_path / f"{name}.json"
+    receipt = tmp_path / f"{name}.receipt.json"
     normalized.write_text(
         json.dumps(
             {
-                "seed": "wedding calculator",
+                "seed": seed,
                 "suggestions": suggestions,
                 "country": "US",
                 "language": "en",
@@ -733,10 +733,10 @@ def _write_google_receipt(tmp_path, suggestions=None):
     return normalized, receipt
 
 
-def _write_ideas_receipt(tmp_path, phrases=None):
+def _write_ideas_receipt(tmp_path, phrases=None, seed="wedding calculator", name="ideas"):
     semrush_path = ROOT / "runtime" / "collectors" / "semrush_relay_collector.py"
     semrush = load_module("discovery_coverage_ideas_fixture", semrush_path)
-    capture = tmp_path / "semrush.capture.json"
+    capture = tmp_path / f"{name}.capture.json"
     capture.write_text(json.dumps({"captured": True}), encoding="utf-8")
     descriptor = {
         "path": "/captured/current-path",
@@ -746,7 +746,7 @@ def _write_ideas_receipt(tmp_path, phrases=None):
         "capture_evidence_ref": str(capture),
         "mode": "ideas",
         "metric_database": "us",
-        "seed": "wedding calculator",
+        "seed": seed,
     }
     phrases = phrases or ["wedding cost calculator"]
     response = {
@@ -754,7 +754,7 @@ def _write_ideas_receipt(tmp_path, phrases=None):
         "result": [{"phrase": phrase, "volume": 900, "difficulty": 22} for phrase in phrases],
     }
     observed_at = "2026-08-30T00:00:01+00:00"
-    raw = tmp_path / "ideas.raw.json"
+    raw = tmp_path / f"{name}.raw.json"
     raw.write_text(
         json.dumps(
             {
@@ -772,8 +772,8 @@ def _write_ideas_receipt(tmp_path, phrases=None):
         ),
         encoding="utf-8",
     )
-    normalized = tmp_path / "ideas.json"
-    receipt = tmp_path / "ideas.receipt.json"
+    normalized = tmp_path / f"{name}.json"
+    receipt = tmp_path / f"{name}.receipt.json"
     normalized.write_text(
         json.dumps(
             dict(
@@ -1361,6 +1361,256 @@ def test_production_handoff_cannot_drop_or_invent_keywords(tmp_path):
     assert added.returncode == 2
     assert any("handoff_keywords_do_not_match_coverage" in error for error in errors)
     assert not report_path.with_suffix(".receipt.json").exists()
+
+
+def test_production_branch_keywords_reach_the_handoff(tmp_path):
+    """A promoted demand branch must deliver the keywords its acquisition observed."""
+
+    coverage = load_module("discovery_coverage_branch_output", COVERAGE)
+    _round1_google_input, round1_google = _write_google_receipt(
+        tmp_path, suggestions=["wedding alcohol calculator"], name="r1-google"
+    )
+    _round1_ideas_input, round1_ideas = _write_ideas_receipt(
+        tmp_path, phrases=["wedding cost calculator"], name="r1-ideas"
+    )
+    branch_seed = "wedding alcohol calculator"
+    _branch_google_input, branch_google = _write_google_receipt(
+        tmp_path,
+        suggestions=["wedding drink calculator", "wedding beer wine calculator"],
+        seed=branch_seed,
+        name="b1-google",
+    )
+    _branch_ideas_input, branch_ideas = _write_ideas_receipt(
+        tmp_path,
+        phrases=["alcohol calculator for 100 guests"],
+        seed=branch_seed,
+        name="b1-ideas",
+    )
+
+    round1 = [
+        {
+            "candidate_id": "candidate-alcohol",
+            "keyword": "wedding alcohol calculator",
+            "source": "google_autocomplete",
+            "source_seed": "wedding calculator",
+            "evidence_receipt_ref": str(round1_google),
+        },
+        {
+            "candidate_id": "candidate-cost",
+            "keyword": "wedding cost calculator",
+            "source": "semrush_ideas",
+            "source_seed": "wedding calculator",
+            "evidence_receipt_ref": str(round1_ideas),
+        },
+    ]
+    input_manifest = {
+        "schema": "seo-discovery-input/v1",
+        "batch_id": "batch-branch-output",
+        "root_handoff_receipt_ref": str(tmp_path / "root-handoff.receipt.json"),
+        "seed_plan": {"original_seed_count": 1, "seeds": ["wedding calculator"]},
+        "source_receipts": [
+            {
+                "evidence_type": "google_autocomplete",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(round1_google),
+            },
+            {
+                "evidence_type": "semrush_ideas",
+                "seed": "wedding calculator",
+                "evidence_receipt_ref": str(round1_ideas),
+            },
+        ],
+        "candidate_inventory": {
+            "original_candidate_count": 2,
+            "candidates": round1,
+            "row_ledger": [
+                {
+                    "evidence_receipt_ref": str(round1_google),
+                    "rows": [
+                        {
+                            "keyword": "wedding alcohol calculator",
+                            "disposition": "kept",
+                            "candidate_id": "candidate-alcohol",
+                        }
+                    ],
+                },
+                {
+                    "evidence_receipt_ref": str(round1_ideas),
+                    "rows": [
+                        {
+                            "keyword": "wedding cost calculator",
+                            "disposition": "kept",
+                            "candidate_id": "candidate-cost",
+                        }
+                    ],
+                },
+            ],
+        },
+        "candidate_analysis": [
+            {
+                "candidate_id": "candidate-alcohol",
+                "analysis_status": "COMPLETE",
+                "branch_required": True,
+                "analysis_reason": "beverage planning is a distinct demand branch",
+            },
+            {
+                "candidate_id": "candidate-cost",
+                "analysis_status": "COMPLETE",
+                "branch_required": False,
+                "analysis_reason": "reviewed; no branch expansion required",
+            },
+        ],
+    }
+    _manifest_path, manifest_receipt = _write_input_manifest_receipt(tmp_path, input_manifest)
+
+    branch_candidates = [
+        {
+            "candidate_id": "branch-drink",
+            "keyword": "wedding drink calculator",
+            "source": "google_autocomplete",
+            "source_seed": branch_seed,
+            "evidence_receipt_ref": str(branch_google),
+        },
+        {
+            "candidate_id": "branch-beer-wine",
+            "keyword": "wedding beer wine calculator",
+            "source": "google_autocomplete",
+            "source_seed": branch_seed,
+            "evidence_receipt_ref": str(branch_google),
+        },
+        {
+            "candidate_id": "branch-100-guests",
+            "keyword": "alcohol calculator for 100 guests",
+            "source": "semrush_ideas",
+            "source_seed": branch_seed,
+            "evidence_receipt_ref": str(branch_ideas),
+        },
+    ]
+    ledger = {
+        "batch_id": "batch-branch-output",
+        "discovery_mode": "full",
+        "required_seeds": [
+            {
+                "seed": "wedding calculator",
+                "autocomplete": {"status": "PASS", "evidence_receipt_ref": str(round1_google)},
+                "semrush": {"status": "PASS", "evidence_receipt_ref": str(round1_ideas)},
+            }
+        ],
+        "observed_candidates": round1,
+        "upstream_input": dict(input_manifest, validation_receipt_ref=str(manifest_receipt)),
+        "candidate_analysis": input_manifest["candidate_analysis"],
+        "required_branch_seeds": [
+            {
+                "branch_seed": branch_seed,
+                "parent_seed": "wedding calculator",
+                "originating_candidate_id": "candidate-alcohol",
+                "source": "google_autocomplete",
+                "evidence_ref": str(round1_google),
+                "branch_reason": "beverage planning is a distinct demand branch",
+                "analysis_status": "required",
+                "depth": 1,
+                "autocomplete": {"status": "PASS", "evidence_receipt_ref": str(branch_google)},
+                "semrush": {"status": "PASS", "evidence_receipt_ref": str(branch_ideas)},
+            }
+        ],
+        "branch_candidates": branch_candidates,
+        "branch_row_ledger": [
+            {
+                "evidence_receipt_ref": str(branch_google),
+                "rows": [
+                    {
+                        "keyword": "wedding drink calculator",
+                        "disposition": "kept",
+                        "candidate_id": "branch-drink",
+                    },
+                    {
+                        "keyword": "wedding beer wine calculator",
+                        "disposition": "kept",
+                        "candidate_id": "branch-beer-wine",
+                    },
+                ],
+            },
+            {
+                "evidence_receipt_ref": str(branch_ideas),
+                "rows": [
+                    {
+                        "keyword": "alcohol calculator for 100 guests",
+                        "disposition": "kept",
+                        "candidate_id": "branch-100-guests",
+                    }
+                ],
+            },
+        ],
+        "competitor_sweep": {"configured": False, "domains": [], "status": "not_configured"},
+        "other_mandatory_sources": [],
+        "max_branch_depth": 1,
+        "max_branch_seeds": 5,
+    }
+    assert coverage.validate_coverage(ledger, production=True) == []
+
+    ledger_path = tmp_path / "coverage-input.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    coverage_report = tmp_path / "coverage.report.json"
+    assert _run_production_stage("discovery_coverage", ledger_path, coverage_report).returncode == 0
+    coverage_receipt = coverage_report.with_suffix(".receipt.json")
+
+    handoff_keywords = [
+        {
+            "candidate_id": candidate["candidate_id"],
+            "keyword": candidate["keyword"],
+            "source": candidate["source"],
+            "source_seed": candidate["source_seed"],
+            "evidence_receipt_ref": candidate["evidence_receipt_ref"],
+        }
+        for candidate in round1 + branch_candidates
+    ]
+    handoff_input = tmp_path / "handoff-input.json"
+    handoff_input.write_text(
+        json.dumps(
+            {
+                "batch_id": "batch-branch-output",
+                "required_seed_count": 1,
+                "autocomplete_pass_count": 1,
+                "status": "PASS",
+                "coverage_status": "PASS",
+                "coverage_receipt_ref": str(coverage_receipt),
+                "keywords": handoff_keywords,
+            }
+        ),
+        encoding="utf-8",
+    )
+    handoff_report = tmp_path / "handoff.report.json"
+    result = _run_production_stage("discovery_handoff", handoff_input, handoff_report)
+
+    assert result.returncode == 0, result.stderr
+    # The three keywords the branch actually observed reach selection.
+    delivered = {item["keyword"] for item in handoff_keywords}
+    assert {
+        "wedding drink calculator",
+        "wedding beer wine calculator",
+        "alcohol calculator for 100 guests",
+    } <= delivered
+    assert handoff_report.with_suffix(".receipt.json").exists()
+
+
+def test_production_branch_candidate_must_be_backed_by_a_branch_row(tmp_path):
+    coverage = load_module("discovery_coverage_branch_output_guard", COVERAGE)
+    _google_input, google_receipt = _write_google_receipt(tmp_path, name="guard-google")
+    ledger = full_ledger()
+    ledger["branch_candidates"] = [
+        {
+            "candidate_id": "branch-invented",
+            "keyword": "wedding seating chart calculator",
+            "source": "google_autocomplete",
+            "source_seed": "wedding alcohol calculator",
+            "evidence_receipt_ref": str(google_receipt),
+        }
+    ]
+
+    errors = coverage.validate_coverage(ledger, production=True)
+
+    assert any("branch_row_ledger" in error or "branch_candidates" in error for error in errors)
+    assert coverage.summarize_coverage(ledger, production=True)["formal_handoff_allowed"] is False
 
 
 def test_production_coverage_receipt_binds_a_formal_handoff(tmp_path):
