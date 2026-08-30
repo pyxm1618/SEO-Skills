@@ -23,6 +23,7 @@ EVALUATOR_PATH = ROOT.parent / "skills" / "seo-keyword-selection" / "scripts" / 
 EMERGING_PIPELINE_PATH = ROOT / "emerging_pipeline.py"
 EMERGING_SCRIPT_PATHS = {
     "validate_observations.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "validate_observations.py",
+    "birth_history.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "birth_history.py",
     "aggregate_signals.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "aggregate_signals.py",
     "classify_emergence.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "classify_emergence.py",
     "route_candidates.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "route_candidates.py",
@@ -53,8 +54,10 @@ STAGE_EVIDENCE_TYPES = {
     "intitle_observation": "google_intitle",
     "serp_review": "google_serp",
     "finalist_trend": "google_trends",
+    "trends_related": "google_trends_related",
+    "trends_timeline": "google_trends",
 }
-CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff"})
+CANONICAL_STAGES = frozenset(set(STAGE_EVIDENCE_TYPES) | {"kgr_intitle", "discovery_handoff", "emerging_radar_run"})
 TRADITIONAL_SHARED_STAGES = ("discovery_autocomplete", "discovery_handoff")
 EXACT_TERMINAL_STATUSES = frozenset({"principle_eliminate_volume", "principle_eliminate_kd", "excluded_manual"})
 CONFIRMED_EMERGING_STATUSES = frozenset({"emerging", "breakout"})
@@ -493,7 +496,7 @@ def _infer_canonical_required_stages(manifest):
         valid, reason = _verify_route_attestation(manifest)
         if not valid:
             return None, reason
-        return [], ""
+        return ["emerging_radar_run"], ""
     return None, f"COMPLETE has unknown or missing route: {route or 'missing'}"
 
 

@@ -16,6 +16,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 SCRIPT_PATHS = {
     "validate_observations.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "validate_observations.py",
+    "birth_history.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "birth_history.py",
     "aggregate_signals.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "aggregate_signals.py",
     "classify_emergence.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "classify_emergence.py",
     "route_candidates.py": ROOT.parent / "skills" / "emerging-keyword-monitor" / "scripts" / "route_candidates.py",
@@ -37,6 +38,8 @@ def _load_module(path: Path, name: str):
 def _modules() -> dict[str, Any]:
     validate = _load_module(SCRIPT_PATHS["validate_observations.py"], "seo_emerging_validate_observations")
     sys.modules["validate_observations"] = validate
+    birth_history = _load_module(SCRIPT_PATHS["birth_history.py"], "seo_emerging_birth_history")
+    sys.modules["birth_history"] = birth_history
     aggregate = _load_module(SCRIPT_PATHS["aggregate_signals.py"], "seo_emerging_aggregate_signals")
     classify = _load_module(SCRIPT_PATHS["classify_emergence.py"], "seo_emerging_classify_emergence")
     route = _load_module(SCRIPT_PATHS["route_candidates.py"], "seo_emerging_route_candidates")

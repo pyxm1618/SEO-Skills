@@ -7,6 +7,19 @@
   "temporal": {
     "max_latest_observation_age_days_confirmed": 7
   },
+  "birth": {
+    "min_history_observations": 6,
+    "min_baseline_observations": 3,
+    "min_formation_observations": 3,
+    "min_follow_up_observations": 2,
+    "min_follow_up_persistence": 0.66,
+    "baseline_max_signal": 5,
+    "min_signal": 5,
+    "min_lift_ratio": 1.5,
+    "quiet_max_signal": 5,
+    "min_historical_positive_observations": 3,
+    "min_quiet_observations": 3
+  },
   "breakout": {
     "growth_rate_min": 1.0
   },

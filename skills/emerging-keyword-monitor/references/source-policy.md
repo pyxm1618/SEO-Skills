@@ -10,6 +10,8 @@ This source-policy change does **not** alter the emerging thresholds or state ma
 
 Whenever the monitor needs a **new/current** Semrush observation, the only allowed transport is the current authenticated same-origin session at `https://sem.3ue.com/` through the project relay collector.
 
+The live radar accepts repeatable `--semrush-request PATH` inputs for current Ideas descriptors captured from that relay. The runner indexes descriptors by their captured seed and invokes the existing Semrush collector CLI only for matching anchors; no descriptor is rewritten, and anchors without a descriptor remain supplemental-unknown rather than using another source.
+
 Do not fall back to an official Semrush API, API key/units, official connector, Ahrefs, another provider, or an AI estimate. Historical Semrush exports/evidence may still be evaluated for compatibility/freshness as existing evidence; they are not permission to create a different live acquisition path.
 
 ## No embedded authentication
@@ -26,7 +28,9 @@ Every observation should answer where it came from, when it was observed, which 
 
 ## Google Trends caution
 
-Google Trends values are relative indexes. Historical zero does not prove zero absolute searches, and the first non-zero point does not prove an absolute keyword birth date.
+Google Trends values are relative indexes and are normalized independently for each timeframe. `5y`, `12m`, `90d`, `30d`, and `7d` are separate comparable series: never compare their index values arithmetically or concatenate them. Preserve each timeframe's source URL, requested timeframe, actual bucket resolution, and evidence reference. Historical zero does not prove zero absolute searches, and the first non-zero point does not prove an absolute keyword birth date.
+
+Google collection must use a genuinely isolated logged-out browser context/profile that is separate from the user's authenticated Google context. If that isolation cannot be established, collection is blocked; cookies must not be copied, deleted, or replaced with a temporary Google account. Related/Rising `Breakout` is retained as `google_rising_label` only and is not the monitor's canonical breakout classification.
 
 ## Semrush caution
 

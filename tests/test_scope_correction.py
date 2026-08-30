@@ -119,6 +119,10 @@ def test_emerging_route_requires_complete_monitor_pipeline_attestation(tmp_path)
         "candidates": {"cand_1": {"keyword": "new demand term"}},
     }
     stages, reason = hook._infer_canonical_required_stages(manifest)
+    # Route handoff alone is not a complete monitor pipeline attestation, so no
+    # canonical stage list is inferred at all. The separate requirement that a
+    # fully attested emerging run must still carry emerging_radar_run is covered
+    # by test_emerging_completion_requires_a_validated_radar_run_stage.
     assert stages is None
     assert "receipt" in reason.lower() or "pipeline" in reason.lower()
 

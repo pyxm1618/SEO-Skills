@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BINDING = ROOT / "runtime" / "evidence_binding.py"
 HOOK = ROOT / "runtime" / "codex_stage_hook.py"
+PIPELINE = ROOT / "runtime" / "emerging_pipeline.py"
 
 
 def load_module(name, path):
@@ -17,6 +18,19 @@ def load_module(name, path):
 
 def load_hook(name="integrity_boundary_hook"):
     return load_module(name, HOOK)
+
+
+def test_pipeline_and_hook_bind_the_same_emerging_scripts():
+    # The pipeline writes the receipt's script hashes and the hook re-verifies
+    # them against its own list. If the two lists drift, a script that shapes
+    # the result (birth_history.py did) is executed but never hash-bound, so
+    # tampering with it would leave a valid-looking receipt.
+    pipeline = load_module("drift_guard_pipeline", PIPELINE)
+    hook = load_hook("drift_guard_hook")
+    assert set(pipeline.SCRIPT_PATHS) == set(hook.EMERGING_SCRIPT_PATHS)
+    for name, path in pipeline.SCRIPT_PATHS.items():
+        assert path.resolve() == hook.EMERGING_SCRIPT_PATHS[name].resolve(), name
+    assert pipeline.THRESHOLDS_PATH.resolve() == hook.EMERGING_THRESHOLDS_PATH.resolve()
 
 
 def test_runtime_has_no_os_broker_dependency():
@@ -79,6 +93,22 @@ def test_emerging_route_cannot_be_self_declared_without_monitor_handoff():
     })
     assert stages is None
     assert "handoff" in error.lower() or "route" in error.lower()
+
+
+def test_emerging_completion_requires_a_validated_radar_run_stage(monkeypatch):
+    hook = load_hook("emerging_run_stage_required_red")
+    monkeypatch.setattr(hook, "_verify_route_attestation", lambda *args, **kwargs: (True, ""))
+
+    stages, error = hook._infer_canonical_required_stages(
+        {
+            "run_id": "r-emerging",
+            "route": "emerging",
+            "status": "COMPLETE",
+            "candidates": {"cand_1": {"keyword": "new demand"}},
+        }
+    )
+
+    assert stages == ["emerging_radar_run"], error
 
 
 def test_traditional_candidate_cannot_hide_finalist_by_setting_false(monkeypatch):

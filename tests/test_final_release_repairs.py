@@ -507,11 +507,15 @@ def test_emerging_pipeline_output_hash_tampering_is_rejected(tmp_path):
     assert "hash" in reason.lower()
 
 
-@pytest.mark.parametrize("field", ["scripts", "thresholds"])
+@pytest.mark.parametrize("field", ["scripts", "scripts_birth_history", "thresholds"])
 def test_emerging_pipeline_receipt_rejects_changed_source_hash(tmp_path, field):
     _, output_dir, receipt = run_emerging_pipeline(tmp_path, emerging_observations())
     if field == "scripts":
         receipt["scripts"]["route_candidates.py"]["sha256"] = "0" * 64
+    elif field == "scripts_birth_history":
+        # birth_history.py drives the estimated birth window, so it must be bound
+        # by the pipeline receipt exactly like every other aggregation script.
+        receipt["scripts"]["birth_history.py"]["sha256"] = "0" * 64
     else:
         receipt["thresholds"]["sha256"] = "0" * 64
     receipt_path = output_dir / "receipt-tampered.json"
