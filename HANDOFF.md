@@ -1,6 +1,6 @@
 # 交接：SEO-Skills Claude 宿主适配 + 验收
 
-> 最后更新：2026-08-31，SERP 可选契约与阶段三结论重算。
+> 最后更新：2026-08-31，Traditional 完成重试与阶段三最终结论。
 > 每次交接请更新本文件的"当前状态"与"剩余问题"，过时的交接比没有交接更危险。
 
 ## 你现在在哪
@@ -42,8 +42,7 @@
 
 A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已被会话列出。
 
-**阶段三 · Live 采集** 已执行；按 2026-08-31 修订后的 SERP 可选契约重算，结论仍是
-**DO NOT MERGE**。7 条台账已收敛：
+**阶段三 · Live 采集** 已完成；按 2026-08-31 修订后的 SERP 可选契约重算，7 条全部 PASS：
 
 | Live 验收 | 状态 | 摘要 |
 | --- | --- | --- |
@@ -52,11 +51,11 @@ A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已
 | Google Trends | PASS | 54 个真实周时序点，raw payload + screenshot + receipt |
 | Semrush Ideas + Exact | PASS | `sem.3ue.com` 当前 UI 捕获；Ideas 30 行、Exact 完整 12 月趋势 |
 | KGR | PASS | verified Exact + intitle；evaluator 算得 1.540625 |
-| Traditional workflow | FAIL | 早退与 continuing Exact 均执行；仍属必需的 continuing intitle 被 `/sorry/` 阻塞且不满足 AEB 六条件 |
+| Traditional workflow | PASS | 早退分支 PASS；continuing Exact + intitle=113 + KGR=0.15694444 均有候选绑定 production receipt；SERP absent/可选 |
 | Emerging Monitor | PASS | 5 个候选、15 个 timeline、2045 点；全部诚实 `watch -> new_root_watchlist` |
 
-计数：`PASS=6`，`ACCEPTED_ENVIRONMENT_BLOCKER=0`，`FAIL=1`，`UNREVIEWED=0`；
-`7 = 6 + 0 + 1 + 0`。逐条证据在 `acceptance-evidence/terminal/stage3-live-*.md`，
+计数：`PASS=7`，`ACCEPTED_ENVIRONMENT_BLOCKER=0`，`FAIL=0`，`UNREVIEWED=0`；
+`7 = 7 + 0 + 0 + 0`。逐条证据在 `acceptance-evidence/terminal/stage3-live-*.md`，
 契约修订证据见 `stage3-serp-optional-contract.md`。
 
 已完成的基础设施：
@@ -69,12 +68,11 @@ A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已
 
 ## 剩余问题
 
-**1. 唯一阶段三 release blocker：Traditional continuing candidate 的 intitle/KGR**
+**1. 阶段三没有剩余 release blocker**
 
-`wedding calculator` 已确定性早退（Volume 320）；`wedding cost calculator` 已通过 Exact
-（Volume 720、KD 18），但下一项必需 intitle 被 `/sorry/` 阻塞，尚无 continuing KGR。换到可用
-Google Search 环境后从 intitle 继续；不要让早退 candidate 的独立 KGR/Trends 证据替代它。
-SERP 已是可选项，不再要求补跑。
+`wedding calculator` 已确定性早退（Volume 320）；`wedding cost calculator` 已完成候选绑定 Exact
+（Volume 720、KD 18）、真实 intitle=113 与 KGR=0.15694444。首次 `/sorry/` 失败仍留在证据中，
+完成重试没有复用或改写失败数据。SERP 已是可选项，不要求补跑。
 
 **2. 可选 SERP blocker 留证仍可改进，但不再阻断 release**
 
@@ -83,11 +81,10 @@ SERP 已是可选项，不再要求补跑。
 它没有进入决策、没有 fallback、没有伪造，按新契约属于非阻断改进；以后若主动使用 SERP，
 任何声称 PASS 的结果仍必须通过真实 top-10 receipt。
 
-**3. Release decision 仍是 DO NOT MERGE**
+**3. Release decision：READY TO MERGE**
 
-自动化与 Host acceptance 不能覆盖必需的 Traditional intitle 缺口。即使 Emerging 已真实 PASS、
-Semrush relay-only 与 provenance 完整，只要 Traditional 仍 FAIL 且该必需来源阻塞未满足 AEB 六条件，
-`TRUST_BOUNDARY.md` 的 Release decision 就不允许推荐合并。SERP unavailable 不再参与这个结论。
+自动化 379 tests、Claude Host acceptance、7 条 Live acceptance、Semrush relay-only 与 provenance
+均已满足，未发现开放 P0/P1。按 `TRUST_BOUNDARY.md` 可以推荐合并；本任务只提交并推送，不代替用户执行合并。
 
 **4. 已完成但不要误读**
 

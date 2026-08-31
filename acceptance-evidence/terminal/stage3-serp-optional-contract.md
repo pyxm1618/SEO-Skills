@@ -4,9 +4,9 @@
 工作树：`/Users/milushangdi/Downloads/SEO-Skills-claude`
 分支：`claude/claude-code-host`
 
-结论：**PASS（契约与自动化行为）**。本次不改写任何 Live 原始事实：intitle 的真实 PASS 保留，
-SERP `/sorry/` 仍是 unavailable 且不是 PASS/AEB，Traditional continuing intitle 仍是 FAIL。
-变化只在于 SERP 不再是验收、Keyword Selection 或 Page Keyword Mapping 的硬门槛。
+结论：**PASS（契约与自动化行为）**。契约修订没有改写任何 Live 原始事实：SERP `/sorry/`
+仍是 unavailable 且不是 PASS/AEB。Traditional continuing intitle 在修订当时仍是 FAIL，随后于
+2026-08-31 用新的真实 Google intitle 与 KGR receipt 完成重试并转为 PASS。
 
 ## 新契约
 
@@ -69,6 +69,6 @@ python3 -m pytest -q
 
 ## 阶段三台账重算
 
-`PASS=6`，`ACCEPTED_ENVIRONMENT_BLOCKER=0`，`FAIL=1`，`UNREVIEWED=0`；
-`7 = 6 + 0 + 1 + 0`。唯一 FAIL 是 Traditional continuing candidate 的必需 intitle/KGR 未完成，
-因此当前 release decision 仍为 **DO NOT MERGE**，但依据已不再包含可选 SERP unavailable。
+`PASS=7`，`ACCEPTED_ENVIRONMENT_BLOCKER=0`，`FAIL=0`，`UNREVIEWED=0`；
+`7 = 7 + 0 + 0 + 0`。Traditional continuing candidate 已补齐必需 intitle/KGR；可选 SERP
+unavailable 没有进入决策。阶段三 Live acceptance 已全部满足。
