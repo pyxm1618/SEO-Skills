@@ -1,6 +1,6 @@
 # 交接：SEO-Skills Claude 宿主适配 + 验收
 
-> 最后更新：2026-08-30，提交 `d051e41`。
+> 最后更新：2026-08-31，Traditional 完成重试与阶段三最终结论。
 > 每次交接请更新本文件的"当前状态"与"剩余问题"，过时的交接比没有交接更危险。
 
 ## 你现在在哪
@@ -26,7 +26,8 @@
 
 ## 当前状态
 
-基线 **363 passed**（`python3 -m pytest -q`，约 6s；系统 python3 即可跑测试）。
+最终基线 **379 passed**（`python3 -m pytest -q`，约 7s；系统 python3 即可跑测试）。
+阶段三 Live 提交基线为 365；SERP 可选契约新增 14 个行为回归，最终提交必须以 379 为准。
 
 **阶段一 · 前置检查** ✅
 **阶段二 · Claude Code 宿主门禁生效** ✅ 证据在 `acceptance-evidence/terminal/stage2-claude-host-gates.md`
@@ -41,7 +42,21 @@
 
 A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已被会话列出。
 
-**阶段三 · Live 采集** ⏳ 见下方"剩余问题"。
+**阶段三 · Live 采集** 已完成；按 2026-08-31 修订后的 SERP 可选契约重算，7 条全部 PASS：
+
+| Live 验收 | 状态 | 摘要 |
+| --- | --- | --- |
+| Google Autocomplete | PASS | 真实 CDP，10 条可见建议，production receipt |
+| Google intitle（SERP 可选） | PASS | intitle=493；可选 SERP 在 `/sorry/` fail closed，未冒充 PASS/AEB，也不进入验收分母 |
+| Google Trends | PASS | 54 个真实周时序点，raw payload + screenshot + receipt |
+| Semrush Ideas + Exact | PASS | `sem.3ue.com` 当前 UI 捕获；Ideas 30 行、Exact 完整 12 月趋势 |
+| KGR | PASS | verified Exact + intitle；evaluator 算得 1.540625 |
+| Traditional workflow | PASS | 早退分支 PASS；continuing Exact + intitle=113 + KGR=0.15694444 均有候选绑定 production receipt；SERP absent/可选 |
+| Emerging Monitor | PASS | 5 个候选、15 个 timeline、2045 点；全部诚实 `watch -> new_root_watchlist` |
+
+计数：`PASS=7`，`ACCEPTED_ENVIRONMENT_BLOCKER=0`，`FAIL=0`，`UNREVIEWED=0`；
+`7 = 7 + 0 + 0 + 0`。逐条证据在 `acceptance-evidence/terminal/stage3-live-*.md`，
+契约修订证据见 `stage3-serp-optional-contract.md`。
 
 已完成的基础设施：
 - Playwright + gspread 装在专用 venv **`~/.venvs/seo-skills`**（系统 python3 是 Homebrew 3.14，
@@ -53,31 +68,31 @@ A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已
 
 ## 剩余问题
 
-**1. 阶段三 Live 验收 7 条，目前 0 条 PASS（唯一阻塞发布的项）**
+**1. 阶段三没有剩余 release blocker**
 
-`TRUST_BOUNDARY.md` 的 8 条里第 6 条（宿主门禁自动触发）已由阶段二完成，实际剩 7 条：
-Autocomplete / intitle+SERP / Trends / Semrush Ideas+Exact / KGR / 一条 Traditional 工作流 /
-一次 Emerging Monitor 真实时序跑通。
+`wedding calculator` 已确定性早退（Volume 320）；`wedding cost calculator` 已完成候选绑定 Exact
+（Volume 720、KD 18）、真实 intitle=113 与 KGR=0.15694444。首次 `/sorry/` 失败仍留在证据中，
+完成重试没有复用或改写失败数据。SERP 已是可选项，不要求补跑。
 
-**2. 直接卡点：Google 限流**
+**2. 可选 SERP blocker 留证仍可改进，但不再阻断 release**
 
-唯一尝试过的 Emerging Radar 最小规模跑被 Google 429 挡住，记为 `ACCEPTED_ENVIRONMENT_BLOCKER`
-（**不是 PASS**，真实关键词数据未取得），证据在
-`acceptance-evidence/terminal/stage3-emerging-radar-live-attempt.md`。
-`.seo-run/emerging-radar-live/emerging-keywords.json` 目前 `records: 0`。
-下一步是换网络（如手机热点）重跑，命令见该文档。
+真实 SERP 第二页进入 `www.google.com/sorry/index`。collector 正确 fail closed，但没有按 `/sorry/`
+路径或中文正文持久化结构化 blocker JSON + screenshot，所以这次可选尝试本身仍不是 PASS/AEB。
+它没有进入决策、没有 fallback、没有伪造，按新契约属于非阻断改进；以后若主动使用 SERP，
+任何声称 PASS 的结果仍必须通过真实 top-10 receipt。
 
-**3. Semrush 与 Google 的浏览器 profile 互斥（尚无方案）**
+**3. Release decision：READY TO MERGE**
 
-Google 采集要求上下文**零认证 cookie**，否则 `connect()` 必须失败——为此用了全新隔离 profile
-`/tmp/seo-google-clean-profile`（端口 9333，已验证 0 cookie）。
-但 Semrush relay 需要 `sem.3ue.com` 的**已登录**会话。两者不能共用同一 profile，
-第 4 条 Live 验收需要单独规划一个已登录 profile + 独立端口。
+自动化 379 tests、Claude Host acceptance、7 条 Live acceptance、Semrush relay-only 与 provenance
+均已满足，未发现开放 P0/P1。按 `TRUST_BOUNDARY.md` 可以推荐合并；本任务只提交并推送，不代替用户执行合并。
 
-**4. 不要用合成数据补 Live 缺口**
+**4. 已完成但不要误读**
 
-`emerging-keywords.json` 是空的，往里塞假记录再导入 Sheet 就能"验证"导出——
-但那正是本仓库存在的意义所禁止的。Sheet 导出层已按上文验证过，缺的是真实数据，不是导出逻辑。
+双浏览器方案已经实证：Google 9333 的 `google_auth_cookies=0`，Semrush 9334 的登录 relay 当前可用。
+Emerging 最终数据库有 5 条真实记录并已导入 Sheet，读回 5/5 一致；34 个缺失单元保持 `unknown`。
+Keyword Selection 和 Page Keyword Mapping 两个 Skill 都已将 SERP 改为可选：缺失保持 `unknown`/
+`observe_serp`，不会阻断批次；observed mismatch、伪造 PASS、无证据 KD 晋级和无 overlap 的独立 URL
+仍会 fail closed。旧的 429 尝试文档仍是历史 AEB 记录，不代表当前 7 条验收状态。
 
 ## 三个环境坑（都真实发生过）
 

@@ -48,8 +48,8 @@ PROTECTED_COMMAND_RULES = (
     (re.compile(r"\bevaluate_candidates\.py\b.*--stage(?:=|\s+)exact\b"), "stage6_exact"),
     (re.compile(r"\bgoogle_live_collector\.py\b.*\bserp\b"), "kgr_intitle"),
     (re.compile(r"\bevaluate_candidates\.py\b.*--stage(?:=|\s+)final\b"), "kgr_intitle"),
-    (re.compile(r"\bgoogle_live_collector\.py\b.*\btrends\b"), "serp_review"),
-    (re.compile(r"\bstage_validator\.py\b.*--stage(?:=|\s+)finalist_trend\b"), "serp_review"),
+    (re.compile(r"\bgoogle_live_collector\.py\b.*\btrends\b"), "kgr_intitle"),
+    (re.compile(r"\bstage_validator\.py\b.*--stage(?:=|\s+)finalist_trend\b"), "kgr_intitle"),
 )
 
 STAGE_EVIDENCE_TYPES = {
@@ -584,6 +584,8 @@ def _verify_finalist_disposition(manifest, candidate_id, candidate):
 
 def _verify_terminal_blocked_candidate(manifest, candidate_id, candidate):
     stage = str(candidate.get("blocked_stage") or "").strip()
+    if stage == "serp_review":
+        return False, "optional stage serp_review cannot terminally block a candidate"
     if stage not in CANONICAL_STAGES:
         return False, "terminal BLOCKED candidate lacks canonical blocked_stage"
     record = _stage_record(manifest, stage, candidate_id)
@@ -601,12 +603,36 @@ def _verify_terminal_blocked_candidate(manifest, candidate_id, candidate):
     return True, ""
 
 
+def _verify_optional_serp(manifest, candidate_id, candidate):
+    record = _stage_record(manifest, "serp_review", candidate_id)
+    if record is None:
+        return True, ""
+    if not isinstance(record, dict):
+        return False, "optional stage serp_review record is invalid"
+
+    status = str(record.get("status") or "").strip().upper()
+    if status == "PASS":
+        valid, reason = _verify_candidate_receipt(
+            manifest, candidate_id, candidate, record, "serp_review"
+        )
+        if not valid:
+            return False, f"optional stage serp_review is not verified: {reason}"
+        return True, ""
+    if status == "BLOCKED":
+        if not str(record.get("blocked_reason") or "").strip():
+            return False, "optional stage serp_review BLOCKED lacks blocked_reason"
+        return True, ""
+    return False, "optional stage serp_review must be PASS, BLOCKED, or absent"
+
+
 def _verify_blocked_run(manifest):
     run_id = str(manifest.get("run_id") or "").strip()
     if not run_id:
         return False, "BLOCKED run requires run_id"
     stage = str(manifest.get("blocked_stage") or "").strip()
     reason = str(manifest.get("blocked_reason") or "").strip()
+    if stage == "serp_review":
+        return False, "optional stage serp_review cannot terminally block a run"
     if stage not in CANONICAL_STAGES:
         return False, "BLOCKED run requires canonical blocked_stage"
     if not reason:
@@ -635,10 +661,15 @@ def _verify_candidate_completion(manifest, candidate_id, candidate):
     exact_status, reason = _verified_exact_disposition(manifest, candidate_id)
     if exact_status is None:
         return False, f"candidate={candidate_id} stage6_exact is not verified: {reason}"
+
+    serp_valid, serp_reason = _verify_optional_serp(manifest, candidate_id, candidate)
+    if not serp_valid:
+        return False, f"candidate={candidate_id} optional SERP record is invalid: {serp_reason}"
+
     if exact_status in EXACT_TERMINAL_STATUSES:
         return True, ""
 
-    for stage in ("intitle_observation", "kgr_intitle", "serp_review"):
+    for stage in ("intitle_observation", "kgr_intitle"):
         record = _stage_record(manifest, stage, candidate_id)
         if not isinstance(record, dict) or record.get("status") != "PASS":
             return False, f"system required stage {stage} for candidate={candidate_id} is missing or not PASS"

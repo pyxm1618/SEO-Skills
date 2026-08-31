@@ -1,11 +1,11 @@
 ---
 name: seo-keyword-selection
-description: Use when concrete keyword candidates must be screened from the former Step 5 onward with real metrics, KGR, SERP evidence, trend validation, opportunity clustering, and human decision support.
+description: Use when concrete keyword candidates need evidence-based screening, qualification, opportunity clustering, or human decision support.
 ---
 
 # SEO Keyword Selection
 
-Run the existing SEO opportunity-selection method from concrete keyword candidates onward. Resume from the earliest unfinished selection contract and do not redo compatible fresh evidence.
+Run the SEO opportunity-selection method from concrete candidates onward. Resume from the earliest unfinished contract and do not redo compatible fresh evidence.
 
 ## Boundaries
 
@@ -47,7 +47,7 @@ The production validator derives `candidate_keyword` from exactly one
 complete row and writes it to the report and receipt. Record that receipt's
 `validation_receipt_ref` under the same candidate's `stage6_exact` record;
 repeat the identity-bound pattern for `intitle_observation`, `kgr_intitle`,
-`serp_review`, and conditional `finalist_trend`. Use the same literal
+optional `serp_review`, and conditional `finalist_trend`. Use the same literal
 `SEO_CANDIDATE_ID=<id>` prefix for protected collector/evaluator commands.
 Missing markers, duplicate or missing complete rows, receipt mounting under a
 different candidate, and keyword mismatches fail closed. Shared discovery
@@ -61,7 +61,7 @@ Production decisions are separately gated:
 
 - Stage 6 Exact must pass the machine-readable `stage6_exact` contract before Stage 7+ production evaluation for that candidate.
 - KGR requires project-collected real Google `intitle:"keyword"` evidence; KGR itself remains calculated by the evaluator.
-- Real SERP review must pass `serp_review` before SERP-dependent final evaluation. KD 40–50 upgrade still requires the existing KGR + at least two structured weak-position rule.
+- SERP review is optional. Missing or unavailable SERP does not block the candidate or batch; KD 40–50 remains `observe_serp`. Upgrade requires a candidate-bound receipt, matching Top-10 rank/URL, KGR pass, and at least two weak positions.
 - Serious finalists require real Google Trends cross-check. Keyword Planner remains optional.
 
 New/current Semrush acquisition is only through the authenticated same-origin `sem.3ue.com` collector. No official API or alternative-provider fallback is permitted.
@@ -72,4 +72,4 @@ Keep the existing `observed`, `calculated`, `analysis`, `unknown` meanings. Miss
 
 ## Completion
 
-Blocked candidates remain reported with their reason while evidence-complete candidates may continue. A finished selection batch exposes complete/blocked counts and preserves the human final decision; `do_candidate` is not an automatic final choice.
+Blocked required stages retain their reason; complete candidates may continue. Optional SERP may be omitted or recorded as `serp_review.status=BLOCKED` with a real reason without terminally blocking the candidate. A finished batch exposes complete/blocked counts and preserves the human decision; `do_candidate` is not an automatic final choice.

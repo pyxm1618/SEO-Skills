@@ -26,7 +26,7 @@ Stage 6 Exact requires current US Volume, KD, CPC, intent, competition level, an
 Use `runtime/collectors/google_live_collector.py` for formal Google evidence:
 
 - `intitle` mode for real visible `intitle:"keyword"` counts;
-- `serp` mode for current real top-10 rank/url evidence;
+- optional `serp` mode for current real top-10 rank/url evidence;
 - `trends` mode for finalist Google Trends cross-check.
 
 If a collector fails, keep the evidence missing and mark the affected execution scope blocked. Do not substitute Bing, generic result counts, APIs, WebSearch output, or AI estimates.

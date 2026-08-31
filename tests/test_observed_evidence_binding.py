@@ -521,3 +521,87 @@ def test_tampered_google_serp_receipt_fails_production_validation(tmp_path):
     assert proc.returncode == 2
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert "evidence" in report["blocked"][0]["errors"][0].lower()
+
+
+def _run_final_evaluator(tmp_path, row, name, env=None):
+    input_path = tmp_path / f"{name}.json"
+    input_path.write_text(json.dumps([row]), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(EVALUATOR), "--input", str(input_path), "--stage", "final", "--format", "json"],
+        text=True,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+    return json.loads(proc.stdout)["rows"][0]
+
+
+def test_serp_upgrade_requires_candidate_bound_receipt_and_matching_rank_urls(tmp_path):
+    weak_evidence = [
+        {"rank": 4, "url": "https://result4.example/", "weakness_type": "low_authority", "observed_fact": "Small site"},
+        {"rank": 8, "url": "https://result8.example/", "weakness_type": "intent_mismatch", "observed_fact": "No calculator"},
+    ]
+    row = {
+        "keyword": "wedding calculator",
+        "volume": 10000,
+        "difficulty": 45,
+        "cpc": 1,
+        "intitle_results": 1000,
+        "serp_weak_evidence": weak_evidence,
+    }
+
+    no_receipt = _run_final_evaluator(tmp_path, row, "no-receipt")
+    assert no_receipt["mechanical_status"] == "observe_serp"
+    assert no_receipt["serp_weak_points"] is None
+
+    blocked_manifest_path = tmp_path / "blocked-active.json"
+    blocked_manifest_path.write_text(json.dumps({
+        "run_id": "blocked-serp-run",
+        "route": "traditional",
+        "status": "IN_PROGRESS",
+        "candidates": {
+            "cand-1": {
+                "keyword": "wedding calculator",
+                "serp_review": {"status": "BLOCKED", "blocked_reason": "Google /sorry/"},
+            }
+        },
+    }), encoding="utf-8")
+    blocked_env = dict(os.environ, SEO_RUN_MANIFEST=str(blocked_manifest_path), SEO_CANDIDATE_ID="cand-1")
+    blocked = _run_final_evaluator(tmp_path, row, "blocked-receipt", blocked_env)
+    assert blocked["mechanical_status"] == "observe_serp"
+    assert blocked["serp_weak_points"] is None
+
+    norm_path, _ = _write_serp_receipt_fixture(tmp_path)
+    validation_proc, report_path = _run_production_validation(
+        tmp_path, "serp_review", norm_path, candidate_id="cand-1"
+    )
+    assert validation_proc.returncode == 0, validation_proc.stderr
+    validation_report = json.loads(report_path.read_text(encoding="utf-8"))
+    manifest_path = tmp_path / "valid-active.json"
+    manifest_path.write_text(json.dumps({
+        "run_id": "valid-serp-run",
+        "route": "traditional",
+        "status": "IN_PROGRESS",
+        "candidates": {
+            "cand-1": {
+                "keyword": "wedding calculator",
+                "serp_review": {
+                    "status": "PASS",
+                    "validation_receipt_ref": validation_report["validation_receipt_ref"],
+                },
+            }
+        },
+    }), encoding="utf-8")
+    valid_env = dict(os.environ, SEO_RUN_MANIFEST=str(manifest_path), SEO_CANDIDATE_ID="cand-1")
+
+    verified = _run_final_evaluator(tmp_path, row, "verified-receipt", valid_env)
+    assert verified["serp_weak_points"] == 2
+    assert verified["mechanical_status"] == "do_candidate"
+
+    mismatched_row = dict(row, serp_weak_evidence=[
+        dict(weak_evidence[0], url="https://invented.example/"),
+        weak_evidence[1],
+    ])
+    mismatched = _run_final_evaluator(tmp_path, mismatched_row, "mismatched-rank-url", valid_env)
+    assert mismatched["serp_weak_points"] == 1
+    assert mismatched["mechanical_status"] == "observe_serp"

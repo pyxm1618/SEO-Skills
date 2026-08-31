@@ -4,6 +4,7 @@ import csv
 import importlib.util
 import json
 import math
+import os
 import re
 from collections import Counter
 from pathlib import Path
@@ -12,10 +13,18 @@ NULL_STRINGS = {'', 'unknown', 'null', 'none', 'n/a', 'na', '-'}
 RULES_PATH = Path(__file__).resolve().parents[1] / 'references' / 'thresholds.json'
 RULES = json.loads(RULES_PATH.read_text(encoding='utf-8'))
 BINDING_PATH = Path(__file__).resolve().parents[3] / 'runtime' / 'evidence_binding.py'
+HOOK_PATH = Path(__file__).resolve().parents[3] / 'runtime' / 'stage_hook.py'
 
 
 def _binding():
     spec = importlib.util.spec_from_file_location('seo_evidence_binding_for_evaluator', BINDING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _stage_hook():
+    spec = importlib.util.spec_from_file_location('seo_stage_hook_for_evaluator', HOOK_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -178,6 +187,53 @@ def parse_serp_evidence(value):
     return valid, valid, errors
 
 
+def _norm_keyword(value):
+    return ' '.join(str(value or '').split()).casefold()
+
+
+def _verified_serp_results(row):
+    if is_missing(row.get('serp_weak_evidence')):
+        return None
+    manifest_ref = str(os.environ.get('SEO_RUN_MANIFEST') or '').strip()
+    candidate_id = str(os.environ.get('SEO_CANDIDATE_ID') or '').strip()
+    if not manifest_ref or not candidate_id:
+        return None
+    try:
+        manifest = json.loads(Path(manifest_ref).read_text(encoding='utf-8'))
+        candidates = manifest.get('candidates')
+        candidate = candidates.get(candidate_id) if isinstance(candidates, dict) else None
+        if not isinstance(candidate, dict):
+            return None
+        if _norm_keyword(candidate.get('keyword')) != _norm_keyword(row.get('keyword')):
+            return None
+        record = candidate.get('serp_review')
+        hook = _stage_hook()
+        valid, _ = hook._verify_candidate_receipt(
+            manifest, candidate_id, candidate, record, 'serp_review'
+        )
+        if not valid:
+            return None
+        report, _ = hook._load_validation_report(record, 'serp_review', candidate_id)
+        complete = report.get('complete') if isinstance(report, dict) else None
+        if not isinstance(complete, list) or len(complete) != 1:
+            return None
+        results = complete[0].get('results') if isinstance(complete[0], dict) else None
+        if not isinstance(results, list):
+            return None
+        verified = {}
+        for item in results:
+            if not isinstance(item, dict):
+                return None
+            rank, error = parse_number(item.get('rank'), 'serp_result.rank', min_value=1, max_value=10, integer=True)
+            url = str(item.get('url') or '').strip()
+            if error or not url:
+                return None
+            verified[int(rank)] = url
+        return verified
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
 def provenance_fields(row, batch_meta):
     metric_source = str(row.get('metric_source') or batch_meta.get('metric_source') or '').strip()
     metric_database = str(row.get('metric_database') or batch_meta.get('metric_database') or batch_meta.get('database') or '').strip()
@@ -224,7 +280,7 @@ def final_status(row, volume, kd, kgr, weak_points, validation_errors):
     if kd < RULES['exact']['do_kd_max_exclusive']:
         return 'do_candidate'
     if weak_points is None:
-        return 'pending_serp'
+        return 'observe_serp'
     if weak_points >= RULES['serp_upgrade_weak_points_min']:
         return 'do_candidate'
     return 'observe_serp'
@@ -250,9 +306,19 @@ def normalize(row, stage, batch_meta=None):
     legacy_weak, err = parse_number(row.get('serp_weak_points'), 'serp_weak_points', min_value=0, max_value=10, integer=True)
     if err: errors.append(err)
 
+    verified_serp_results = _verified_serp_results(row) if stage == 'final' else None
     evidence_present = not is_missing(row.get('serp_weak_evidence'))
     valid_evidence, evidence_out, evidence_errors = parse_serp_evidence(row.get('serp_weak_evidence'))
-    weak_points = len(valid_evidence) if evidence_present and valid_evidence is not None else None
+    verified_evidence = []
+    if evidence_present and verified_serp_results is None:
+        evidence_errors.append('serp_weak_evidence:unverified_serp_review')
+    elif evidence_present and valid_evidence is not None:
+        for idx, item in enumerate(valid_evidence):
+            if verified_serp_results.get(item['rank']) == item['url']:
+                verified_evidence.append(item)
+            else:
+                evidence_errors.append(f'serp_weak_evidence[{idx}]:rank_url_not_in_verified_serp')
+    weak_points = len(verified_evidence) if evidence_present and verified_serp_results is not None else None
     if legacy_weak is not None:
         out['reported_serp_weak_points'] = int(legacy_weak)
 
@@ -272,6 +338,7 @@ def normalize(row, stage, batch_meta=None):
     out['intitle_results'] = compact_number(intitle)
     out['serp_weak_evidence'] = evidence_out if evidence_present else None
     out['serp_weak_points'] = weak_points
+    out['serp_evidence_status'] = 'verified' if evidence_present and verified_serp_results is not None else ('unverified' if evidence_present else 'absent')
     out['serp_evidence_errors'] = ' | '.join(evidence_errors)
     out['validation_errors'] = ' | '.join(errors)
     out['row_valid'] = not errors
@@ -369,7 +436,10 @@ def main():
     args = ap.parse_args()
 
     raw_rows, batch_meta = load_input(args.input)
-    rows = annotate_duplicates([normalize(r, args.stage, batch_meta) for r in raw_rows])
+    rows = annotate_duplicates([
+        normalize(row, args.stage, batch_meta)
+        for row in raw_rows
+    ])
     if args.format == 'csv':
         print(write_csv(rows), end='')
     else:

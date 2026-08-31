@@ -1,4 +1,5 @@
 import csv
+import importlib.util
 import json
 import subprocess
 import sys
@@ -23,6 +24,13 @@ def run_eval(tmp_path, rows, stage='final'):
 
 def by_keyword(data):
     return {r['keyword']: r for r in data['rows']}
+
+
+def load_evaluator(name='selection_evaluator_unit'):
+    spec = importlib.util.spec_from_file_location(name, SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_skill_structure_and_no_root_library_duplication():
@@ -103,7 +111,7 @@ def test_kgr_not_blue_ocean_does_not_become_do(tmp_path):
     assert r['mechanical_status'] == 'observe_kgr'
 
 
-def test_kd_40_50_requires_two_serp_weak_points_to_upgrade(tmp_path):
+def test_unverified_serp_rows_never_upgrade_kd_40_50(tmp_path):
     one_evidence = json.dumps([
         {'rank':4,'url':'https://example.com/a','weakness_type':'low_dr_site','observed_fact':'DR 18'},
     ])
@@ -117,7 +125,48 @@ def test_kd_40_50_requires_two_serp_weak_points_to_upgrade(tmp_path):
     ]
     d = by_keyword(run_eval(tmp_path, rows, 'final'))
     assert d['one']['mechanical_status'] == 'observe_serp'
-    assert d['two']['mechanical_status'] == 'do_candidate'
+    assert d['two']['mechanical_status'] == 'observe_serp'
+    assert d['two']['serp_weak_points'] is None
+
+
+def test_verified_serp_rank_urls_require_two_weak_points_to_upgrade():
+    evaluator = load_evaluator('selection_verified_serp_unit')
+    one_evidence = [
+        {'rank':4,'url':'https://example.com/a','weakness_type':'low_dr_site','observed_fact':'DR 18'},
+    ]
+    two_evidence = one_evidence + [
+        {'rank':8,'url':'https://example.com/b','weakness_type':'intent_mismatch','observed_fact':'No requested calculator'},
+    ]
+    verified_results = {
+        4: 'https://example.com/a',
+        8: 'https://example.com/b',
+    }
+    evaluator._verified_serp_results = lambda _row: verified_results
+    base = {'volume':10000,'difficulty':45,'cpc':1,'intitle_results':1000}
+
+    one = evaluator.normalize(
+        dict(base, keyword='one', serp_weak_evidence=one_evidence),
+        'final',
+    )
+    two = evaluator.normalize(
+        dict(base, keyword='two', serp_weak_evidence=two_evidence),
+        'final',
+    )
+
+    assert one['mechanical_status'] == 'observe_serp'
+    assert two['serp_weak_points'] == 2
+    assert two['mechanical_status'] == 'do_candidate'
+
+
+def test_kd_40_50_without_optional_serp_stays_observe_not_pending(tmp_path):
+    rows = [
+        {'keyword':'no-serp','volume':10000,'difficulty':45,'cpc':1,'intitle_results':1000},
+    ]
+
+    result = by_keyword(run_eval(tmp_path, rows, 'final'))['no-serp']
+
+    assert result['serp_weak_points'] is None
+    assert result['mechanical_status'] == 'observe_serp'
 
 
 def test_low_cpc_is_signal_not_hard_elimination(tmp_path):
@@ -229,20 +278,24 @@ def test_serp_upgrade_requires_structured_documented_evidence(tmp_path):
     d = by_keyword(run_eval(tmp_path, rows, 'final'))
     assert d['count-only']['mechanical_status'] != 'do_candidate'
     assert d['count-only']['serp_weak_points'] is None
-    assert d['documented']['serp_weak_points'] == 2
-    assert d['documented']['mechanical_status'] == 'do_candidate'
+    assert d['documented']['serp_weak_points'] is None
+    assert d['documented']['mechanical_status'] == 'observe_serp'
 
 
 def test_invalid_serp_evidence_does_not_count(tmp_path):
-    evidence = json.dumps([
+    evidence = [
         {'rank':0,'url':'https://example.com/a','weakness_type':'low_dr_site','observed_fact':'DR 18'},
         {'rank':4,'url':'','weakness_type':'intent_mismatch','observed_fact':'Mismatch'},
         {'rank':5,'url':'https://example.com/c','weakness_type':'','observed_fact':'Mismatch'},
         {'rank':6,'url':'https://example.com/d','weakness_type':'intent_mismatch','observed_fact':''},
         {'rank':7,'url':'https://example.com/e','weakness_type':'intent_mismatch','observed_fact':'Mismatch'},
-    ])
-    rows = [{'keyword':'partial','volume':10000,'difficulty':45,'cpc':1,'intitle_results':1000,'serp_weak_evidence':evidence}]
-    r = by_keyword(run_eval(tmp_path, rows, 'final'))['partial']
+    ]
+    evaluator = load_evaluator('selection_partial_verified_serp_unit')
+    evaluator._verified_serp_results = lambda _row: {7: 'https://example.com/e'}
+    r = evaluator.normalize(
+        {'keyword':'partial','volume':10000,'difficulty':45,'cpc':1,'intitle_results':1000,'serp_weak_evidence':evidence},
+        'final',
+    )
     assert r['serp_weak_points'] == 1
     assert r['mechanical_status'] == 'observe_serp'
 

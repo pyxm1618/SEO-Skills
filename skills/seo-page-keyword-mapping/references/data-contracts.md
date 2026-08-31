@@ -23,7 +23,7 @@ Minimum fields:
 | `role_candidate` | `core`, `intent`, `non_target`, or `unknown` |
 | `ownership_status` | `confirmed`, `rejected`, or `unknown` |
 | `ownership_page_id` | Page that observed/analysed evidence assigns the query to |
-| `serp_fast_status` | `confirmed`, `mismatch`, or `unknown` |
+| `serp_fast_status` | Optional SERP result: exactly `confirmed`, `mismatch`, or `unknown`; unknown is non-blocking and other values are invalid |
 | `target_scope_demand` | Observed demand after explicit scope aggregation; null if unknown |
 | `target_market_volume` | Optional observed priority-market demand |
 | `kd` | Optional observed difficulty |
@@ -47,7 +47,7 @@ Recommended provenance fields: `metric_source`, `metric_database`, `language`, `
 }
 ```
 
-Unknown evidence stays null. `serp_overlap` must come from an actually observed result set or a deterministic comparison of stored SERP URLs.
+Unknown evidence stays null. `serp_overlap` must be a finite ratio from 0 to 1 from an actually observed result set or deterministic comparison of stored SERP URLs. The evaluator emits `serp_overlap_status=observed|unknown|invalid`; only `observed` may support an independent URL.
 
 ## Page-pair cannibalization input
 
@@ -57,4 +57,4 @@ Use explicit pairs only inside the current mapping universe:
 {"page_a":"/hexagram-1/","page_b":"/hexagram-1-love/","serp_overlap":0.8}
 ```
 
-The validator does not crawl the whole site and does not invent pairwise SERP similarity.
+The validator does not crawl the whole site and does not invent pairwise SERP similarity. Page-pair `serp_overlap` follows the same finite 0-to-1 contract: missing is unknown and non-blocking, while malformed or out-of-range values are invalid.

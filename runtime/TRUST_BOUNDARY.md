@@ -63,8 +63,9 @@ Candidate-specific selection stages never fall back to global receipts. Every co
 
 - `stage6_exact`;
 - `intitle_observation`;
-- `kgr_intitle`;
-- `serp_review`.
+- `kgr_intitle`.
+
+`serp_review` is optional. A candidate and batch may complete without it. If an optional SERP review is attempted, a claimed `PASS` must still carry its candidate-bound production validation receipt; SERP weak-position rank/URL must match that receipt's verified Top-10. An unavailable attempt may be retained as a nonterminal `BLOCKED` stage record with a non-empty real reason, but `serp_review` cannot be the candidate or run `blocked_stage`. Missing, blocked, unverified, or mismatched optional SERP never upgrades a KD 40–50 candidate and must not be rewritten as observed evidence.
 
 For `stage6_exact`, `intitle_observation`, `kgr_intitle`, `serp_review`, and `finalist_trend`, the production validator must be called with `--candidate-id <id>` and the protected command must contain the literal `SEO_CANDIDATE_ID=<id>`. The validator derives `candidate_keyword` from exactly one complete row and writes it to both the validation report and receipt. The Hook compares that normalized value with `manifest.candidates[<id>].keyword`; missing, duplicate, or mismatched rows fail closed. Global discovery receipts must not carry candidate identity.
 
@@ -94,13 +95,15 @@ Automated tests prove contracts, hashes, replay behavior, lifecycle gates, and f
 The release acceptance set is:
 
 1. Google Autocomplete in a real browser/CDP session;
-2. Google intitle and SERP through the real Google collector;
+2. Google intitle through the real Google collector;
 3. Google Trends with real temporal evidence;
 4. authenticated `sem.3ue.com` Ideas and Exact relay collection, with no official API or fallback provider;
 5. KGR from the verified Exact + intitle pair;
 6. actual Agent Host `PreToolUse` and `Stop` invocation from that host's reviewed/trusted project hook configuration, for **every** host the release covers;
 7. one Traditional workflow exercising a deterministic early-elimination candidate and the continuing-candidate gates as far as the external sources permit;
 8. one Emerging Monitor run using **real temporal observations** through `validate_observations.py -> aggregate_signals.py -> classify_emergence.py -> route_candidates.py`.
+
+Google SERP is an optional competitive-analysis enhancement, not a release-acceptance item. Its absence is excluded from the Live acceptance denominator and does not block a candidate, batch, or release. When SERP is requested, the real Google collector, evidence provenance, fail-closed behavior, and no-fallback policy remain mandatory. Without candidate-bound verified structured SERP weak-position evidence whose rank/URL match the verified Top-10, a KD 40–50 candidate remains `observe_serp` and cannot receive the SERP-dependent `do_candidate` upgrade.
 
 ### Agent Host acceptance
 
@@ -164,6 +167,6 @@ A release candidate may be recommended for merge when:
 - Semrush relay-only policy and evidence provenance remain intact;
 - Host acceptance passes for every host the release covers;
 - the real-data Emerging Monitor pipeline passes under the semantics above; and
-- any remaining Live source failure is only an `ACCEPTED_ENVIRONMENT_BLOCKER` meeting every condition above.
+- any remaining **required** Live source failure is only an `ACCEPTED_ENVIRONMENT_BLOCKER` meeting every condition above.
 
-A real code defect, unverifiable provenance, provider fallback, fabricated observation, missing Host enforcement, or open P0/P1 remains `DO NOT MERGE`.
+A real code defect that can corrupt evidence or bypass a required gate, unverifiable provenance used for a decision, provider fallback, fabricated observation, missing Host enforcement, or open P0/P1 remains `DO NOT MERGE`. Failure to obtain optional SERP alone is non-blocking when it fails closed and is not used for promotion.
