@@ -57,7 +57,7 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 - `unknown`：就是没有取得，不能变成 0 或估算值。
 - `missing`、`invalid`、numeric `0`、`not_applicable`、`unknown` 必须区分。
 - 当前 Semrush acquisition 只允许项目 `sem.3ue.com` authenticated same-origin relay；失败时不切换 official API、Ahrefs 或其他 provider。
-- Google Autocomplete、intitle、SERP、Google Trends 必须是当前真实 Google evidence；拿不到就 BLOCKED。
+- Google Autocomplete、intitle、Google Trends 以及任何主动请求的 SERP 都必须是当前真实 Google evidence。必需来源拿不到就 BLOCKED；SERP 是可选增强，拿不到时必须如实保持 absent/unavailable、不得用于晋级，也不得冒充 PASS/AEB，但不阻断 candidate、batch 或 release。若 collector 已生成 blocker artifact 就原样保留；若 collector 未持久化 blocker，只能把现场诊断另记为 diagnostic，不能伪称 collector receipt。
 - Full Traditional Discovery 的 required Seed 与 required Branch Seed 都必须完成 Google Autocomplete + Semrush Ideas/Related；Google PASS 不等于 Coverage PASS。
 - Competitor Organic 是 domain/root-cluster 级补漏来源，仅在显式配置 competitor domains 时 mandatory；未配置记录 `not_configured`，配置后失败则 BLOCKED。
 - `discovery_coverage` 必须绑定 production-verified `discovery_input_manifest`，并逐项核对 Root/Natural Seeds 原始总数、Candidate inventory 与完整 Candidate analysis；partial evidence 保留，失败项不能从 ledger 删除。
@@ -65,15 +65,36 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 
 ## 真实采集浏览器
 
-需要真实 Google 与 `sem.3ue.com` 采集时，启动项目专用的可见 Chrome：
+真实采集使用两个分离的可见 Chrome/CDP 端点。先启动通用/Semrush 浏览器：
 
 ```bash
-eval "$(python3 runtime/start_live_browser.py --port 9223)"
+eval "$(python3 runtime/start_live_browser.py --port 9334)"
 ```
 
-它只监听 `127.0.0.1`，使用持久目录 `.seo-run/browser-profile/`，不使用 `--headless`，也不会读取、复制或修改正常 Chrome 的 profile。目标端口被未知进程占用时会直接停止，不会抢占或杀进程。如果专用窗口显示 Semrush 登录页，请只在该窗口内完成登录，不要把密码、验证码、Cookie 或 Token 发给 Agent；登录完成后再运行 collector。
+它导出 `SEO_BROWSER_CDP_URL`，只监听 `127.0.0.1`，使用持久目录
+`.seo-run/browser-profile/`，不使用 `--headless`，也不会读取、复制或修改正常 Chrome 的
+profile。目标端口被未知进程占用时会直接停止，不会抢占或杀进程。如果专用窗口显示
+Semrush 登录页，请只在该窗口内完成登录，不要把密码、验证码、Cookie 或 Token 发给
+Agent；登录完成后再运行 collector。
 
-通常只需登录一次。锁屏不会清除登录；重启电脑后要重新启动专用 Chrome，但通常无需重新登录。正在采集时不要让机器睡眠。会话过期、主动退出、删除 `.seo-run/browser-profile/` 或清除浏览数据后，需要重新登录。
+Google 必须使用另一个全新、隔离且没有 Google 登录 Cookie 的 profile：
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9333 \
+  --user-data-dir=/tmp/seo-google-clean-profile \
+  --no-first-run --no-default-browser-check --disable-sync &
+export SEO_GOOGLE_CDP_URL=http://127.0.0.1:9333
+```
+
+两个 URL 必须不同。Google collector 连接后会检查上下文 Cookie；发现 Google 认证 Cookie
+会 fail closed。不要把登录 Google 的日常 profile 或 Semrush profile 当作 Google 端点。
+
+以上登录生命周期**只适用于 Semrush 浏览器**：通常只需登录一次；锁屏不会清除登录；重启电脑后
+要重新启动专用 Chrome，但通常无需重新登录。正在采集时不要让机器睡眠。会话过期、主动退出、
+删除 `.seo-run/browser-profile/` 或清除浏览数据后，需要重新登录。Google 隔离 profile 不得登录
+Google；一旦出现 Google 认证 Cookie，collector 会拒绝连接。
 
 ## 生产运行最短闭环
 
@@ -85,6 +106,14 @@ python3 runtime/start_seo_run.py --route traditional
 ```
 
 启动器只创建 `run_id`、`route`、`status=IN_PROGRESS`、空的 `stages` 和空的 `candidates`，并拒绝覆盖已有运行。普通代码开发/审核会话没有启动 SEO production run 时，Stop Hook 仍可正常结束。
+
+默认 `.seo-run/active.json` 是**单个 worktree 的单例运行状态**，不是并发锁。同一 worktree
+同一时刻只允许一个 production host session；仅设置不同 `SEO_RUN_MANIFEST` 仍不足以隔离
+浏览器和 evidence，不能把同一 worktree 变成安全的并发环境。确需并发 Live 时，每个会话必须
+同时使用独立 worktree、独立 Google/Semrush CDP 端口和 profile、独立 manifest、独立 evidence
+目录，并在宿主进程启动前完成设置；任一项做不到就串行执行。不要在会话运行后临时改路径。
+若 `run_id` 意外变化，立即停止所有相关运行并保留现场，不得猜测 stage 或 evidence 属于哪个
+会话。
 
 传统路线先完成 global discovery，再建立候选。候选 ID 必须同时出现在 manifest、validator 参数和受保护命令的环境标记中；keyword 不接受第二个自由输入，而由唯一 `complete` row 派生：
 
@@ -152,7 +181,10 @@ Skill 与 runtime 是宿主无关的，但**门禁配置不通用**：Codex 读 
 
 1. **`SubagentStop` 不能省。** Claude Code 的 `Stop` 只在主代理结束时触发。若 SEO 流程跑在子代理里，缺了 `SubagentStop` 就会完全绕过完整性门禁——保护看起来在，实际没上电。
 2. **hooks 在会话启动时快照。** 首次 clone 或修改 `.claude/settings.json` 后需重启 Claude Code 会话，并在提示时确认信任这些 hook。未被信任的 hook 不会执行。
-3. **`.seo-run/active.json` 是运行期状态，不是配置。** 它存在且 `status=IN_PROGRESS` 时 `Stop` 门禁会拦截回合结束，这是设计意图。run 必须收敛到 `COMPLETE`，或收敛到带真实 blocker 的 `BLOCKED`；遗留的调试态 manifest 会拦住这个仓库里所有后续工作。
+3. **`.seo-run/active.json` 是运行期状态，不是配置。** 它存在且 `status=IN_PROGRESS` 时 `Stop` 门禁会拦截回合结束，这是设计意图。run 必须收敛到 `COMPLETE`，或收敛到带真实 blocker 的 `BLOCKED`；遗留的调试态 manifest 会拦住这个仓库里所有后续工作。默认路径没有多会话隔离，同一 worktree 禁止并发 production run。并发 Live 只有在 worktree、两类 CDP 端口/profile、manifest 与 evidence 全部分离时才受支持；仅换 `SEO_RUN_MANIFEST` 不够。
+
+当前路径的 Claude Code 自动触发验收记录在
+[`acceptance-evidence/terminal/stage2-claude-host-current-path.md`](acceptance-evidence/terminal/stage2-claude-host-current-path.md)。
 
 ## 开发 / 验证
 

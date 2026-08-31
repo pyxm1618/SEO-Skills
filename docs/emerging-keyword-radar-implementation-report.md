@@ -1,5 +1,10 @@
 # Emerging Keyword Radar Review-Fix Implementation Report
 
+> 历史快照：本文记录 PR #24 在 2026-08-30 的 repair SHA 与当时 Google 429 blocker，保留其
+> `LIVE RELATED ACCEPTANCE BLOCKED` 原始结论，不代表当前 main 的发布状态。后续真实阶段三
+> 验收已经完成；当前状态以 `HANDOFF.md`、`runtime/TRUST_BOUNDARY.md` 和
+> `acceptance-evidence/terminal/stage3-live-*.md` 为准。
+
 日期：2026-08-30
 分支：`codex/seo-emerging-radar-repair`
 Base：`codex/seo-a-plus-scope-correction`

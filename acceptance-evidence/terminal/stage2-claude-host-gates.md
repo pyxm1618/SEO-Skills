@@ -1,5 +1,11 @@
 # 阶段二 · Claude Code Host 门禁生效证明
 
+> 历史证据说明：本文件记录 2026-08-29 初始接线，原始输出中的
+> `runtime/codex_stage_hook.py` 是当时的真实路径，因此保留不改。脚本更名后的当前路径
+> `runtime/stage_hook.py` 已在 2026-08-31 重新通过根目录 `PreToolUse`、子目录
+> `PreToolUse`、`SubagentStop` 和 `Stop` 自动触发验收；见
+> [`stage2-claude-host-current-path.md`](stage2-claude-host-current-path.md)。
+
 宿主：Claude Code
 工作树：`/Users/milushangdi/Downloads/SEO-Skills-claude`
 分支：`claude/claude-code-host`
@@ -154,5 +160,4 @@ manifest 删除后，主代理正常结束回合，未再收到 Stop 阻断（`s
 | G | 清除 manifest 后行为正确 | PASS |
 
 C–G 全部由 Claude Code 宿主自动触发，无一项以手工执行 `runtime/codex_stage_hook.py` 代替。
-
 
