@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -16,6 +17,20 @@ def parse_num(value):
     if n != n or n in (float("inf"), float("-inf")):
         return None
     return int(n) if n.is_integer() else n
+
+
+def parse_ratio(value):
+    if value in (None, ""):
+        return None, "unknown"
+    if isinstance(value, bool):
+        return None, "invalid"
+    try:
+        ratio = float(value)
+    except (TypeError, ValueError):
+        return None, "invalid"
+    if not math.isfinite(ratio) or ratio < 0 or ratio > 1:
+        return None, "invalid"
+    return ratio, "observed"
 
 
 def load_payload(path):
@@ -40,7 +55,15 @@ def normalize_row(row):
     r["ownership_page_id"] = str(r.get("ownership_page_id") or "").strip() or None
     r["role_candidate"] = str(r.get("role_candidate") or "unknown").strip().lower()
     r["ownership_status"] = str(r.get("ownership_status") or "unknown").strip().lower()
-    r["serp_fast_status"] = str(r.get("serp_fast_status") or "unknown").strip().lower()
+    raw_serp_fast_status = r.get("serp_fast_status")
+    if raw_serp_fast_status is None or (
+        isinstance(raw_serp_fast_status, str) and not raw_serp_fast_status.strip()
+    ):
+        r["serp_fast_status"] = "unknown"
+    elif isinstance(raw_serp_fast_status, str):
+        r["serp_fast_status"] = raw_serp_fast_status.strip().lower()
+    else:
+        r["serp_fast_status"] = "invalid"
     r["metric_scope_id"] = str(r.get("metric_scope_id") or "").strip() or None
     for key in ("target_scope_demand", "target_market_volume", "kd", "cpc"):
         r[key] = parse_num(r.get(key))
@@ -49,7 +72,7 @@ def normalize_row(row):
         r["role_candidate"] == "core"
         and r["ownership_status"] == "confirmed"
         and r["ownership_page_id"] == r["page_id"]
-        and r["serp_fast_status"] == "confirmed"
+        and r["serp_fast_status"] in {"confirmed", "unknown"}
     )
     return r
 
@@ -134,13 +157,14 @@ def cluster_summary(rows, primary):
 
 def architecture_decision(item):
     x = dict(item)
-    overlap = parse_num(x.get("serp_overlap"))
+    overlap, overlap_status = parse_ratio(x.get("serp_overlap"))
     demand = parse_num(x.get("target_scope_demand"))
     x["serp_overlap"] = overlap
+    x["serp_overlap_status"] = overlap_status
     x["target_scope_demand"] = demand
     task = x.get("task_divergence") is True
     independent = x.get("content_independent") is True
-    if overlap is None or x.get("task_divergence") is None or x.get("content_independent") is None:
+    if overlap_status != "observed" or x.get("task_divergence") is None or x.get("content_independent") is None:
         treatment = "review"
     elif overlap >= 0.6:
         treatment = "content_module"
@@ -184,7 +208,7 @@ def evaluate(payload, cpc_tiebreak=False):
         "pages": pages,
         "architecture_candidates": architecture,
         "method": {
-            "primary": "confirmed ownership + confirmed SERP fast check + core candidate",
+            "primary": "confirmed ownership + core candidate; observed SERP mismatch disqualifies",
             "cluster": "deduplicated owned observed queries within the primary metric scope",
             "cpc_tiebreak": bool(cpc_tiebreak),
         },

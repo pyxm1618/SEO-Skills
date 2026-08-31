@@ -33,7 +33,7 @@ Normalized evaluator inputs:
 - `difficulty` or `kd`: Semrush KD; observed numeric or unknown.
 - `cpc`: observed numeric or unknown.
 - `intitle_results`: manually observed Google `intitle:"keyword"` count or unknown.
-- `serp_weak_points`: count of documented weak top-10 positions from real SERP review; analysis based on observed SERP facts.
+- `serp_weak_points`: optional count of documented weak top-10 positions whose rank/URL match a candidate-bound, production-verified SERP receipt. Missing or unverified review remains unknown.
 - `exclude_reason`: nonblank only for a documented manual exclusion such as brand navigation or semantic drift.
 
 Optional pass-through fields include `intent`, `competition_level`, `trend`, `serp_notes`, `page_form`, and provenance fields.
@@ -48,6 +48,7 @@ The evaluator may add:
 - `cpc_signal`
 - `kgr`
 - `kgr_signal`
+- `serp_evidence_status`
 - `kdroi`
 - `mechanical_status`
 
@@ -97,7 +98,9 @@ Missing values remain `unknown`; malformed values are invalid. Preserve `validat
 
 ## Structured SERP weak evidence
 
-`serp_weak_points` is a **calculated count**, not a trusted manual input. The evaluator derives it from `serp_weak_evidence`.
+`serp_weak_points` is a **calculated verified count**, not a trusted manual input. The evaluator derives it from `serp_weak_evidence` only after the active candidate's production `serp_review` receipt passes and each evidence item's rank/URL matches that receipt's real Top-10 row.
+
+The entire SERP review is optional. Omitted evidence leaves `serp_weak_points=unknown` and a KD 40–50 candidate at `observe_serp`; it never creates a zero count, a production blocker, or an upgrade.
 
 Each evidence item must contain:
 
@@ -108,6 +111,7 @@ Rules:
 - `rank` must be an integer from 1 to 10;
 - `url`, `weakness_type`, and `observed_fact` must be nonblank;
 - one rank can count at most once;
+- `rank` and `url` must match the same result in the verified candidate-bound SERP receipt;
 - malformed/partial evidence does not count;
 - a legacy numeric `serp_weak_points` may be preserved as `reported_serp_weak_points` for audit, but never upgrades a KD 40–50 keyword by itself.
 

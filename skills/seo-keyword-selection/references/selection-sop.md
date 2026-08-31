@@ -48,11 +48,13 @@ Join the verified Stage 6 Exact row and the verified Google `intitle` observatio
 
 KGR remains calculated by `evaluate_candidates.py` from those real inputs. Do not hand-copy Volume, hand-fill KGR, or add an independent KGR algorithm. The existing `<0.25` rule is unchanged.
 
-## 13. Review real SERP top 10
+## 13. Optional real SERP top-10 review
 
 Use the project Google live collector to obtain current top-10 rank/url evidence. AI may analyze intent fit, page quality, weakness, freshness, UGC, small-site presence, and similar qualities on top of those observed facts. External facts such as DR must be actually acquired or remain unknown.
 
-KD 40–50 may upgrade only under the existing rule: KGR < 0.25 plus real top 10 plus structured weak evidence plus at least two verifiable weak positions. The evaluator remains authoritative for this mechanical upgrade behavior.
+This step is optional and its absence must not block the candidate or batch. If collection is attempted but unavailable, retain `serp_review.status=BLOCKED` with the real reason and use no fallback. The candidate remains `observe_serp`; do not turn missing evidence into zero weak positions.
+
+KD 40–50 may upgrade only under the existing rule: KGR < 0.25 plus a candidate-bound production `serp_review` receipt plus structured weak evidence whose rank/URL match that real Top-10 plus at least two verifiable weak positions. The evaluator remains authoritative for this mechanical upgrade behavior. Optional means the review may be skipped, not that the upgrade may bypass it.
 
 ## 14. Trend validation
 
@@ -74,7 +76,7 @@ Maintain at least:
 
 `keyword | domain | root | parent_seed | volume | kd | cpc | metric_source | metric_database | observed_at | metric_stage | provenance_status | intent | trend | intitle_results | kgr | serp_weak_evidence | serp_weak_points | page_form | kdroi | risk | status | duplicate_warning`
 
-Also report `complete_count`, `blocked_count`, and blocked reasons. Never silently delete blocked candidates.
+SERP fields may remain `unknown` when the optional review was not completed. Also report `complete_count`, `blocked_count`, and blocked required-stage reasons. Never silently delete blocked candidates.
 
 ## 18. Cluster opportunities
 

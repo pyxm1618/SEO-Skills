@@ -21,7 +21,7 @@ This stage is **not** the owner of generic domain/root/Seed discovery. New reusa
 
 **Rule:** `source_seed` is provenance only; it never establishes page ownership. Cross-page line queries, hubs/lists, brands, and semantic drift must not be assigned merely because they appeared under one seed.
 
-## Stage 3 — Ownership Classification + Core Compression + SERP Fast Check
+## Stage 3 — Ownership Classification + Core Compression + Optional SERP Fast Check
 
 Compress the page-scoped pool into:
 
@@ -29,9 +29,9 @@ Compress the page-scoped pool into:
 - `intent` — same entity plus a task/modifier that can live in the cluster;
 - `non_target` — brand/navigation, another entity, hub/list, semantic drift, or rejected query.
 
-A modifier can be promoted to `core` when it disambiguates the entity and observed SERP results confirm the target entity intent.
+A modifier can be promoted to `core` when it disambiguates the entity and ownership evidence confirms the target page. Optional observed SERP may strengthen this decision; an observed mismatch rejects it.
 
-Every final Core Candidate gets a **SERP Fast Check**: inspect enough live result titles/page types to confirm entity intent. Do not infer this from KD, Volume, or wording alone.
+**SERP Fast Check is optional:** when available, inspect enough live result titles/page types to check entity intent. If unavailable, retain `serp_fast_status=unknown` and continue without claiming confirmation. Do not infer SERP facts from KD, Volume, or wording.
 
 ## Stage 4 — Real Metrics
 
@@ -51,9 +51,9 @@ Cluster Observed Demand is a comparison signal, not a traffic prediction.
 
 ## Stage 6 — Mapping + Cannibalization
 
-Select Primary from ownership-confirmed, SERP-fast-confirmed Core Candidates. Preserve Secondary Core queries and Intent rows on the same page when they share ownership.
+Select Primary from ownership-confirmed Core Candidates unless observed SERP evidence contradicts ownership. Preserve `serp_fast_status=unknown` when the optional check is unavailable, and preserve Secondary Core queries and Intent rows on the same page when they share ownership.
 
-Use SERP Deep Review when candidates are close, intent is ambiguous, a hub/entity boundary is unclear, language contamination is suspected, or an independent child URL is proposed.
+Optional SERP Deep Review is useful when candidates are close, intent is ambiguous, a hub/entity boundary is unclear, language contamination is suspected, or an independent child URL is proposed. Without it, keep the affected conflict or child-URL decision unresolved while the rest of the batch continues.
 
 Cannibalization checks are limited to the current mapping universe: entity pages, relevant parent/hub pages, and proposed child pages. Check exact ownership collisions, high-overlap page pairs, and parent-child splits with overlapping SERPs.
 

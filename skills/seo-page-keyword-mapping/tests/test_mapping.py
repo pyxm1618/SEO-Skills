@@ -41,11 +41,12 @@ def test_source_seed_never_creates_ownership(tmp_path):
     assert pg(d,'hex-1')['primary_keyword'] is None and d['rows'][0]['eligible_core'] is False
 
 
-def test_unknown_is_not_zero_and_serp_fast_is_required(tmp_path):
+def test_unknown_is_not_zero_and_optional_serp_does_not_block_primary(tmp_path):
     rows=[core('p','good',None,cluster_include=True), core('p','big-but-unchecked',5000)]
     rows[1]['serp_fast_status']='unknown'
     d=run(EVAL,tmp_path,{'rows':rows}); p=pg(d,'p')
-    assert p['primary_keyword']=='good' and p['core_keyword_demand'] is None
+    assert p['primary_keyword']=='big-but-unchecked' and p['core_keyword_demand']==5000
+    assert d['rows'][1]['serp_fast_status']=='unknown' and d['rows'][1]['eligible_core'] is True
     assert p['cluster_observed_demand'] is None and p['cluster_unknown_keyword_count']==1 and p['cluster_demand_complete'] is False
 
 
@@ -80,13 +81,83 @@ def test_architecture_uses_serp_overlap_task_and_content_not_fixed_volume(tmp_pa
     assert a['h54-romance']=='independent_url_candidate' and a['h1-love']=='content_module'
 
 
-def test_validator_detects_ownership_serp_and_split_conflicts(tmp_path):
+def test_validator_detects_ownership_serp_mismatch_and_split_conflicts(tmp_path):
     rows=[core('a','same term',100),core('b','SAME TERM',100),core('c','unchecked',100)]
-    rows[2]['serp_fast_status']='unknown'
+    rows[2]['serp_fast_status']='mismatch'
     arch=[{'parent_page_id':'a','child_page_id':'a-child','serp_overlap':.75,'proposed_treatment':'independent_url_candidate'}]
     d=run(VALIDATE,tmp_path,{'rows':rows,'architecture_candidates':arch})
     codes={x['code'] for x in d['issues']}
-    assert {'exact_ownership_collision','core_missing_serp_fast','high_overlap_split'} <= codes and d['valid'] is False
+    assert {'exact_ownership_collision','core_serp_mismatch','high_overlap_split'} <= codes and d['valid'] is False
+
+
+def test_validator_allows_unknown_optional_serp(tmp_path):
+    row=core('p','unchecked',100)
+    row['serp_fast_status']='unknown'
+
+    result=run(VALIDATE,tmp_path,{'rows':[row]})
+
+    assert result['valid'] is True
+    assert result['issues'] == []
+
+
+def test_invalid_serp_fast_status_is_neither_eligible_nor_valid(tmp_path):
+    for index, status in enumerate(('misatch', False, 0)):
+        row=core('p',f'invalid-status-{index}',100)
+        row['serp_fast_status']=status
+
+        evaluated=run(EVAL,tmp_path,{'rows':[row]})
+        validated=run(VALIDATE,tmp_path,{'rows':[row]})
+
+        assert evaluated['rows'][0]['eligible_core'] is False
+        assert pg(evaluated,'p')['primary_keyword'] is None
+        assert validated['valid'] is False
+        assert {issue['code'] for issue in validated['issues']} == {'invalid_serp_fast_status'}
+
+
+def test_validator_rejects_independent_url_without_optional_serp_overlap(tmp_path):
+    item={
+        'parent_page_id':'p',
+        'child_page_id':'p-child',
+        'proposed_treatment':'independent_url_candidate',
+        'serp_overlap':None,
+    }
+
+    result=run(VALIDATE,tmp_path,{'rows':[],'architecture_candidates':[item]})
+
+    assert result['valid'] is False
+    assert {issue['code'] for issue in result['issues']} == {'independent_url_missing_serp_overlap'}
+
+
+def test_invalid_serp_overlap_cannot_support_independent_url(tmp_path):
+    for index, overlap in enumerate((-0.1, 1.1, True, float('nan'))):
+        item={
+            'parent_page_id':'p',
+            'child_page_id':f'p-child-{index}',
+            'proposed_treatment':'independent_url_candidate',
+            'serp_overlap':overlap,
+            'task_divergence':True,
+            'content_independent':True,
+            'target_scope_demand':100,
+        }
+
+        evaluated=run(EVAL,tmp_path,{'rows':[],'architecture_candidates':[item]})
+        validated=run(VALIDATE,tmp_path,{'rows':[],'architecture_candidates':[item]})
+
+        decision=evaluated['architecture_candidates'][0]
+        assert decision['recommended_treatment']=='review'
+        assert decision['serp_overlap_status']=='invalid'
+        assert validated['valid'] is False
+        assert {issue['code'] for issue in validated['issues']} == {'independent_url_invalid_serp_overlap'}
+
+
+def test_invalid_page_pair_serp_overlap_fails_validation(tmp_path):
+    for index, overlap in enumerate((-0.1, 1.1, False, True, float('nan'))):
+        pair={'page_a':f'/a-{index}/','page_b':f'/b-{index}/','serp_overlap':overlap}
+
+        result=run(VALIDATE,tmp_path,{'rows':[],'page_pairs':[pair]})
+
+        assert result['valid'] is False
+        assert {issue['code'] for issue in result['issues']} == {'invalid_page_pair_serp_overlap'}
 
 
 def test_docs_encode_nonnegotiable_rules():

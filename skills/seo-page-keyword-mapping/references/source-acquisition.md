@@ -16,6 +16,6 @@ There is no fallback to official Semrush API, API keys/units, official connector
 
 ## SERP evidence
 
-SERP Fast Check uses actual current Google result evidence to confirm entity intent. SERP Deep Review records real current URLs/page types and the observed facts used for architecture or cannibalization decisions. If an external fact such as DR is required, actually acquire it or leave it unknown.
+Optional SERP Fast Check uses actual current Google result evidence to check entity intent. Optional SERP Deep Review records real current URLs/page types and the observed facts used for architecture or cannibalization decisions. If an external fact such as DR is required, actually acquire it or leave it unknown.
 
-If a required observation cannot be obtained, keep it unknown/unresolved rather than inventing a replacement.
+If optional SERP cannot be obtained, keep it unknown/unresolved and continue other mapping work. If any required observation cannot be obtained, keep it unknown/unresolved rather than inventing a replacement.

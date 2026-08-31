@@ -74,8 +74,8 @@ def test_start_seo_run_does_not_overwrite_active_in_progress_manifest(tmp_path):
         ("python3 skills/seo-keyword-selection/scripts/evaluate_candidates.py --stage exact --input rows.json", "stage6_exact"),
         ("python3 runtime/collectors/google_live_collector.py serp --keyword example --output out.json", "kgr_intitle"),
         ("python3 skills/seo-keyword-selection/scripts/evaluate_candidates.py --stage final --input rows.json", "kgr_intitle"),
-        ("python3 runtime/collectors/google_live_collector.py trends --keyword example --output out.json", "serp_review"),
-        ("python3 runtime/stage_validator.py --stage finalist_trend --input trend.json", "serp_review"),
+        ("python3 runtime/collectors/google_live_collector.py trends --keyword example --output out.json", "kgr_intitle"),
+        ("python3 runtime/stage_validator.py --stage finalist_trend --input trend.json", "kgr_intitle"),
     ],
 )
 def test_multiline_protected_commands_have_same_stage_as_single_line(command, stage):

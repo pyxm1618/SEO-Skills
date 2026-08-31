@@ -55,14 +55,14 @@ Low CPC is **not** an automatic elimination. CPC is a monetization/value signal,
 
 A term with KGR ≥ 0.25 does not receive mechanical `do_candidate`; keep it as `observe_kgr` for judgment rather than fabricating a pass.
 
-## 6. KD 40–50 SERP upgrade
+## 6. Optional KD 40–50 SERP upgrade
 
 A KD 40–50 term may upgrade from `observe` to `do_candidate` only when:
 
 1. KGR passes (<0.25), **and**
 2. real top-10 review documents at least **2 verifiable weak positions**.
 
-Otherwise it remains `observe_serp` (or `pending_serp` if SERP review has not supplied a count).
+Otherwise it remains `observe_serp`, including when optional SERP review has not supplied a count. Missing SERP is not a workflow-pending state and is never interpreted as zero weak positions.
 
 Weak-position examples are defined in `data-contracts.md`. “Inner page” alone is not a weak position.
 
@@ -86,8 +86,7 @@ For the final evaluation stage:
 6. KGR ≥ 0.25 → `observe_kgr`;
 7. KD < 40 + KGR pass → `do_candidate`;
 8. KD 40–50 + KGR pass + ≥2 weak positions → `do_candidate`;
-9. KD 40–50 + KGR pass + missing SERP count → `pending_serp`;
-10. KD 40–50 + KGR pass + <2 weak positions → `observe_serp`.
+9. KD 40–50 + KGR pass + missing SERP count or <2 weak positions → `observe_serp`.
 
 `do_candidate` is still not the human final decision.
 
@@ -100,6 +99,6 @@ After every two completed batches, inspect human-selected keywords' Volume/KD/CP
 Before any mechanical status is trusted:
 
 1. impossible numeric inputs or a blank keyword produce `invalid_row`;
-2. KD 40–50 SERP promotion uses only the evaluator-derived count from structured `serp_weak_evidence`; a manually supplied count alone is insufficient;
+2. KD 40–50 SERP promotion uses only the evaluator-derived count from structured `serp_weak_evidence` whose rank/URL match the active candidate's production-verified `serp_review` receipt; caller-supplied rows or a manual count are insufficient;
 3. `provenance_status=incomplete` is a warning, not automatic elimination, but serious finalists must repair provenance before a human final decision;
 4. duplicate rows are preserved and flagged; do not let them inflate cluster density.

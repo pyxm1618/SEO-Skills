@@ -87,6 +87,181 @@ def test_traditional_route_only_autocomplete_and_exact_is_denied(monkeypatch):
     assert "intitle_observation" in reason
 
 
+def test_traditional_candidate_can_complete_without_optional_serp(monkeypatch):
+    hook = load_hook("traditional_optional_serp_unit")
+    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    monkeypatch.setattr(hook, "_verified_exact_disposition", lambda *args, **kwargs: ("do_candidate", ""))
+    monkeypatch.setattr(hook, "_verify_finalist_disposition", lambda *args, **kwargs: (False, ""))
+    manifest = {
+        "run_id": "r_trad_optional_serp",
+        "route": "traditional",
+        "status": "COMPLETE",
+        "stages": {
+            "discovery_autocomplete": {"status": "PASS"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {"status": "PASS", "coverage_receipt_ref": "coverage"},
+        },
+        "candidates": {
+            "cand": {
+                "keyword": "candidate keyword",
+                "stage6_exact": {"status": "PASS"},
+                "intitle_observation": {"status": "PASS"},
+                "kgr_intitle": {"status": "PASS"},
+            }
+        },
+    }
+
+    valid, reason = hook._verify_completion_requirements(manifest)
+
+    assert valid is True, reason
+
+
+def test_traditional_candidate_can_record_optional_serp_unavailable(monkeypatch):
+    hook = load_hook("traditional_serp_unavailable_unit")
+    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    monkeypatch.setattr(hook, "_verified_exact_disposition", lambda *args, **kwargs: ("do_candidate", ""))
+    monkeypatch.setattr(hook, "_verify_finalist_disposition", lambda *args, **kwargs: (False, ""))
+    manifest = {
+        "run_id": "r_trad_serp_unavailable",
+        "route": "traditional",
+        "status": "COMPLETE",
+        "stages": {
+            "discovery_autocomplete": {"status": "PASS"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {"status": "PASS", "coverage_receipt_ref": "coverage"},
+        },
+        "candidates": {
+            "cand": {
+                "keyword": "candidate keyword",
+                "stage6_exact": {"status": "PASS"},
+                "intitle_observation": {"status": "PASS"},
+                "kgr_intitle": {"status": "PASS"},
+                "serp_review": {
+                    "status": "BLOCKED",
+                    "blocked_reason": "Google returned /sorry/; no fallback used",
+                },
+            }
+        },
+    }
+
+    valid, reason = hook._verify_completion_requirements(manifest)
+
+    assert valid is True, reason
+
+
+def test_optional_serp_cannot_terminally_block_candidate():
+    hook = load_hook("traditional_serp_terminal_candidate_rejected")
+    reason = "Google returned /sorry/; no fallback used"
+    manifest = {
+        "run_id": "r_trad_serp_terminal_candidate",
+        "route": "traditional",
+        "status": "COMPLETE",
+        "candidates": {
+            "cand": {
+                "keyword": "candidate keyword",
+                "terminal_status": "BLOCKED",
+                "blocked_stage": "serp_review",
+                "blocked_reason": reason,
+                "serp_review": {"status": "BLOCKED", "blocked_reason": reason},
+            }
+        },
+    }
+
+    valid, message = hook._verify_terminal_blocked_candidate(
+        manifest, "cand", manifest["candidates"]["cand"]
+    )
+
+    assert valid is False
+    assert "optional" in message.lower()
+
+
+def test_optional_serp_cannot_terminally_block_run():
+    hook = load_hook("traditional_serp_terminal_run_rejected")
+    reason = "Google returned /sorry/; no fallback used"
+    manifest = {
+        "run_id": "r_trad_serp_terminal_run",
+        "route": "traditional",
+        "status": "BLOCKED",
+        "blocked_stage": "serp_review",
+        "blocked_reason": reason,
+        "stages": {"serp_review": {"status": "BLOCKED", "blocked_reason": reason}},
+    }
+
+    valid, message = hook._verify_blocked_run(manifest)
+
+    assert valid is False
+    assert "optional" in message.lower()
+
+
+def test_optional_serp_pass_is_verified_when_present(monkeypatch):
+    hook = load_hook("traditional_optional_serp_pass_verification_unit")
+    monkeypatch.setattr(hook, "_verify_validation_receipt", lambda *args, **kwargs: (True, ""))
+    monkeypatch.setattr(hook, "_verified_exact_disposition", lambda *args, **kwargs: ("do_candidate", ""))
+    monkeypatch.setattr(hook, "_verify_finalist_disposition", lambda *args, **kwargs: (False, ""))
+    monkeypatch.setattr(
+        hook,
+        "_verify_candidate_receipt",
+        lambda _manifest, _candidate_id, _candidate, _record, stage: (False, "tampered")
+        if stage == "serp_review"
+        else (True, ""),
+    )
+    manifest = {
+        "run_id": "r_trad_optional_serp_invalid",
+        "route": "traditional",
+        "status": "COMPLETE",
+        "stages": {
+            "discovery_autocomplete": {"status": "PASS"},
+            "discovery_coverage": {"status": "PASS", "validation_receipt_ref": "coverage"},
+            "discovery_handoff": {"status": "PASS", "coverage_receipt_ref": "coverage"},
+        },
+        "candidates": {
+            "cand": {
+                "keyword": "candidate keyword",
+                "stage6_exact": {"status": "PASS"},
+                "intitle_observation": {"status": "PASS"},
+                "kgr_intitle": {"status": "PASS"},
+                "serp_review": {"status": "PASS", "validation_receipt_ref": "serp"},
+            }
+        },
+    }
+
+    valid, reason = hook._verify_completion_requirements(manifest)
+
+    assert valid is False
+    assert "serp_review" in reason
+    assert "tampered" in reason
+
+
+def test_exact_eliminated_candidate_still_verifies_claimed_optional_serp_pass(monkeypatch):
+    hook = load_hook("traditional_eliminated_optional_serp_verification_unit")
+    monkeypatch.setattr(
+        hook, "_verified_exact_disposition", lambda *args, **kwargs: ("principle_eliminate_volume", "")
+    )
+    monkeypatch.setattr(
+        hook, "_verify_candidate_receipt", lambda *args, **kwargs: (False, "tampered")
+    )
+    manifest = {
+        "run_id": "r_trad_eliminated_optional_serp_invalid",
+        "route": "traditional",
+        "status": "COMPLETE",
+        "candidates": {
+            "cand": {
+                "keyword": "candidate keyword",
+                "stage6_exact": {"status": "PASS"},
+                "serp_review": {"status": "PASS", "validation_receipt_ref": "serp"},
+            }
+        },
+    }
+
+    valid, reason = hook._verify_candidate_completion(
+        manifest, "cand", manifest["candidates"]["cand"]
+    )
+
+    assert valid is False
+    assert "serp_review" in reason
+    assert "tampered" in reason
+
+
 def test_emerging_route_only_exact_is_denied(monkeypatch):
     hook = load_hook("emerging_partial_unit")
     monkeypatch.setattr(hook, "_verify_route_attestation", lambda *args, **kwargs: (True, ""))

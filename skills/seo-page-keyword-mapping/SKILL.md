@@ -1,6 +1,6 @@
 ---
 name: seo-page-keyword-mapping
-description: Use when a predefined set of entity, category, location, product, glossary, or localized pages must be mapped to Primary/Secondary SEO keywords, ownership-confirmed query clusters, content modules, and possible child URLs using real keyword and SERP evidence.
+description: Use when a predefined page inventory needs Primary/Secondary keyword ownership, query clusters, content modules, or possible child URLs mapped.
 ---
 
 # SEO Page Keyword Mapping
@@ -23,9 +23,9 @@ Read before execution:
 
 - `source_seed` is discovery provenance, never page ownership.
 - `unknown` is not zero. Never invent Volume, KD, CPC, rankings, SERP facts, or language adjustments.
-- Every final Core Candidate requires a **SERP Fast Check**. Use **SERP Deep Review** only for conflicts, close decisions, ambiguity, cannibalization, or split-page decisions.
+- **SERP Fast Check** and **SERP Deep Review** are optional enhancements. Missing SERP stays `unknown` and does not block Primary selection or batch completion; an observed `mismatch` still disqualifies the contradicted ownership.
 - Keep **Core Keyword Demand** separate from **Cluster Observed Demand**. The latter is an observed aggregate, not a traffic forecast.
-- A modifier may become Primary when it is required to disambiguate the entity and SERP evidence confirms ownership.
+- A modifier may become Primary when it is required to disambiguate the entity and ownership evidence confirms the target page. Optional SERP may strengthen that decision; an observed mismatch rejects it.
 - CPC does not override ownership or demand evidence; it is optional only as a final business tie-break after SEO evidence is otherwise tied.
 - Language/market exclusions require observed evidence; never hard-code a country exclusion across projects.
 
@@ -38,8 +38,8 @@ python scripts/evaluate_mapping.py --input normalized.json --format json
 python scripts/validate_mapping.py --input normalized.json --format json
 ```
 
-`evaluate_mapping.py` ranks eligible Core Candidates, computes deduplicated cluster demand inside one metric scope, and classifies supplied architecture candidates. `validate_mapping.py` checks ownership collisions, missing Core SERP confirmation, and supplied high-overlap split/cannibalization risks.
+`evaluate_mapping.py` ranks eligible Core Candidates, computes deduplicated cluster demand inside one metric scope, and classifies supplied architecture candidates. `validate_mapping.py` checks ownership collisions, observed Core SERP mismatches, and unsupported or high-overlap URL splits.
 
 ## Completion
 
-A batch is complete only when every page has explicit ownership evidence or an unresolved status, Primary/Secondary decisions preserve their evidence, Cluster Observed Demand reports scope/completeness, current-universe cannibalization checks are clear, and child URLs remain candidates unless independent intent is actually demonstrated.
+A batch is complete when every page has explicit ownership evidence or an unresolved status, Primary/Secondary decisions preserve their evidence, Cluster Observed Demand reports scope/completeness, and current-universe cannibalization findings are retained. Missing optional SERP remains `unknown`; child URLs stay `review` unless independent intent is actually demonstrated.

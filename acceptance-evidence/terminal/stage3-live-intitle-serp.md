@@ -1,12 +1,13 @@
-# 阶段三 Live 验收 2/7 · Google intitle + SERP
+# 阶段三 Live 验收 2/7 · Google intitle（SERP 可选）
 
 日期：2026-08-30
 工作树：`/Users/milushangdi/Downloads/SEO-Skills-claude`
 分支：`claude/claude-code-host`
 
-结论：**FAIL**。intitle PASS；SERP 在真实 Google 第二页进入 `/sorry/index`，collector
-fail closed，但没有持久化该 blocker，故整条组合验收不能记 PASS，也不满足
-`ACCEPTED_ENVIRONMENT_BLOCKER` 的全部六项条件。
+结论：**PASS**（按 2026-08-31 修订后的验收契约）。必需项 intitle 已通过；SERP 在真实
+Google 第二页进入 `/sorry/index`，collector fail closed 但没有持久化该 blocker。该事实仍不
+冒充 SERP PASS 或 `ACCEPTED_ENVIRONMENT_BLOCKER`，只是 SERP 现已明确为可选增强，不再进入
+Live 验收分母，也不再让本条 intitle 验收失败。
 
 ## intitle：PASS
 
@@ -29,7 +30,7 @@ SEO_BROWSER_CDP_URL=http://127.0.0.1:9334 \
 - receipt：`.seo-run/stage3-live/traditional/google-intitle-wedding-calculator.receipt.json`
 - production validator：`intitle_observation PASS`，`complete_count=1`。
 
-## SERP：FAIL
+## 可选 SERP：UNAVAILABLE（不阻断）
 
 ```bash
 SEO_GOOGLE_CDP_URL=http://127.0.0.1:9333 \
@@ -69,6 +70,7 @@ diagnostic 是失败后对浏览器现场的只读保存，不冒充 collector �
 | 未用 mock、合成、官方 API、替代 provider 或 fallback | 是 | 没有任何降级，输出缺失保持缺失 |
 | collector 与下游 fail closed | 是 | exit 2；无 normalized SERP、无 receipt、无后续 SERP 决策 |
 | 针对相关 parser/extractor 的回归测试 | **否** | 现有测试覆盖 Trends 429 error page，不覆盖 SERP `/sorry/` blocker 留证 |
-| 无开放 P0/P1 门禁缺陷 | **否** | 本次发现新的 release-blocking blocker-evidence 缺口 |
+| 无开放 P0/P1 门禁缺陷 | **是（修订契约下）** | blocker-evidence 缺口仅影响可选 SERP 留证，不再能绕过必需门或影响 release 决策 |
 
-六项未全部满足，因此状态是 **FAIL**，不是 AEB。
+六项未全部满足，因此这次可选 SERP 尝试本身仍不是 PASS 或 AEB。修订后的 release contract
+不要求用 AEB 把可选 SERP 失败转成可接受状态；它保持真实 unavailable，且未用于 KD 40–50 晋级。

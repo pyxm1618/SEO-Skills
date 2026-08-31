@@ -5,15 +5,16 @@
 分支：`claude/claude-code-host`
 
 结论：**FAIL**。早期淘汰分支与 continuing candidate 的 Exact 门已真实执行；continuing
-candidate 在下一 intitle 门遇到 Google `/sorry/`，而该 blocker 不满足 AEB 六条件，故不能把
-“走到外部允许的位置”压成 PASS。
+candidate 在下一项仍属必需的 intitle 门遇到 Google `/sorry/`，而该 blocker 不满足 AEB 六条件，
+故不能把“走到外部允许的位置”压成 PASS。2026-08-31 起 SERP 已改为可选；这消除了 SERP
+硬门槛，但不会补齐本次缺失的 continuing intitle/KGR。
 
 ## 显式候选台账
 
 | candidate | Exact 门 | evaluator | 后续 |
 | --- | --- | --- | --- |
 | `wedding calculator` | PASS：Volume 320 / KD 22 / CPC 1.7 | `principle_eliminate_volume` | 按 Traditional 规则应在 Exact 后确定性早退 |
-| `wedding cost calculator` | PASS：Volume 720 / KD 18 / CPC 1.65 | `do_candidate`（Exact stage） | intitle collector BLOCKED；无 continuing KGR/SERP |
+| `wedding cost calculator` | PASS：Volume 720 / KD 18 / CPC 1.65 | `do_candidate`（Exact stage） | intitle collector BLOCKED；无 continuing KGR；SERP 可选 |
 
 两个 candidate 的 identity 分别绑定到 production validator：
 
@@ -28,7 +29,7 @@ cand_wedding_cost_calculator_continue -> stage6_exact PASS, candidate_keyword=we
 - `discovery_semrush_ideas PASS`：30 条当前 `sem.3ue.com` Ideas；
 - 两条 `stage6_exact PASS`：当前 US Exact；
 - continuing intitle：`BLOCKED: Page.wait_for_selector ... #result-stats`，exit 2；
-- continuing SERP：未执行，保留为未满足，不用早退 candidate 的独立 KGR/Trends 冒充。
+- continuing SERP：未执行；按修订契约属于可选项，不构成本次 FAIL 的依据。
 
 独立 KGR 与 Trends 验收确实使用了 `wedding calculator` 的真实证据，但它们属于第 5/7 与 3/7
 验收，不改变 Traditional 的早退顺序，也不补 continuing candidate 的缺口。
