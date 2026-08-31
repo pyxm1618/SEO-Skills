@@ -125,6 +125,24 @@ A further host may be added only once its own hook configuration exists and its 
 
 The Hook normalizes only a matching copy of Bash input, including backslash-newline continuations and repeated whitespace. The command passed to the tool is not changed. Single-line, multiline, `&&`, and directory-prefixed equivalent protected commands must resolve to the same prerequisite stage.
 
+### Active manifest concurrency boundary
+
+The default `.seo-run/active.json` is a per-worktree singleton state file, not a concurrency lock.
+`start_seo_run.py` refuses to replace an existing manifest, but two host sessions that can edit the
+same worktree can still race or overwrite that file after creation. A changed `run_id` can make one
+session read another session's stages, blockers, or evidence references, so it must never be treated
+as harmless last-writer-wins behavior.
+
+Only one production host session may run in a worktree at a time. A unique `SEO_RUN_MANIFEST` alone is
+not sufficient isolation: Live collectors also own browser contexts, CDP endpoints/profiles, and
+evidence paths. Concurrent Live sessions are supported only when every session has a separate
+worktree, separate Google and Semrush CDP ports/profiles, a separate manifest, and separate evidence
+directories, all selected **before that host session starts**. If any dimension cannot be isolated,
+the sessions must run serially. If a session observes an unexpected `run_id` or route change, all
+affected runs stop fail-closed, preserve the conflicting artifacts, and report ownership as unknown;
+no stage or evidence may be reassigned by guessing. Host acceptance probes that touch runtime state
+must also be serialized within a worktree.
+
 ### Fail-closed hook lockout (accepted operational risk)
 
 The gate denies a command when the hook *decides* to deny it, and equally when the hook itself *fails to execute*. The second case is deliberate — a hook that cannot run has not cleared anything, so treating its failure as approval would be the bypass this repository exists to prevent. The operational consequence is that a hook which cannot execute rejects **every** Bash call in that session, including the one that would repair it.

@@ -1,19 +1,20 @@
 # 交接：SEO-Skills Claude 宿主适配 + 验收
 
-> 最后更新：2026-08-31，Traditional 完成重试与阶段三最终结论。
+> 最后更新：2026-08-31，Claude 当前 Hook 路径复验与阶段三最终结论均已完成。
 > 每次交接请更新本文件的"当前状态"与"剩余问题"，过时的交接比没有交接更危险。
 
 ## 你现在在哪
 
-分支 `claude/claude-code-host`，worktree `/Users/milushangdi/Downloads/SEO-Skills-claude`，
-已推送到 `origin/claude/claude-code-host`（GitHub: pyxm1618/SEO-Skills）。
+分支 `claude/claude-code-host`，worktree `/Users/milushangdi/Downloads/SEO-Skills-claude`。
+PR #28 已合入 main；运行时代码基线 `2fac394c3e832f43fbee16980da0ea6299ce6a54` 在
+`origin/main` 与 `origin/claude/claude-code-host` 上一致。
 
-**注意有两个克隆。** 主仓 `/Users/milushangdi/Downloads/SEO-Skills-main` 在
-`codex/seo-a-plus-scope-correction` 分支上，**Codex 正在那里并发工作，不要动它**（PR 冲突由它负责）。
-两个坑：① Claude Code 会话的默认 cwd 常常是 `-main`，对本仓库的每条 Bash 都要显式
+**注意有两个克隆。** `/Users/milushangdi/Downloads/SEO-Skills-main` 是另一条工作线，仍不要
+从本 worktree 操作或替它切分支。两个坑：① Claude Code 会话的默认 cwd 常常是 `-main`，
+对本仓库的每条 Bash 都要显式
 `cd /Users/milushangdi/Downloads/SEO-Skills-claude &&` 或用 `git -C`（`cd` 不跨 Bash 调用持久）；
-② hook 只接线在 `-claude` 这个克隆里，从 `-main` 启动的会话**不受门禁约束**，
-别把"那里 Bash 能跑"当成门禁没问题的证据。
+② 宿主只读取启动会话所在 clone/worktree 的项目配置，另一个 clone 的行为不能作为本 worktree
+的门禁证据；必须在目标 worktree 的全新会话中验收。
 
 ## 这个项目是什么
 
@@ -30,17 +31,22 @@
 阶段三 Live 提交基线为 365；SERP 可选契约新增 14 个行为回归，最终提交必须以 379 为准。
 
 **阶段一 · 前置检查** ✅
-**阶段二 · Claude Code 宿主门禁生效** ✅ 证据在 `acceptance-evidence/terminal/stage2-claude-host-gates.md`
+**阶段二 · Claude Code 宿主门禁生效** ✅ 初始证据在
+`acceptance-evidence/terminal/stage2-claude-host-gates.md`；脚本更名后的当前路径复验证据在
+`acceptance-evidence/terminal/stage2-claude-host-current-path.md`。
 
 | 项 | 结果 |
 | --- | --- |
-| C PreToolUse 拦截受保护命令 | PASS |
-| D 子目录下门禁不失效 | PASS |
-| E Stop 拦截未完成 run | PASS |
-| F SubagentStop 拦截子代理 | PASS |
-| G 清除 manifest 后行为正确 | PASS（含一处预期纠正，见文档） |
+| A 当前路径根目录 PreToolUse | PASS |
+| B 当前路径子目录 PreToolUse | PASS |
+| C 当前路径 SubagentStop | PASS |
+| D 当前路径 Stop | PASS |
 
-A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已被会话列出。
+四项均由执行复验的全新 Claude Code 会话报告为自动触发，命令前缀为
+`runtime/stage_hook.py`，未出现旧路径。当前结论是组合证据：初始验收保留完整命令、cwd 与事件
+时序；当前输出证明新路径被调用；`.claude/settings.json` 与自动化测试证明三个事件均接到该路径。
+子目录 stderr 不自带 cwd，`Stop`/`SubagentStop` 又共用同一命令，因此不把单行输出夸大为独立
+事件证明。用户已明确接受 Claude 的现场报告，不要求再次扰动宿主状态。
 
 **阶段三 · Live 采集** 已完成；按 2026-08-31 修订后的 SERP 可选契约重算，7 条全部 PASS：
 
@@ -65,6 +71,8 @@ A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已
   二次原地更新零 append，读回确认 `unknown` 保持为 `unknown`（不空、不为 0），事后删掉 smoke 工作表。
 - stage hook 已从 `runtime/codex_stage_hook.py` 更名为宿主中立的 `runtime/stage_hook.py`
   （`a719d09`），两个宿主配置均已重指，转发垫片已删除（`d051e41`）。
+- 更名后的 Claude Code 当前路径已重新实测根目录/子目录 `PreToolUse`、`SubagentStop` 与
+  `Stop` 全部 PASS；不是用手工执行 hook 代替宿主触发。
 
 ## 剩余问题
 
@@ -81,12 +89,24 @@ A/B 由 C–G 反证：hook 拦得动就说明已加载且被信任；skills 已
 它没有进入决策、没有 fallback、没有伪造，按新契约属于非阻断改进；以后若主动使用 SERP，
 任何声称 PASS 的结果仍必须通过真实 top-10 receipt。
 
-**3. Release decision：READY TO MERGE**
+**3. Release acceptance：PASS**
 
 自动化 379 tests、Claude Host acceptance、7 条 Live acceptance、Semrush relay-only 与 provenance
-均已满足，未发现开放 P0/P1。按 `TRUST_BOUNDARY.md` 可以推荐合并；本任务只提交并推送，不代替用户执行合并。
+均已满足，未发现开放 P0/P1。运行时改动已经通过 PR #28 合入 main；当前验收结论不再是
+`READY TO MERGE`，而是发布门槛已通过。可选 SERP 的真实 `/sorry/` 失败仍不冒充 PASS。
 
-**4. 已完成但不要误读**
+**4. active manifest 并发风险不是 release blocker，但必须遵守隔离规则**
+
+当前路径复验期间，同一 worktree 的另一个 Claude 会话覆盖了 `.seo-run/active.json`。D 项的
+首次 `Stop` 原始反馈在覆盖前已经取得，因此不影响该项 PASS；被覆盖后的 `/tmp` 文件不作为
+D 的证据。这个事件证明默认 manifest 是 worktree 级单例状态，不是并发锁。
+
+同一 worktree 同一时刻只允许一个 production host session；仅换 `SEO_RUN_MANIFEST` 不足以隔离
+浏览器与 evidence。确需并发 Live 时，必须同时分离 worktree、Google/Semrush CDP 端口与 profile、
+manifest、evidence 目录，并在宿主启动前完成设置；否则必须串行。发现 `run_id` 意外变化时立即
+fail closed，不得猜测证据归属。
+
+**5. 已完成但不要误读**
 
 双浏览器方案已经实证：Google 9333 的 `google_auth_cookies=0`，Semrush 9334 的登录 relay 当前可用。
 Emerging 最终数据库有 5 条真实记录并已导入 Sheet，读回 5/5 一致；34 个缺失单元保持 `unknown`。
@@ -94,7 +114,7 @@ Keyword Selection 和 Page Keyword Mapping 两个 Skill 都已将 SERP 改为可
 `observe_serp`，不会阻断批次；observed mismatch、伪造 PASS、无证据 KD 晋级和无 overlap 的独立 URL
 仍会 fail closed。旧的 429 尝试文档仍是历史 AEB 记录，不代表当前 7 条验收状态。
 
-## 三个环境坑（都真实发生过）
+## 四个环境坑（都真实发生过）
 
 1. **auto 模式分类器故障**：写入与代码执行全被拒、只读正常。
    不要重试，让用户按 `Shift+Tab` 切出 auto 模式。详见 `CLAUDE.md`。
@@ -109,6 +129,11 @@ Keyword Selection 和 Page Keyword Mapping 两个 Skill 都已将 SERP 改为可
    环境类成因则需重启会话。
    **改 hook 路径必须按序**：保留旧文件 → 改配置 → 重启所有会话 → 才能删旧文件
    （宿主在启动时把 wiring 读进内存，改磁盘对当前会话无效）。
+
+4. **同一 worktree 并发会话覆盖 active manifest**：
+   `.seo-run/active.json` 没有多会话隔离。不要在同一 worktree 并发跑 production。并发 Live 必须
+   同时使用独立 worktree、独立 Google/Semrush CDP 端口与 profile、独立 manifest 和 evidence；
+   只设置唯一 `SEO_RUN_MANIFEST` 仍不安全。
 
 ## 用户偏好
 
