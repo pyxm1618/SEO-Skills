@@ -82,6 +82,23 @@ SERP fields may remain `unknown` when the optional review was not completed. Als
 
 Cluster surviving evidence-complete terms back to `domain × root × parent_seed` using the existing method.
 
+Provenance clustering records where a keyword came from. It does not decide how
+many pages the surviving set needs, because Google decides that and exposes the
+decision through the result set. Add SERP-overlap clustering over the
+`serp_review` evidence already collected for those survivors:
+
+```bash
+python scripts/cluster_by_serp.py --input .seo-run/evidence/serp-*.json --threshold 3
+```
+
+This is `calculated` and introduces no new acquisition. It runs here by design:
+SERP evidence exists for candidates that reached SERP review, so clustering the
+survivors costs nothing, while clustering every discovery candidate would
+require one live page load per keyword.
+
+Keywords sharing at least the threshold number of top-10 URLs can be served by
+one page; keywords below it need separate pages even when they share a root.
+
 ## 19. Infer product directions
 
 Translate strong demand clusters into possible product/content architectures. Keywords remain demand evidence, not products.

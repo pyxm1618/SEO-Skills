@@ -54,6 +54,7 @@ PROTECTED_COMMAND_RULES = (
 
 STAGE_EVIDENCE_TYPES = {
     "discovery_autocomplete": "google_autocomplete",
+    "discovery_expansions": "google_serp_expansions",
     "discovery_semrush_ideas": "semrush_ideas",
     "discovery_semrush_competitor_organic": "semrush_competitor_organic",
     "stage6_exact": "semrush_exact",

@@ -8,6 +8,11 @@
     "equals": {"source": "google_autocomplete"},
     "list_min": {"suggestions": 1}
   },
+  "discovery_expansions": {
+    "required": ["seed", "people_also_ask", "related_searches", "expansion_count", "market", "observed_at", "source", "evidence_ref"],
+    "equals": {"source": "google_serp_expansions"},
+    "number_range": {"expansion_count": {"min": 1, "integer": true}}
+  },
   "discovery_semrush_ideas": {
     "required": ["seed", "rows", "observed_at", "metric_source", "relay_origin", "provenance_ref"],
     "equals": {"metric_source": "Semrush"},

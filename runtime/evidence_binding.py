@@ -21,6 +21,7 @@ COLLECTOR_FILES = {
     "semrush_exact": ROOT / "collectors" / "semrush_relay_collector.py",
     "semrush_competitor_organic": ROOT / "collectors" / "semrush_relay_collector.py",
     "google_autocomplete": ROOT / "collectors" / "google_live_collector.py",
+    "google_serp_expansions": ROOT / "collectors" / "google_live_collector.py",
     "google_intitle": ROOT / "collectors" / "google_live_collector.py",
     "google_serp": ROOT / "collectors" / "google_live_collector.py",
     "google_trends": ROOT / "collectors" / "google_live_collector.py",
@@ -31,6 +32,7 @@ EXPECTED_COLLECTORS = {
     "semrush_exact": "semrush_relay_collector",
     "semrush_competitor_organic": "semrush_relay_collector",
     "google_autocomplete": "google_live_collector",
+    "google_serp_expansions": "google_live_collector",
     "google_intitle": "google_live_collector",
     "google_serp": "google_live_collector",
     "google_trends": "google_live_collector",
@@ -41,6 +43,7 @@ REQUIRED_ARTIFACT_ROLES = {
     "semrush_exact": {"relay_raw_response", "current_network_capture"},
     "semrush_competitor_organic": {"relay_raw_response", "current_network_capture"},
     "google_autocomplete": {"screenshot", "structured_observation"},
+    "google_serp_expansions": {"screenshot", "structured_observation"},
     "google_intitle": {"screenshot", "structured_observation"},
     "google_serp": {"screenshot", "structured_observation"},
     "google_trends": {"temporal_payload", "screenshot"},
@@ -320,6 +323,20 @@ def _verify_google_semantics(evidence_type, normalized, role_paths):
         fields = ["seed", "suggestions", "country", "language", "observed_at"]
         if normalized.get("source") != "google_autocomplete":
             raise EvidenceIntegrityError("Google autocomplete source mismatch")
+    elif evidence_type == "google_serp_expansions":
+        fields = ["seed", "people_also_ask", "related_searches", "market", "language", "observed_at"]
+        if normalized.get("source") != "google_serp_expansions":
+            raise EvidenceIntegrityError("Google SERP expansions source mismatch")
+        paa = normalized.get("people_also_ask")
+        related = normalized.get("related_searches")
+        if not isinstance(paa, list) or not isinstance(related, list):
+            raise EvidenceIntegrityError("Google SERP expansions lists are malformed")
+        if not paa and not related:
+            raise EvidenceIntegrityError("Google SERP expansions observed neither block")
+        # The stage contract gates on the count, so it must be derived from the
+        # observed terms rather than trusted alongside them.
+        if normalized.get("expansion_count") != len(paa) + len(related):
+            raise EvidenceIntegrityError("Google SERP expansions count differs from observed terms")
     elif evidence_type == "google_intitle":
         fields = ["intitle_results", "market", "observed_at"]
         expected_query = f'intitle:"{normalized.get("keyword")}"'

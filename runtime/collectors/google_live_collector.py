@@ -107,6 +107,26 @@ def assert_google(page):
         raise RuntimeError("Google CAPTCHA/unusual-traffic page detected")
 
 
+def goto_google(page, url):
+    """Open a google.com URL, defeating the country redirect once if it fires.
+
+    Google redirects google.com to a ccTLD (google.com.hk, google.co.jp, ...)
+    based on egress IP. That ccTLD is a different market and a different origin,
+    so `assert_google` rejects it and every collection from an affected network
+    fails. Visiting `/ncr` (No Country Redirect) records the preference on the
+    context; retry the original URL once afterwards. A second redirect is still
+    a real BLOCKED condition.
+    """
+    page.goto(url, wait_until="domcontentloaded")
+    if _google_url(page.url):
+        assert_google(page)
+        return
+    page.goto("https://www.google.com/ncr", wait_until="domcontentloaded")
+    page.wait_for_timeout(1200)
+    page.goto(url, wait_until="domcontentloaded")
+    assert_google(page)
+
+
 def screenshot(page, evidence_dir, name):
     evidence_dir = Path(evidence_dir)
     evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -125,8 +145,7 @@ def evidence_json(evidence_dir, name, payload):
 
 def autocomplete(context, seed, country, language, evidence_dir):
     page = context.new_page()
-    page.goto(f"https://www.google.com/search?hl={quote_plus(language)}&gl={quote_plus(country)}", wait_until="domcontentloaded")
-    assert_google(page)
+    goto_google(page, f"https://www.google.com/search?hl={quote_plus(language)}&gl={quote_plus(country)}")
     box = page.locator('textarea[name="q"], input[name="q"]').first
     if not box.is_visible():
         raise RuntimeError("Google search input unavailable")
@@ -169,8 +188,7 @@ def autocomplete(context, seed, country, language, evidence_dir):
 def intitle(context, keyword, market, evidence_dir):
     page = context.new_page()
     query = f'intitle:"{keyword}"'
-    page.goto(f"https://www.google.com/search?q={quote_plus(query)}&gl={quote_plus(market)}", wait_until="domcontentloaded")
-    assert_google(page)
+    goto_google(page, f"https://www.google.com/search?q={quote_plus(query)}&gl={quote_plus(market)}")
     stats = page.locator("#result-stats")
     # Google can keep #result-stats in the DOM while Playwright reports the node
     # as not visible. The text is still part of the current loaded result page and
@@ -304,8 +322,7 @@ def _next_page_url(page):
 
 def serp(context, keyword, market, evidence_dir):
     page = context.new_page()
-    page.goto(f"https://www.google.com/search?q={quote_plus(keyword)}&gl={quote_plus(market)}&num=10", wait_until="domcontentloaded")
-    assert_google(page)
+    goto_google(page, f"https://www.google.com/search?q={quote_plus(keyword)}&gl={quote_plus(market)}&num=10")
     _wait_for_serp_headings(page)
     rows = []
     seen = set()
@@ -324,8 +341,7 @@ def serp(context, keyword, market, evidence_dir):
         next_url = _next_page_url(page)
         if not next_url or next_url in page_urls:
             break
-        page.goto(next_url, wait_until="domcontentloaded")
-        assert_google(page)
+        goto_google(page, next_url)
         _wait_for_serp_headings(page)
         page_urls.append(page.url)
     if len(rows) < 10:
@@ -698,6 +714,100 @@ class Throttle:
         self.sleeper(delay)
 
 
+def _clean_text(node):
+    try:
+        if not node.is_visible():
+            return ""
+        return " ".join(node.inner_text().split()).strip()
+    except Exception:
+        return ""
+
+
+def _collect_paa(page):
+    """Visible 'People also ask' questions on the current SERP.
+
+    Google also renders a wrapper element holding every question concatenated.
+    It is rejected by the single-'?' and length rules rather than by a selector,
+    because the wrapper's markup changes more often than its shape does.
+    """
+    out = []
+    for selector in ('[jsname="yEVEwb"]', "div[data-initq]", '[role="heading"][aria-level="3"]'):
+        for node in page.locator(selector).all():
+            text = _clean_text(node)
+            if not text or not text.endswith("?") or text.count("?") > 1:
+                continue
+            if len(text) > 120 or text.lower().startswith("people also ask"):
+                continue
+            if text not in out:
+                out.append(text)
+    return out
+
+
+RELATED_NOISE = {"next", "more results", "previous", "images", "videos", "news", "shopping"}
+
+
+def _collect_related(page, seed):
+    """Visible 'Related searches' terms on the current SERP."""
+    out = []
+    seed_norm = " ".join(str(seed or "").lower().split())
+    for selector in ('a[href*="/search?"] div[role="link"]', "div[data-abe] a", "#botstuff a"):
+        for node in page.locator(selector).all():
+            text = _clean_text(node)
+            if not text or not 2 < len(text) < 80:
+                continue
+            low = text.lower()
+            if low in RELATED_NOISE or low == seed_norm or text in out:
+                continue
+            out.append(text)
+    return out
+
+
+def expansions(context, seed, market, language, evidence_dir):
+    """People Also Ask + Related Searches from one SERP page load.
+
+    Both blocks render on the same result page the SERP collector already
+    opens, so they cost no extra page load and carry the same observed
+    provenance as the organic results. They expose tool and format demand that
+    autocomplete does not return for the same seed.
+    """
+    page = context.new_page()
+    goto_google(page, f"https://www.google.com/search?q={quote_plus(seed)}&gl={quote_plus(market)}&hl={quote_plus(language)}")
+    _wait_for_serp_headings(page)
+    page.wait_for_timeout(2500)
+    paa = _collect_paa(page)
+    related = _collect_related(page, seed)
+    if not paa and not related:
+        raise RuntimeError("Google SERP exposed neither People-Also-Ask nor Related-Searches blocks")
+    observed_at = now()
+    slug = _evidence_slug("expansions", seed, market, language)
+    evidence = screenshot(page, evidence_dir, f"{slug}.png")
+    observation = evidence_json(
+        evidence_dir,
+        f"{slug}.json",
+        {
+            "page_url": page.url,
+            "seed": seed,
+            "people_also_ask": paa,
+            "related_searches": related,
+            "market": market,
+            "language": language,
+            "observed_at": observed_at,
+        },
+    )
+    return {
+        "seed": seed,
+        "people_also_ask": paa,
+        "related_searches": related,
+        "expansion_count": len(paa) + len(related),
+        "market": market,
+        "language": language,
+        "observed_at": observed_at,
+        "source": "google_serp_expansions",
+        "evidence_ref": evidence,
+        "observation_ref": observation,
+    }
+
+
 def _artifacts_for(mode, result):
     if mode == "trends_related":
         return [
@@ -717,7 +827,7 @@ def _artifacts_for(mode, result):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["autocomplete", "intitle", "serp", "trends", "trends_timeline", "trends_related"])
+    parser.add_argument("mode", choices=["autocomplete", "expansions", "intitle", "serp", "trends", "trends_timeline", "trends_related"])
     parser.add_argument("--keyword")
     parser.add_argument("--seed")
     parser.add_argument("--country", default="US")
@@ -735,6 +845,10 @@ def main():
             if not args.seed:
                 raise RuntimeError("--seed is required")
             result = autocomplete(context, args.seed, args.country, args.language, args.evidence_dir)
+        elif args.mode == "expansions":
+            if not args.seed:
+                raise RuntimeError("--seed is required")
+            result = expansions(context, args.seed, args.market, args.language, args.evidence_dir)
         else:
             if not args.keyword:
                 raise RuntimeError("--keyword is required")
@@ -751,6 +865,7 @@ def main():
         output = Path(args.output)
         evidence_type = {
             "autocomplete": "google_autocomplete",
+            "expansions": "google_serp_expansions",
             "intitle": "google_intitle",
             "serp": "google_serp",
             "trends": "google_trends",
