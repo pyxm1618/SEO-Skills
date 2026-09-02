@@ -34,6 +34,12 @@ Network failure, CAPTCHA, unavailable/unconfirmed DOM, zero visible suggestions,
 
 Do not substitute AI suggestions, Bing, WebSearch snippets/results, or third-party suggestion tools.
 
+### Google People Also Ask / Related Searches — implemented supplementary expansion
+
+The current Google live collector also supports an `expansions` mode that reads visible People Also Ask questions and Related Searches from a real Google Search result page. Validate that acquisition with the `discovery_expansions` stage contract. If the page exposes either block, the stage can pass; if neither is observed, that `expansions` acquisition returns `BLOCKED`.
+
+This source is implemented and usable now, but the current `discovery_coverage.py` does **not** include `google_serp_expansions` among the machine-enforced mandatory Full Discovery evidence types. Therefore it is currently supplementary to the formal Coverage gate: it does not replace mandatory Google Autocomplete or Semrush Ideas/Related, and skipping it is not yet rejected by the final Coverage validator. Any future decision to require this acquisition for every required Seed must update the Coverage Contract, source-receipt accounting, handoff reconciliation, and tests together.
+
 ### Semrush Ideas / Related — mandatory for Full Discovery
 
 For the default Full route, acquire Semrush Ideas/Related for every required Seed only through the current authenticated same-origin `sem.3ue.com` relay session. The request shape must be re-confirmed live from the current UI/session; historical captures are locator hints only. A Semrush block preserves any Google observation but blocks Full Coverage and formal handoff.
