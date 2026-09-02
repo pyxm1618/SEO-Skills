@@ -15,6 +15,7 @@ UNKNOWN = "unknown"
 ROOT = Path(__file__).resolve().parent
 BINDING_PATH = ROOT / "evidence_binding.py"
 COVERAGE_PATH = ROOT / "discovery_coverage.py"
+SHEET_DELIVERY_PATH = ROOT / "discovery_sheet_delivery.py"
 PRODUCTION_BINDINGS = {
     "discovery_autocomplete": "google_autocomplete",
     "discovery_expansions": "google_serp_expansions",
@@ -55,6 +56,13 @@ def _binding():
 
 def _coverage():
     spec = importlib.util.spec_from_file_location("seo_discovery_coverage_validator", COVERAGE_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _sheet_delivery():
+    spec = importlib.util.spec_from_file_location("seo_discovery_sheet_delivery_validator", SHEET_DELIVERY_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -244,6 +252,11 @@ def _verify_coverage_receipt_for_handoff(payload):
     return []
 
 
+def _verify_sheet_delivery_receipt_for_handoff(payload):
+    """Verify that this exact handoff was written to and read back from Google Sheets."""
+    return _sheet_delivery().verify_handoff(payload)
+
+
 def validate_stage(stage, payload, contracts, production=False):
     if stage not in contracts:
         return [f"stage:unknown:{stage}"]
@@ -322,6 +335,7 @@ def validate_stage(stage, payload, contracts, production=False):
 
     if stage == "discovery_handoff" and production and not errors:
         errors.extend(_verify_coverage_receipt_for_handoff(payload))
+        errors.extend(_verify_sheet_delivery_receipt_for_handoff(payload))
 
     if production and not errors:
         errors.extend(_validate_production_binding(stage, payload))
