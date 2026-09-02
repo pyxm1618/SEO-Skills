@@ -1,0 +1,42 @@
+{
+  "_comment": "Global wiring for the SEO stage gate, merged into ~/.claude/settings.json. The repository's .claude/settings.json only covers sessions opened inside this checkout; the skills are installed globally via ~/.claude/skills symlinks and are used from other projects, so the gate needs a global entry too. Deliberately does NOT cd: the hook resolves .seo-run/active.json relative to the working directory, so each project keeps its own run manifest. Guards exit 0 when the script or python3 is absent -- without them a missing path makes python3 exit 2, which is indistinguishable from a deny and blocks every Bash call in every project. Verify with: python3 runtime/check_hook_wiring.py",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "H=\"$HOME/code/SEO-Skills/runtime/stage_hook.py\"; [ -f \"$H\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$H\" pre",
+            "timeout": 10,
+            "statusMessage": "Checking SEO stage contract"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "H=\"$HOME/code/SEO-Skills/runtime/stage_hook.py\"; [ -f \"$H\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$H\" stop",
+            "timeout": 10,
+            "statusMessage": "Checking SEO run completeness"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "H=\"$HOME/code/SEO-Skills/runtime/stage_hook.py\"; [ -f \"$H\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$H\" stop",
+            "timeout": 10,
+            "statusMessage": "Checking SEO run completeness"
+          }
+        ]
+      }
+    ]
+  }
+}

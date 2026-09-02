@@ -186,6 +186,31 @@ Skill 与 runtime 是宿主无关的，但**门禁配置不通用**：Codex 读 
 当前路径的 Claude Code 自动触发验收记录在
 [`acceptance-evidence/terminal/stage2-claude-host-current-path.md`](acceptance-evidence/terminal/stage2-claude-host-current-path.md)。
 
+### 包装命令为何不能简化
+
+三处配置的 `command` 都以同一组前置检查开头，去掉任何一条都会造成实际故障：
+
+```sh
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; [ -f "$ROOT/runtime/stage_hook.py" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; cd "$ROOT" || exit 0; exec python3 runtime/stage_hook.py pre
+```
+
+写成 `cd "$(git rev-parse --show-toplevel)" && python3 runtime/stage_hook.py pre` 时，只要 cwd 不在仓库内（非 git 目录、别的项目、或 macOS TCC 权限故障导致 cwd 读不到），`git rev-parse` 失败 → `cd ""` 不改变目录 → **`python3` 对不存在的路径退出码恰好是 2，而 2 正是门禁的拒绝码** → 该会话所有 Bash 全被拒，包括用来修复它的那一条。hook 改名事故与 `~/Downloads` 权限事故都是这一个成因。
+
+**反向同样致命**：用 `|| exit 0` 包住整条命令会把真拒绝一起吞掉，留下一个只会放行的假门禁。`tests/test_hook_shell_wrapper.py` 与 `tests/test_claude_hooks_template.py` 对两侧退出码逐 case 断言，`tests/test_claude_hooks_config.py` 守住前置检查不被删除。
+
+### 在其他项目中使用（全局接线）
+
+`.claude/settings.json` 只覆盖在本 checkout 内打开的会话。若 Skill 经 `~/.claude/skills/` 软链全局安装、并在**其他项目**里使用，门禁必须另外接到全局，否则恰好在实际干活的地方不生效。
+
+把 `runtime/claude_hooks.template.json` 的 `hooks` 键合并进 `~/.claude/settings.json`（只合并该键，勿整体覆盖——该文件通常还存有 `env` 等个人配置），然后重启会话。全局模板**不做 `cd`**：`.seo-run/active.json` 按当前项目解析，每个项目各自持有自己的 run。
+
+全局命令用绝对路径指向 `runtime/stage_hook.py`，因此**改名或移动仓库会让全局门禁静默失效**。两处报警：
+
+```bash
+python3 runtime/check_hook_wiring.py    # 退出码 0=ACTIVE；不信任配置，实际执行并断言放行/拒绝
+python3 -m pytest tests/test_claude_hooks_template.py -q   # 路径漂移即报红
+```
+
 ## 开发 / 验证
 
 仅在修改 Skill / runtime 实现时需要：

@@ -816,8 +816,14 @@ def main():
         print("usage: stage_hook.py {pre|stop}", file=sys.stderr)
         return 2
     payload = _load_stdin()
-    manifest = _load_manifest()
-    return pre_tool_use(payload, manifest) if sys.argv[1] == "pre" else stop(payload, manifest)
+    if sys.argv[1] == "pre":
+        # An unprotected command has no claim on the manifest, so a damaged one
+        # must not block it. Protected commands still fail closed below.
+        stage, _ = _required_transition(payload)
+        if not stage:
+            return 0
+        return pre_tool_use(payload, _load_manifest())
+    return stop(payload, _load_manifest())
 
 
 if __name__ == "__main__":
