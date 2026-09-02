@@ -26,6 +26,18 @@ Historical knowledge such as prior `/kwogw/v2/webapi`, `ideas.GetKeywords`, or `
 
 There is no fallback to official Semrush API, API keys/units, official connectors, Ahrefs, alternative providers, or AI estimates.
 
-## Supplementary Google sources
+## Google People Also Ask and Related Searches
 
-The current Google Collector has a reliable Autocomplete, intitle, SERP, and Trends path, but no dedicated Related Searches/PAA parser. Related/PAA remain optional future supplementary sources and cannot satisfy the Full Google or Semrush coverage requirements in this repair.
+The current Google live collector **does** include a dedicated `expansions` mode. It opens a real Google Search result page for the Seed and captures visible People Also Ask questions and Related Searches from that page.
+
+Example live command:
+
+```bash
+SEO_GOOGLE_CDP_URL="$CDP_URL" python3 runtime/collectors/google_live_collector.py expansions \
+  --seed "wedding calculator" --market US --language en \
+  --output .seo-run/evidence/expansions-wedding-calculator.json
+```
+
+The result is validated with the `discovery_expansions` stage contract. A page exposing either People Also Ask or Related Searches can satisfy that stage; when neither block is observed, the `expansions` collection itself returns `BLOCKED`.
+
+This describes the **current implementation only**. At present, `discovery_coverage.py` does not list `google_serp_expansions` as one of the mandatory Full Discovery coverage evidence types, so this source does not replace mandatory Google Autocomplete or Semrush Ideas/Related and is not currently a machine-enforced Full Coverage requirement. Any change to make this acquisition mandatory must be implemented consistently in the Coverage Contract, source-receipt accounting, handoff reconciliation, and tests rather than by documentation alone.
