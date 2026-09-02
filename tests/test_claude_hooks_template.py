@@ -9,16 +9,17 @@ The global wrapper therefore differs from the per-repository one: it does not
 `cd`. The hook resolves `.seo-run/active.json` relative to the working
 directory, so staying put is what lets each project own its run manifest.
 
-The path assertion below doubles as a rename/relocation alarm. A global hook
-names the script by absolute path, so renaming the hook or moving this
-repository disables the gate silently -- which is precisely what happened when
-codex_stage_hook.py became stage_hook.py. Here that turns into a red test.
+The template intentionally names the conventional global install path
+`$HOME/code/SEO-Skills`. Tests simulate that install layout with a temporary
+HOME pointing back to the current checkout, so the contract is valid both on a
+developer machine and on GitHub runners whose checkout lives elsewhere.
 """
 
 import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "runtime" / "claude_hooks.template.json"
 HOOK = ROOT / "runtime" / "stage_hook.py"
 REQUIRED_EVENTS = ("PreToolUse", "Stop", "SubagentStop")
+INSTALL_RELATIVE = Path("code") / "SEO-Skills"
 
 UNRELATED = "npm run build"
 PROTECTED = "python3 runtime/collectors/google_live_collector.py intitle --keyword x"
@@ -45,6 +47,13 @@ def _command(event="PreToolUse"):
     return _hooks()[event][0]["hooks"][0]["command"]
 
 
+def _install_checkout(home):
+    install = Path(home) / INSTALL_RELATIVE
+    install.parent.mkdir(parents=True, exist_ok=True)
+    install.symlink_to(ROOT, target_is_directory=True)
+    return install
+
+
 def _run(cwd, tool_command=UNRELATED, event="PreToolUse", manifest=None):
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": tool_command}})
     env = dict(os.environ)
@@ -53,15 +62,18 @@ def _run(cwd, tool_command=UNRELATED, event="PreToolUse", manifest=None):
         env.pop("SEO_RUN_MANIFEST", None)
     else:
         env["SEO_RUN_MANIFEST"] = str(manifest)
-    return subprocess.run(
-        _command(event),
-        shell=True,
-        cwd=str(cwd),
-        input=payload,
-        capture_output=True,
-        text=True,
-        env=env,
-    ).returncode
+    with tempfile.TemporaryDirectory(prefix="seo-hook-home-") as home:
+        _install_checkout(home)
+        env["HOME"] = home
+        return subprocess.run(
+            _command(event),
+            shell=True,
+            cwd=str(cwd),
+            input=payload,
+            capture_output=True,
+            text=True,
+            env=env,
+        ).returncode
 
 
 def test_every_required_event_is_present():
@@ -92,14 +104,15 @@ def test_commands_do_not_cd():
         assert "cd " not in _command(event)
 
 
-def test_template_path_still_resolves_to_this_checkout():
+def test_template_path_resolves_to_the_installed_checkout(tmp_path):
     command = _command()
     referenced = command.split('H="', 1)[1].split('"', 1)[0]
-    resolved = Path(os.path.expandvars(referenced)).expanduser()
-    assert resolved == HOOK, (
-        f"template points at {resolved}, but this checkout's hook is {HOOK}. "
-        "If the hook was renamed or the repository moved, update the template and "
-        "~/.claude/settings.json -- until then the global gate is silently disabled."
+    home = tmp_path / "home"
+    install = _install_checkout(home)
+    resolved = Path(referenced.replace("$HOME", str(home))).resolve()
+    assert resolved == HOOK.resolve(), (
+        f"template path {referenced} does not resolve to {HOOK} under the supported "
+        f"install layout {install}"
     )
 
 
