@@ -152,6 +152,53 @@ def test_handoff_must_be_formal_pass():
         exporter.build_rows(bad)
 
 
+def test_handoff_binding_ignores_only_delivery_ref_and_changes_with_keywords():
+    exporter = load_exporter("sheet_binding")
+    original = handoff()
+    digest = exporter.handoff_binding_sha256(original)
+    decorated = dict(original, sheet_delivery_receipt_ref="evidence/sheet.receipt.json")
+    assert exporter.handoff_binding_sha256(decorated) == digest
+    changed = handoff(keywords=[dict(original["keywords"][0], keyword="changed keyword"), original["keywords"][1]])
+    assert exporter.handoff_binding_sha256(changed) != digest
+
+
+def test_successful_cli_writes_bound_receipt_and_decorates_handoff(tmp_path, capsys, monkeypatch):
+    exporter = load_exporter("sheet_receipt")
+    path = tmp_path / "handoff.json"
+    path.write_text(json.dumps(handoff()), encoding="utf-8")
+    sheet = FakeWorksheet()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_to_sheet.py",
+            "--handoff",
+            str(path),
+            "--sheet-id",
+            "sheet-123",
+            "--credentials",
+            "credentials.json",
+        ],
+    )
+
+    assert exporter.main(worksheet_factory=lambda *a, **k: sheet) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    decorated = json.loads(path.read_text(encoding="utf-8"))
+    receipt_path = Path(decorated["sheet_delivery_receipt_ref"])
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert output["sheet_delivery_receipt_ref"] == str(receipt_path)
+    assert receipt["schema"] == "seo-discovery-sheet-delivery/v1"
+    assert receipt["status"] == "PASS"
+    assert receipt["batch_id"] == "batch-1"
+    assert receipt["worksheet"] == "keyword_discovery"
+    assert receipt["sheet_id"] == "sheet-123"
+    assert receipt["record_count"] == 2
+    assert receipt["verified_count"] == 2
+    assert receipt["handoff_binding_sha256"] == exporter.handoff_binding_sha256(decorated)
+    assert receipt["exporter_source_sha256"] == exporter.file_sha256(EXPORTER)
+
+
 def test_cli_dry_run_needs_no_google_credentials(tmp_path, capsys, monkeypatch):
     exporter = load_exporter("sheet_dry_run")
     path = tmp_path / "handoff.json"
@@ -161,6 +208,7 @@ def test_cli_dry_run_needs_no_google_credentials(tmp_path, capsys, monkeypatch):
     payload = json.loads(capsys.readouterr().out)
     assert payload["worksheet"] == "keyword_discovery"
     assert len(payload["rows"]) == 2
+    assert "sheet_delivery_receipt_ref" not in json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_cli_requires_sheet_and_credentials_without_dry_run(tmp_path, capsys, monkeypatch):
