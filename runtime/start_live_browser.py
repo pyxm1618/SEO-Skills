@@ -13,16 +13,19 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROFILE = ROOT / ".seo-run" / "browser-profile"
+GOOGLE_PROFILE = ROOT / ".seo-run" / "google-profile"
 DEFAULT_PORT = 9223
+DEFAULT_GOOGLE_PORT = 9224
 DEFAULT_WAIT_SECONDS = 20.0
 CHROME_CANDIDATES = (
     Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
     Path("/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta"),
 )
 LOGIN_URL = "https://sem.3ue.com/"
+GOOGLE_START_URL = "https://www.google.com/ncr"
 
 
-def chrome_command(port, profile, binary):
+def chrome_command(port, profile, binary, start_url=LOGIN_URL):
     return [
         str(binary),
         "--remote-debugging-address=127.0.0.1",
@@ -30,7 +33,7 @@ def chrome_command(port, profile, binary):
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
-        LOGIN_URL,
+        start_url,
     ]
 
 
@@ -82,10 +85,10 @@ def dedicated_process_matches(port, expected_profile):
     return False
 
 
-def start_chrome(port, profile, binary):
+def start_chrome(port, profile, binary, start_url=LOGIN_URL):
     Path(profile).mkdir(parents=True, exist_ok=True)
     return subprocess.Popen(
-        chrome_command(port, profile, binary),
+        chrome_command(port, profile, binary, start_url),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -104,7 +107,7 @@ def wait_for_cdp(port, timeout):
         time.sleep(min(0.2, remaining))
 
 
-def ensure_browser(port, profile, binary, wait_seconds=DEFAULT_WAIT_SECONDS):
+def ensure_browser(port, profile, binary, wait_seconds=DEFAULT_WAIT_SECONDS, start_url=LOGIN_URL):
     _validate_port(port)
     existing = read_cdp_version(port)
     if existing is not None:
@@ -116,7 +119,7 @@ def ensure_browser(port, profile, binary, wait_seconds=DEFAULT_WAIT_SECONDS):
     if not port_is_free(port):
         raise RuntimeError(f"CDP port {port} is occupied; refusing to kill an unknown process")
 
-    process = start_chrome(port, profile, binary)
+    process = start_chrome(port, profile, binary, start_url)
     try:
         wait_for_cdp(port, wait_seconds)
     except Exception:
@@ -133,16 +136,36 @@ def find_chrome():
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser = argparse.ArgumentParser(
+        description="Start or safely reuse a project Chrome CDP session."
+    )
+    parser.add_argument("--port", type=int)
     parser.add_argument("--wait-seconds", type=float, default=DEFAULT_WAIT_SECONDS)
+    parser.add_argument(
+        "--google",
+        action="store_true",
+        help=(
+            "Start the dedicated Google browser instead of the relay browser: a separate "
+            "port and profile, exported as SEO_GOOGLE_CDP_URL. The Google collector then "
+            "reuses that persistent logged-out profile rather than building a cookieless "
+            "context per run, which Google's bot detection flags immediately."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.google:
+        port = args.port if args.port is not None else DEFAULT_GOOGLE_PORT
+        profile, start_url, variable = GOOGLE_PROFILE, GOOGLE_START_URL, "SEO_GOOGLE_CDP_URL"
+    else:
+        port = args.port if args.port is not None else DEFAULT_PORT
+        profile, start_url, variable = DEFAULT_PROFILE, LOGIN_URL, "SEO_BROWSER_CDP_URL"
+
     try:
-        status = ensure_browser(args.port, DEFAULT_PROFILE, find_chrome(), args.wait_seconds)
+        status = ensure_browser(port, profile, find_chrome(), args.wait_seconds, start_url)
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"BLOCKED: {exc}")
         return 2
-    print(f"export SEO_BROWSER_CDP_URL=http://127.0.0.1:{args.port}")
+    print(f"export {variable}=http://127.0.0.1:{port}")
     return 0
 
 

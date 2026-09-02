@@ -58,7 +58,7 @@ def test_launcher_starts_then_waits_for_cdp(monkeypatch, tmp_path):
     process = object()
     monkeypatch.setattr(launcher, "read_cdp_version", lambda port: None)
     monkeypatch.setattr(launcher, "port_is_free", lambda port: True)
-    monkeypatch.setattr(launcher, "start_chrome", lambda port, expected_profile, binary: process)
+    monkeypatch.setattr(launcher, "start_chrome", lambda port, expected_profile, binary, start_url=None: process)
     monkeypatch.setattr(launcher, "wait_for_cdp", lambda port, timeout: {"Browser": "Chrome/151"})
 
     result = launcher.ensure_browser(9223, profile, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")

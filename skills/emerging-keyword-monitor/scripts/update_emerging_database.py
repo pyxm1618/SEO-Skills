@@ -50,6 +50,63 @@ def _record_key(record: dict[str, Any]) -> tuple[str, str]:
     return canonical_keyword(record.get("domain")), canonical_keyword(record.get("keyword"))
 
 
+# Where each classifier status leaves a record for the next radar run. Statuses
+# that are still forming stay under observation; confirmed ones graduate once
+# they have been handed downstream; settled ones retire but keep their record,
+# so a decayed spike is not re-adopted as a fresh signal on a later batch.
+WATCHING_STATUSES = frozenset({"new_signal", "watch", "insufficient_evidence"})
+GRADUATING_STATUSES = frozenset({"emerging", "breakout"})
+RETIRING_STATUSES = frozenset({"noise", "mature"})
+
+
+def observation_state(status: Any) -> str:
+    """Derive the lifecycle bucket from the classifier status.
+
+    Unknown is not a verdict: a status this module does not recognise leaves the
+    record under observation rather than silently retiring it.
+    """
+    value = str(status or "").strip()
+    if value in GRADUATING_STATUSES:
+        return "graduated"
+    if value in RETIRING_STATUSES:
+        return "retired"
+    if value in WATCHING_STATUSES:
+        return "watching"
+    return "watching"
+
+
+def carry_forward(database: dict[str, Any], include_graduated: bool = False,
+                  include_retired: bool = False) -> list[dict[str, Any]]:
+    """Records the next run should observe again, with their prior status.
+
+    classify_emergence reads `previous_status` off the row it is handed, so
+    without this the next batch starts from zero and every state transition
+    reads as brand new.
+    """
+    records = database.get("records") if isinstance(database, dict) else []
+    out = []
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        state = record.get("observation_state") or observation_state(record.get("status"))
+        if state == "graduated" and not include_graduated:
+            continue
+        if state == "retired" and not include_retired:
+            continue
+        out.append(
+            {
+                "domain": record.get("domain"),
+                "keyword": record.get("keyword"),
+                "root_id": record.get("root_id"),
+                "previous_status": record.get("status"),
+                "first_observed_at": record.get("first_observed_at"),
+                "observation_count": record.get("observation_count"),
+            }
+        )
+    out.sort(key=lambda row: (canonical_keyword(row["domain"]), canonical_keyword(row["keyword"])))
+    return out
+
+
 def _route_index(routes: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
     indexed: dict[tuple[str, str], dict[str, Any]] = {}
     for route in routes:
@@ -126,6 +183,8 @@ def merge_database(
             record["status_history"] = history
 
         record["last_seen_at"] = discovered_at
+        record["observation_count"] = int(previous.get("observation_count") or 0) + 1 if previous else 1
+        record["observation_state"] = observation_state(candidate.get("status"))
         if route is not None:
             record["route"] = route.get("route")
             record["route_reason"] = route.get("route_reason")
@@ -194,12 +253,36 @@ def _load_list(path: Path, keys: tuple[str, ...]) -> list[dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="classified candidate JSON")
-    parser.add_argument("--routes", required=True, help="route JSON")
+    parser.add_argument("--input", help="classified candidate JSON")
+    parser.add_argument("--routes", help="route JSON")
     parser.add_argument("--database", required=True)
-    parser.add_argument("--csv", required=True)
+    parser.add_argument("--csv")
     parser.add_argument("--discovered-at", default=datetime.now(timezone.utc).isoformat())
+    parser.add_argument(
+        "--carry-forward",
+        metavar="PATH",
+        help=(
+            "Write the records the next run should observe again, with their prior status, "
+            "instead of merging. Graduated and retired records are excluded."
+        ),
+    )
+    parser.add_argument("--include-graduated", action="store_true")
+    parser.add_argument("--include-retired", action="store_true")
     args = parser.parse_args()
+
+    if args.carry_forward:
+        rows = carry_forward(
+            load_database(Path(args.database)), args.include_graduated, args.include_retired
+        )
+        Path(args.carry_forward).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.carry_forward).write_text(
+            json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"{len(rows)} records carried forward -> {args.carry_forward}")
+        return
+
+    if not args.input or not args.routes or not args.csv:
+        parser.error("--input, --routes and --csv are required when merging")
     database = merge_database(
         load_database(Path(args.database)),
         _load_list(Path(args.input), ("candidates", "rows")),

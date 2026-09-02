@@ -80,13 +80,15 @@ Agent；登录完成后再运行 collector。
 Google 必须使用另一个全新、隔离且没有 Google 登录 Cookie 的 profile：
 
 ```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port=9333 \
-  --user-data-dir=/tmp/seo-google-clean-profile \
-  --no-first-run --no-default-browser-check --disable-sync &
-export SEO_GOOGLE_CDP_URL=http://127.0.0.1:9333
+eval "$(python3 runtime/start_live_browser.py --google)"
 ```
+
+它导出 `SEO_GOOGLE_CDP_URL`，默认端口 9224，使用独立的持久目录
+`.seo-run/google-profile/`，并以 `https://www.google.com/ncr` 打开，避免首次加载就被
+按出口 IP 跳到 ccTLD（`google.com.hk` 等）而污染该 profile 的偏好。
+
+profile 持久是有意的：Google 对每次都全新、零 Cookie 的会话判定为机器人的概率很高。
+持久 profile 让人工通过一次验证后长期有效，而不是每次采集重新触发。
 
 两个 URL 必须不同。Google collector 连接后会检查上下文 Cookie；发现 Google 认证 Cookie
 会 fail closed。不要把登录 Google 的日常 profile 或 Semrush profile 当作 Google 端点。
@@ -94,7 +96,8 @@ export SEO_GOOGLE_CDP_URL=http://127.0.0.1:9333
 以上登录生命周期**只适用于 Semrush 浏览器**：通常只需登录一次；锁屏不会清除登录；重启电脑后
 要重新启动专用 Chrome，但通常无需重新登录。正在采集时不要让机器睡眠。会话过期、主动退出、
 删除 `.seo-run/browser-profile/` 或清除浏览数据后，需要重新登录。Google 隔离 profile 不得登录
-Google；一旦出现 Google 认证 Cookie，collector 会拒绝连接。
+Google；一旦出现 Google 认证 Cookie，collector 会拒绝连接。登出不等于每次清空：该 profile
+保留非认证 Cookie，人工通过一次 Google 验证后会持续有效。
 
 ## 生产运行最短闭环
 

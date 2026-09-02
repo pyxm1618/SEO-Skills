@@ -89,6 +89,28 @@ Route without making final SEO decisions:
 python scripts/route_candidates.py --input classified.json --format json
 ```
 
+## Record lifecycle across runs
+
+`update_emerging_database.py` persists radar records and carries
+`previous_status` forward. Each record also holds an `observation_state`
+derived from the classifier status, so a run knows what to look at next:
+
+- `new_signal`, `watch`, `insufficient_evidence` stay `watching`
+- `emerging`, `breakout` become `graduated` and stop being carried forward
+- `noise`, `mature` become `retired`, keeping the record so a decayed spike is
+  not re-adopted as a fresh signal on a later batch
+
+Export the next batch's observation set with its prior status:
+
+```bash
+python scripts/update_emerging_database.py --database radar.json \
+  --carry-forward next-observations.json
+```
+
+The state is derived from what the classifier produced. An unrecognised status
+leaves a record `watching` rather than retiring it, because unknown is not a
+verdict.
+
 For a domain-level radar, start with a domain/anchor pool and use Trends Rising as the recursive edge. Autocomplete and Semrush Ideas may be supplemental evidence but are not recursive BFS edges by default. Persist radar records and handoffs under `.seo-run/`; the monitor still does not invoke selection decisions.
 
 The live radar CLI may receive repeatable `--semrush-request PATH` options. Each path must be a current authenticated same-origin Semrush Ideas request descriptor for its captured seed; unmatched anchors remain without Semrush supplemental evidence, and any attempted relay/schema failure is a blocker. The CLI never constructs a Semrush endpoint or falls back to an API/provider.

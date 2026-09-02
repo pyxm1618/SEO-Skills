@@ -92,9 +92,13 @@ python scripts/cluster_by_serp.py --input .seo-run/evidence/serp-*.json --thresh
 ```
 
 This is `calculated` and introduces no new acquisition. It runs here by design:
-SERP evidence exists for candidates that reached SERP review, so clustering the
-survivors costs nothing, while clustering every discovery candidate would
-require one live page load per keyword.
+where the optional Step 13 review was completed, that evidence is already on
+disk, so clustering those survivors costs nothing, while clustering every
+discovery candidate would require one live page load per keyword.
+
+Cluster only candidates that actually hold `serp_review` evidence. A candidate
+whose optional review was skipped or `BLOCKED` has no observed SERP and stays
+unclustered rather than being grouped on assumption.
 
 Keywords sharing at least the threshold number of top-10 URLs can be served by
 one page; keywords below it need separate pages even when they share a root.
