@@ -32,6 +32,7 @@ def expansions_row(**overrides):
         "people_also_ask": ["How do I know my angel number?"],
         "related_searches": ["angel number calculator", "what is my angel number"],
         "expansion_count": 3,
+        "result_status": "observed",
         "market": "US",
         "language": "en",
         "observed_at": "2026-09-01T10:00:00Z",
@@ -75,14 +76,19 @@ def test_expansions_contract_accepts_real_shape():
     assert errors == []
 
 
-def test_expansions_contract_rejects_empty_result():
+def test_expansions_contract_accepts_completed_absence():
     validator = load(VALIDATOR_PATH, "sv_exp_empty")
     errors = validator.validate_stage(
         "discovery_expansions",
-        expansions_row(people_also_ask=[], related_searches=[], expansion_count=0),
+        expansions_row(
+            people_also_ask=[],
+            related_searches=[],
+            expansion_count=0,
+            result_status="not_present",
+        ),
         contracts(),
     )
-    assert errors, "zero expansions must not satisfy the contract"
+    assert errors == []
 
 
 def test_expansions_contract_rejects_wrong_source():
@@ -224,14 +230,14 @@ def test_cluster_requires_two_inputs(tmp_path):
     only = write_serp(tmp_path, "kw a", ["https://x.com/1"])
     out = run(CLUSTER, "--input", only)
     assert out.returncode == 2
-    assert "at least two" in out.stderr
+    assert "BLOCKED" in out.stderr
 
 
 def test_cluster_rejects_evidence_without_results(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"keyword": "kw", "results": []}), encoding="utf-8")
     other = write_serp(tmp_path, "kw b", ["https://x.com/1"])
-    out = run(CLUSTER, "--input", str(bad), other)
+    out = run(CLUSTER, "--input", str(bad), str(other))
     assert out.returncode == 2
     assert "BLOCKED" in out.stderr
 
