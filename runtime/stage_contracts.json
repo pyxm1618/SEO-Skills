@@ -9,9 +9,9 @@
     "list_min": {"suggestions": 1}
   },
   "discovery_expansions": {
-    "required": ["seed", "people_also_ask", "related_searches", "expansion_count", "market", "observed_at", "source", "evidence_ref"],
+    "required": ["seed", "people_also_ask", "related_searches", "expansion_count", "result_status", "market", "observed_at", "source", "evidence_ref"],
     "equals": {"source": "google_serp_expansions"},
-    "number_range": {"expansion_count": {"min": 1, "integer": true}}
+    "number_range": {"expansion_count": {"min": 0, "integer": true}}
   },
   "discovery_semrush_ideas": {
     "required": ["seed", "rows", "observed_at", "metric_source", "relay_origin", "provenance_ref"],
