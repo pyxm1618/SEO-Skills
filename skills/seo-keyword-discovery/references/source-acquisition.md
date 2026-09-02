@@ -14,6 +14,31 @@ SEO_BROWSER_CDP_URL="$CDP_URL" python3 runtime/collectors/google_live_collector.
 
 If the collector returns `BLOCKED`, do not invent suggestions or replace the source.
 
+## Google People Also Ask and Related Searches
+
+Every required Seed and every required Branch Seed must run `runtime/collectors/google_live_collector.py expansions` against a real Google Search result page. The collector attempts both visible People Also Ask questions and Related Searches in the same acquisition.
+
+Example live command:
+
+```bash
+SEO_GOOGLE_CDP_URL="$CDP_URL" python3 runtime/collectors/google_live_collector.py expansions \
+  --seed "wedding calculator" --market US --language en \
+  --output .seo-run/evidence/expansions-wedding-calculator.json
+```
+
+Validate the output with `discovery_expansions`.
+
+The acquisition is mandatory to **attempt**, but Google is not required to return expansion rows:
+
+- one or both blocks observed: `result_status=observed`, `expansion_count>0`, PASS when evidence validates;
+- real page checked successfully but neither block present: `result_status=not_present`, `expansion_count=0`, PASS;
+- acquisition never run: `NOT_RUN`, which blocks Full Discovery;
+- CAPTCHA, network failure, unavailable/unconfirmed DOM, or missing evidence: `BLOCKED`, which blocks Full Discovery.
+
+Observed PAA/Related rows are normal Discovery source rows. First-round rows must be frozen in `source_receipts` and reconciled through `candidate_inventory.row_ledger`; Branch rows are reconciled through `branch_row_ledger`. They may become Candidates, explicit duplicates, or supported low-risk exclusions. A valid zero-result acquisition contributes no rows but still proves the mandatory check was performed.
+
+`google_serp_expansions` does not replace Google Autocomplete or Semrush Ideas/Related. All three mandatory Seed-level acquisitions are independently accounted for by the Full Coverage gate.
+
 ## Semrush relay only
 
 Every new/current Semrush acquisition in this repository uses only `https://sem.3ue.com/` through the authenticated same-origin browser session. Full Traditional Discovery uses the relay for Ideas/Related on every required Seed and Branch Seed; an explicitly configured competitor sweep uses the same relay for each competitor domain.
@@ -25,19 +50,3 @@ The supported descriptor modes are `ideas`, `exact`, and `competitor_organic`. T
 Historical knowledge such as prior `/kwogw/v2/webapi`, `ideas.GetKeywords`, or `keywords.GetInfo` observations may be used only to help locate the current request in the UI. Do not copy a historical endpoint into a live descriptor until current traffic proves it still exists and returns the expected schema.
 
 There is no fallback to official Semrush API, API keys/units, official connectors, Ahrefs, alternative providers, or AI estimates.
-
-## Google People Also Ask and Related Searches
-
-The current Google live collector **does** include a dedicated `expansions` mode. It opens a real Google Search result page for the Seed and captures visible People Also Ask questions and Related Searches from that page.
-
-Example live command:
-
-```bash
-SEO_GOOGLE_CDP_URL="$CDP_URL" python3 runtime/collectors/google_live_collector.py expansions \
-  --seed "wedding calculator" --market US --language en \
-  --output .seo-run/evidence/expansions-wedding-calculator.json
-```
-
-The result is validated with the `discovery_expansions` stage contract. A page exposing either People Also Ask or Related Searches can satisfy that stage; when neither block is observed, the `expansions` collection itself returns `BLOCKED`.
-
-This describes the **current implementation only**. At present, `discovery_coverage.py` does not list `google_serp_expansions` as one of the mandatory Full Discovery coverage evidence types, so this source does not replace mandatory Google Autocomplete or Semrush Ideas/Related and is not currently a machine-enforced Full Coverage requirement. Any change to make this acquisition mandatory must be implemented consistently in the Coverage Contract, source-receipt accounting, handoff reconciliation, and tests rather than by documentation alone.
