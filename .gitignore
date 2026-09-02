@@ -10,3 +10,4 @@ __pycache__/
 *service-account*.json
 *service_account*.json
 *credentials*.json
+.gstack/

@@ -80,13 +80,15 @@ Agent；登录完成后再运行 collector。
 Google 必须使用另一个全新、隔离且没有 Google 登录 Cookie 的 profile：
 
 ```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port=9333 \
-  --user-data-dir=/tmp/seo-google-clean-profile \
-  --no-first-run --no-default-browser-check --disable-sync &
-export SEO_GOOGLE_CDP_URL=http://127.0.0.1:9333
+eval "$(python3 runtime/start_live_browser.py --google)"
 ```
+
+它导出 `SEO_GOOGLE_CDP_URL`，默认端口 9224，使用独立的持久目录
+`.seo-run/google-profile/`，并以 `https://www.google.com/ncr` 打开，避免首次加载就被
+按出口 IP 跳到 ccTLD（`google.com.hk` 等）而污染该 profile 的偏好。
+
+profile 持久是有意的：Google 对每次都全新、零 Cookie 的会话判定为机器人的概率很高。
+持久 profile 让人工通过一次验证后长期有效，而不是每次采集重新触发。
 
 两个 URL 必须不同。Google collector 连接后会检查上下文 Cookie；发现 Google 认证 Cookie
 会 fail closed。不要把登录 Google 的日常 profile 或 Semrush profile 当作 Google 端点。
@@ -94,7 +96,8 @@ export SEO_GOOGLE_CDP_URL=http://127.0.0.1:9333
 以上登录生命周期**只适用于 Semrush 浏览器**：通常只需登录一次；锁屏不会清除登录；重启电脑后
 要重新启动专用 Chrome，但通常无需重新登录。正在采集时不要让机器睡眠。会话过期、主动退出、
 删除 `.seo-run/browser-profile/` 或清除浏览数据后，需要重新登录。Google 隔离 profile 不得登录
-Google；一旦出现 Google 认证 Cookie，collector 会拒绝连接。
+Google；一旦出现 Google 认证 Cookie，collector 会拒绝连接。登出不等于每次清空：该 profile
+保留非认证 Cookie，人工通过一次 Google 验证后会持续有效。
 
 ## 生产运行最短闭环
 
@@ -185,6 +188,31 @@ Skill 与 runtime 是宿主无关的，但**门禁配置不通用**：Codex 读 
 
 当前路径的 Claude Code 自动触发验收记录在
 [`acceptance-evidence/terminal/stage2-claude-host-current-path.md`](acceptance-evidence/terminal/stage2-claude-host-current-path.md)。
+
+### 包装命令为何不能简化
+
+三处配置的 `command` 都以同一组前置检查开头，去掉任何一条都会造成实际故障：
+
+```sh
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; [ -f "$ROOT/runtime/stage_hook.py" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; cd "$ROOT" || exit 0; exec python3 runtime/stage_hook.py pre
+```
+
+写成 `cd "$(git rev-parse --show-toplevel)" && python3 runtime/stage_hook.py pre` 时，只要 cwd 不在仓库内（非 git 目录、别的项目、或 macOS TCC 权限故障导致 cwd 读不到），`git rev-parse` 失败 → `cd ""` 不改变目录 → **`python3` 对不存在的路径退出码恰好是 2，而 2 正是门禁的拒绝码** → 该会话所有 Bash 全被拒，包括用来修复它的那一条。hook 改名事故与 `~/Downloads` 权限事故都是这一个成因。
+
+**反向同样致命**：用 `|| exit 0` 包住整条命令会把真拒绝一起吞掉，留下一个只会放行的假门禁。`tests/test_hook_shell_wrapper.py` 与 `tests/test_claude_hooks_template.py` 对两侧退出码逐 case 断言，`tests/test_claude_hooks_config.py` 守住前置检查不被删除。
+
+### 在其他项目中使用（全局接线）
+
+`.claude/settings.json` 只覆盖在本 checkout 内打开的会话。若 Skill 经 `~/.claude/skills/` 软链全局安装、并在**其他项目**里使用，门禁必须另外接到全局，否则恰好在实际干活的地方不生效。
+
+把 `runtime/claude_hooks.template.json` 的 `hooks` 键合并进 `~/.claude/settings.json`（只合并该键，勿整体覆盖——该文件通常还存有 `env` 等个人配置），然后重启会话。全局模板**不做 `cd`**：`.seo-run/active.json` 按当前项目解析，每个项目各自持有自己的 run。
+
+全局命令用绝对路径指向 `runtime/stage_hook.py`，因此**改名或移动仓库会让全局门禁静默失效**。两处报警：
+
+```bash
+python3 runtime/check_hook_wiring.py    # 退出码 0=ACTIVE；不信任配置，实际执行并断言放行/拒绝
+python3 -m pytest tests/test_claude_hooks_template.py -q   # 路径漂移即报红
+```
 
 ## 开发 / 验证
 

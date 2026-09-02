@@ -42,6 +42,35 @@ For every required Seed, use the project Google live collector against a real Go
 
 Never substitute AI expansion, Bing, generic WebSearch results, or a third-party suggestion page for mandatory Google Autocomplete evidence.
 
+## Seed generation from universal roots
+
+`scripts/expand_seeds.py` fills the `x` slot of the universal root patterns
+with a domain topic to produce Seed hypotheses:
+
+```bash
+python3 scripts/expand_seeds.py --domain tarot --topic tarot --format csv
+```
+
+Every row is `analysis`. A Seed becomes a candidate only after the live
+collector observes it. The generator deliberately over-produces; unreal demand
+is removed by Google returning nothing for it, not by AI judgement.
+
+## People Also Ask and Related Searches
+
+The result page already opened for a query also renders People Also Ask and
+Related Searches. Capture both in one page load:
+
+```bash
+SEO_GOOGLE_CDP_URL="$CDP_URL" python3 runtime/collectors/google_live_collector.py expansions \
+  --seed "angel number meaning" --market US --language en \
+  --output .seo-run/evidence/expansions-angel-number-meaning.json
+```
+
+Validate with the `discovery_expansions` stage contract. These blocks expose
+tool and format demand that autocomplete does not return for the same seed. A
+query legitimately carrying only one of the two blocks still passes; a page
+exposing neither is `BLOCKED`.
+
 ## Semrush discovery
 
 Default Full Traditional Discovery requires Semrush Ideas/Related for every required Seed and every required Branch Seed. Current acquisition must use the authenticated same-origin `sem.3ue.com` relay collector. Google evidence is retained when Semrush is blocked, but the Full Coverage Contract remains `BLOCKED` and no formal handoff is allowed. An explicitly labelled diagnostic Google-only run is not a Full handoff.

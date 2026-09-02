@@ -17,6 +17,7 @@ BINDING_PATH = ROOT / "evidence_binding.py"
 COVERAGE_PATH = ROOT / "discovery_coverage.py"
 PRODUCTION_BINDINGS = {
     "discovery_autocomplete": "google_autocomplete",
+    "discovery_expansions": "google_serp_expansions",
     "discovery_semrush_ideas": "semrush_ideas",
     "discovery_semrush_competitor_organic": "semrush_competitor_organic",
     "stage6_exact": "semrush_exact",
@@ -28,6 +29,20 @@ PRODUCTION_BINDINGS = {
 }
 CANDIDATE_SCOPED_STAGES = frozenset(
     {"stage6_exact", "intitle_observation", "kgr_intitle", "serp_review", "finalist_trend"}
+)
+# Stages that legitimately carry no single collector receipt: manifests and
+# gates that verify other receipts, plus the two stages handled ahead of the
+# PRODUCTION_BINDINGS lookup. Any other stage missing from PRODUCTION_BINDINGS
+# is a registration bug, and --production must fail closed rather than silently
+# skip the binding replay for it.
+EVIDENCE_EXEMPT_STAGES = frozenset(
+    {
+        "discovery_input_manifest",
+        "discovery_coverage",
+        "discovery_handoff",
+        "kgr_intitle",
+        "emerging_radar_run",
+    }
 )
 
 
@@ -160,6 +175,8 @@ def _validate_production_binding(stage, payload):
             evidence_type = PRODUCTION_BINDINGS.get(stage)
             if evidence_type:
                 binding.verify_payload(payload, evidence_type)
+            elif stage not in EVIDENCE_EXEMPT_STAGES:
+                return [f"evidence:stage {stage} has no production evidence binding registered"]
     except Exception as exc:
         return [f"evidence:{exc}"]
     return []

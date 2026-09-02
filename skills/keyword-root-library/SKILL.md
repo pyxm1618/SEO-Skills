@@ -18,10 +18,16 @@ Read `references/root-taxonomy.md` before changing lifecycle, evidence, enums, o
 Before proposing roots for a domain, query the library:
 
 ```bash
+python scripts/query_roots.py --overview
 python scripts/query_roots.py --domain travel --limit 50
 python scripts/query_roots.py --category calculate --status verified
 python scripts/query_roots.py --text "meaning"
 ```
+
+`--overview` takes no other argument and prints the industries the library
+already covers plus the universal roots grouped by demand category. Run it
+before assuming a domain is uncovered: the library spans far more industries
+than the examples used throughout the documentation.
 
 Prefer `verified` and `active`; keep `candidate` roots separated as hypotheses. Add roots only for uncovered demand.
 
