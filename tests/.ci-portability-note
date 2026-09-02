@@ -1,1 +1,0 @@
-This branch fixes only the Claude global-hook test harness so CI can simulate the documented $HOME/code/SEO-Skills install layout regardless of runner checkout path.
