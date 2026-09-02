@@ -31,6 +31,23 @@ Rules:
 - a required Seed with zero suggestions is `BLOCKED`, not a successful empty observation;
 - source/evidence must come from the project live Google collector.
 
+## Google PAA/Related observation
+
+Required fields:
+
+`seed | people_also_ask | related_searches | expansion_count | result_status | market | language | observed_at | source | evidence_ref`
+
+Rules:
+
+- `source` must be `google_serp_expansions`;
+- every required Seed and Branch Seed must run the check;
+- `result_status=observed` means at least one PAA or Related Search row was observed;
+- `result_status=not_present` is valid only when the real Google result page was successfully checked and both observed lists are empty; `expansion_count` is then the real numeric zero;
+- `NOT_RUN` and acquisition failure are not equivalent to `not_present` and block Full Coverage;
+- observed rows enter the same row-accounting system as other Discovery sources.
+
+The requirement is therefore “must check”, not “Google must display the blocks”.
+
 ## Semrush Ideas/Related observation
 
 For Full Traditional Discovery, retain at least:
@@ -70,9 +87,11 @@ Before a Full Coverage ledger is evaluated, the Root/Natural Seeds handoff is fr
 
 ## Source receipts and the row ledger
 
-`source_receipts` is the complete set of first-round acquisition receipts the manifest is signed against. Each record carries `evidence_type`, the acquisition identity (`seed`, or `competitor_domain` for a competitor sweep), and `evidence_receipt_ref`. The binding is enforced in both directions: every Candidate's `evidence_receipt_ref` must appear in this set, and Coverage requires every passing first-round acquisition — each required Seed's Google and Semrush receipt, plus each configured competitor domain's receipt — to be frozen here too. Otherwise a whole source could pass on its own receipt while its rows escaped reconciliation. Branch Seed receipts are not in this set, because a Branch Seed does not exist when the manifest is signed; they are reconciled in the Coverage ledger instead.
+`source_receipts` is the complete set of first-round acquisition receipts the manifest is signed against. Each record carries `evidence_type`, the acquisition identity (`seed`, or `competitor_domain` for a competitor sweep), and `evidence_receipt_ref`.
 
-`candidate_inventory.row_ledger` accounts for **every row those receipts actually returned**. It holds one record per receipt with an ordered `rows` list that must equal the receipt's observed rows exactly, in order. Each row declares one `disposition`:
+The binding is enforced in both directions. Every Candidate's `evidence_receipt_ref` must appear in this set, and Coverage requires every passing first-round mandatory acquisition to be frozen here: each required Seed's Google Autocomplete receipt, Google PAA/Related receipt, and Semrush receipt, plus each configured competitor domain's receipt. A valid zero-result PAA/Related receipt is still frozen even though it contributes no rows. Otherwise a whole source could pass on its own receipt while escaping Coverage accounting. Branch Seed receipts are not in this set because a Branch Seed does not exist when the manifest is signed; they are reconciled in the Coverage ledger instead.
+
+`candidate_inventory.row_ledger` accounts for **every row those receipts actually returned**. It holds one record per receipt with an ordered `rows` list that must equal the receipt's observed rows exactly, in order. A zero-result PAA/Related receipt has no observed keyword rows and therefore contributes no Candidate rows. Each non-empty row declares one `disposition`:
 
 - `kept` — becomes a Candidate; `candidate_id` must resolve to an inventory Candidate whose keyword equals the row and whose `evidence_receipt_ref` is this receipt. A Candidate is kept exactly once.
 - `dedupe_of` — the row repeats a kept Candidate; `candidate_id` must resolve to a Candidate holding the **same normalized keyword**. Production recomputes this relation instead of trusting the declaration.
@@ -90,14 +109,34 @@ The run ledger records:
 
 `observed_candidates` stays exactly equal to the frozen manifest inventory. Branch acquisitions happen after the freeze, so their output lives in `branch_candidates`, reconciled by `branch_row_ledger` under the same row-accounting rules as the manifest: every row a branch receipt returned is `kept`, `dedupe_of` an existing candidate, or `excluded` under a supported `rule_code`, and every Branch candidate must be the `kept` target of a real branch row. Each Branch candidate's `source_seed` must be a Branch Seed that completed in this run. A Branch may still only originate from a first-round Candidate carrying an authoritative `branch_required=true`.
 
-Each required Seed and Branch Seed has nested `autocomplete` and (for Full Discovery) `semrush` records with `status` and an evidence receipt on PASS. Non-PASS records retain a reason. `source_seed` binds an observed Candidate to the Seed that produced its receipt; production validation checks that receipt's original Seed. A Branch Seed must match one Candidate's exact normalized keyword, source, and evidence reference, and its `parent_seed` must equal that Candidate's `source_seed`. A Branch cannot be its own parent, point to a future/unvisited node, or bypass the authoritative `branch_required` decision.
+Each required Seed and Branch Seed has nested `autocomplete`, `expansions`, and (for Full Discovery) `semrush` records with `status` and an evidence receipt on PASS. Non-PASS records retain a reason. `expansions.status=PASS` may represent either observed rows or a verified `result_status=not_present` zero-result check. Missing `expansions`, `NOT_RUN`, `BLOCKED`, or `UNKNOWN` cannot satisfy Full Coverage.
+
+`source_seed` binds an observed Candidate to the Seed that produced its receipt; production validation checks that receipt's original Seed. A Branch Seed must match one Candidate's exact normalized keyword, source, and evidence reference, and its `parent_seed` must equal that Candidate's `source_seed`. A Branch cannot be its own parent, point to a future/unvisited node, or bypass the authoritative `branch_required` decision.
 
 Each `other_mandatory_sources` PASS record must declare a supported `evidence_type` and a receipt. Production verifies the receipt's file, evidence type, collector, collector source hash, normalized hash, and required artifacts through the existing evidence binding.
 
-## Coverage summary and handoff
+## Coverage summary
 
-The validator computes and exposes:
+The validator computes and exposes at least:
 
-`required_seed_count | autocomplete_pass_count | semrush_required_count | semrush_pass_count | required_branch_seed_count | branch_seed_pass_count | branch_candidate_count | competitor_sweep_configured | competitor_sweep_status | coverage_status | blocked_reasons | formal_handoff_allowed`
+`required_seed_count | autocomplete_pass_count | expansions_required_count | expansions_pass_count | semrush_required_count | semrush_pass_count | required_branch_seed_count | branch_seed_pass_count | branch_expansions_required_count | branch_expansions_pass_count | branch_candidate_count | competitor_sweep_configured | competitor_sweep_status | coverage_status | blocked_reasons | formal_handoff_allowed`
 
-Full Coverage requires equality of every mandatory source total and pass count, a PASS `discovery_coverage` validation receipt, and `formal_handoff_allowed=true`. A formal `discovery_handoff` must carry `coverage_status=PASS`, the exact `coverage_receipt_ref`, and a `keywords` list whose items each declare `candidate_id | keyword | source | source_seed | evidence_receipt_ref`. Production reconciles that list against the verified Coverage record: it must cover the first-round Candidate inventory **and** the reconciled Branch candidates exactly, so the handoff can neither drop a Candidate nor introduce a keyword Coverage never verified. Blocked/NOT_RUN/UNKNOWN items remain visible; they may not be silently removed to make counts equal.
+Full Coverage requires equality of every mandatory-source total and pass count, including the PAA/Related check total, a PASS `discovery_coverage` validation receipt, and `formal_handoff_allowed=true`. Blocked/NOT_RUN/UNKNOWN items remain visible; they may not be silently removed to make counts equal.
+
+## Formal handoff and Google Sheet delivery
+
+A formal `discovery_handoff` carries `coverage_status=PASS`, the exact `coverage_receipt_ref`, and a `keywords` list whose items each declare:
+
+`candidate_id | keyword | source | source_seed | evidence_receipt_ref`
+
+Production reconciles that list against the verified Coverage record: it must cover the first-round Candidate inventory **and** the reconciled Branch candidates exactly, so the handoff can neither drop a Candidate nor introduce a keyword Coverage never verified.
+
+Before production handoff validation, the exact handoff is exported to the existing SEO Google Spreadsheet, separate worksheet `keyword_discovery`. The exporter reads the current batch back and requires exact equality. A successful delivery writes a receipt with:
+
+`schema | status | batch_id | worksheet | sheet_id | record_count | verified_count | handoff_binding_sha256 | exporter_source_sha256 | verified_at`
+
+where `schema=seo-discovery-sheet-delivery/v1`, `status=PASS`, `worksheet=keyword_discovery`, and `record_count=verified_count=len(handoff.keywords)`. The exporter then adds `sheet_delivery_receipt_ref` to the handoff JSON.
+
+The binding hash covers the complete handoff content except the `sheet_delivery_receipt_ref` field itself, allowing the receipt to be created first and then referenced without a circular hash. Production handoff validation re-computes that binding, verifies the current exporter source hash, exact batch and row counts, and the receipt file. A missing Sheet receipt, partial write, extra/missing/duplicate current-batch row, or handoff mutation after delivery blocks production handoff PASS.
+
+JSON remains the machine-authoritative handoff/evidence artifact. Google Sheet delivery is mandatory for completion. CSV is optional and is not a formal output contract.
