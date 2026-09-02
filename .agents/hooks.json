@@ -1,0 +1,23 @@
+{
+  "seo-stage-gate": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel 2>/dev/null || echo ..)\" && python3 runtime/stage_hook.py pre",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "cd \"$(git rev-parse --show-toplevel 2>/dev/null || echo ..)\" && python3 runtime/stage_hook.py stop",
+        "timeout": 10
+      }
+    ]
+  }
+}

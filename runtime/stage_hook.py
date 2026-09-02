@@ -154,11 +154,22 @@ def _explicit_requirement(tool_input):
     return stage_match.group(1) if stage_match else None, candidate_match.group(1) if candidate_match else None
 
 
+def _extract_tool_call(payload):
+    if isinstance(payload, dict):
+        tool_call = payload.get("toolCall")
+        if isinstance(tool_call, dict):
+            name = str(tool_call.get("name") or "")
+            args = tool_call.get("args") or {}
+            return name, args
+        return str(payload.get("tool_name") or ""), payload.get("tool_input")
+    return "", None
+
+
 def _protected_requirement(payload):
-    tool_name = str(payload.get("tool_name") or "")
-    if tool_name.lower() not in {"bash", "shell", "terminal", "command"}:
+    tool_name, tool_input = _extract_tool_call(payload)
+    if tool_name.lower() not in {"bash", "shell", "terminal", "command", "run_command"}:
         return None
-    joined = _detection_text(payload.get("tool_input"))
+    joined = _detection_text(tool_input)
     for pattern, stage in PROTECTED_COMMAND_RULES:
         if pattern.search(joined):
             return stage
@@ -166,7 +177,8 @@ def _protected_requirement(payload):
 
 
 def _required_transition(payload):
-    explicit_stage, candidate_id = _explicit_requirement(payload.get("tool_input"))
+    _, tool_input = _extract_tool_call(payload)
+    explicit_stage, candidate_id = _explicit_requirement(tool_input)
     protected_stage = _protected_requirement(payload)
     return protected_stage or explicit_stage, candidate_id
 
@@ -738,26 +750,68 @@ def _verify_completion_requirements(manifest):
     return True, ""
 
 
+def _is_antigravity(payload):
+    if not isinstance(payload, dict):
+        return False
+    return (
+        "toolCall" in payload
+        or "executionNum" in payload
+        or "terminationReason" in payload
+        or "conversationId" in payload
+        or "stepIdx" in payload
+    )
+
+
+def _respond_pre(is_ag, allow, reason=""):
+    if is_ag:
+        if allow:
+            sys.stdout.write(json.dumps({"decision": "allow"}) + "\n")
+        else:
+            if reason:
+                sys.stderr.write(reason + "\n")
+            sys.stdout.write(json.dumps({"decision": "deny", "reason": reason}) + "\n")
+        return 0
+    if not allow:
+        if reason:
+            print(reason, file=sys.stderr)
+        return 2
+    return 0
+
+
+def _respond_stop(is_ag, allow, reason=""):
+    if is_ag:
+        if allow:
+            sys.stdout.write(json.dumps({}) + "\n")
+        else:
+            if reason:
+                sys.stderr.write(reason + "\n")
+            sys.stdout.write(json.dumps({"decision": "continue", "reason": reason}) + "\n")
+        return 0
+    if not allow:
+        if reason:
+            print(reason, file=sys.stderr)
+        return 2
+    return 0
+
+
 def pre_tool_use(payload, manifest):
+    is_ag = _is_antigravity(payload)
     stage, candidate_id = _required_transition(payload)
     protected_stage = _protected_requirement(payload)
     if not stage:
-        return 0
+        return _respond_pre(is_ag, True)
     if stage not in CANONICAL_STAGES:
-        print(f"SEO stage gate denied {stage}; unknown/non-canonical stage", file=sys.stderr)
-        return 2
+        return _respond_pre(is_ag, False, f"SEO stage gate denied {stage}; unknown/non-canonical stage")
     if manifest is None:
-        print(f"SEO stage gate denied {stage}; active run manifest is missing", file=sys.stderr)
-        return 2
+        return _respond_pre(is_ag, False, f"SEO stage gate denied {stage}; active run manifest is missing")
     if stage in CANDIDATE_SCOPED_STAGES and protected_stage == stage and not candidate_id:
-        print(
+        return _respond_pre(
+            is_ag,
+            False,
             f"SEO stage gate denied {stage}; SEO_CANDIDATE_ID is required before a validation receipt can be used",
-            file=sys.stderr,
         )
-        return 2
     if stage in GLOBAL_STAGES and candidate_id:
-        print(f"SEO stage gate denied {stage}; global stages cannot use SEO_CANDIDATE_ID", file=sys.stderr)
-        return 2
+        return _respond_pre(is_ag, False, f"SEO stage gate denied {stage}; global stages cannot use SEO_CANDIDATE_ID")
     record = _stage_record(manifest, stage, candidate_id)
     status = record.get("status") if isinstance(record, dict) else record
     if status == "PASS":
@@ -768,47 +822,44 @@ def pre_tool_use(payload, manifest):
         else:
             valid, receipt_reason = _verify_validation_receipt(record, stage)
         if valid:
-            return 0
+            return _respond_pre(is_ag, True)
         scope = f" candidate={candidate_id}" if candidate_id else ""
-        print(f"SEO stage gate denied {stage}{scope}; PASS validation receipt invalid: {receipt_reason}", file=sys.stderr)
-        return 2
+        return _respond_pre(
+            is_ag, False, f"SEO stage gate denied {stage}{scope}; PASS validation receipt invalid: {receipt_reason}"
+        )
     reason = record.get("blocked_reason", "") if isinstance(record, dict) else ""
     scope = f" candidate={candidate_id}" if candidate_id else ""
     detail = f": {reason}" if reason else ""
-    print(f"SEO stage gate denied {stage}{scope}; status={status or 'NOT_RUN'}{detail}", file=sys.stderr)
-    return 2
+    return _respond_pre(is_ag, False, f"SEO stage gate denied {stage}{scope}; status={status or 'NOT_RUN'}{detail}")
 
 
 def stop(payload, manifest):
+    is_ag = _is_antigravity(payload)
     if manifest is None:
-        return 0
+        return _respond_stop(is_ag, True)
     if payload.get("stop_hook_active") is True:
-        return 0
+        return _respond_stop(is_ag, True)
     status = str(manifest.get("status") or "IN_PROGRESS")
     if status == "BLOCKED":
         valid, reason = _verify_blocked_run(manifest)
         if valid:
-            return 0
-        print(
-            f"Active SEO production run {manifest.get('run_id', 'unknown')} cannot be BLOCKED: {reason}",
-            file=sys.stderr,
+            return _respond_stop(is_ag, True)
+        return _respond_stop(
+            is_ag, False, f"Active SEO production run {manifest.get('run_id', 'unknown')} cannot be BLOCKED: {reason}"
         )
-        return 2
     if status == "COMPLETE":
         valid, reason = _verify_completion_requirements(manifest)
         if valid:
-            return 0
-        print(
-            f"Active SEO production run {manifest.get('run_id', 'unknown')} cannot be COMPLETE: {reason}",
-            file=sys.stderr,
+            return _respond_stop(is_ag, True)
+        return _respond_stop(
+            is_ag, False, f"Active SEO production run {manifest.get('run_id', 'unknown')} cannot be COMPLETE: {reason}"
         )
-        return 2
-    print(
+    return _respond_stop(
+        is_ag,
+        False,
         f"Active SEO production run {manifest.get('run_id', 'unknown')} is {status}; "
         "finish required stages or mark the run BLOCKED with the real blocker before stopping.",
-        file=sys.stderr,
     )
-    return 2
 
 
 def main():
@@ -821,7 +872,7 @@ def main():
         # must not block it. Protected commands still fail closed below.
         stage, _ = _required_transition(payload)
         if not stage:
-            return 0
+            return _respond_pre(_is_antigravity(payload), True)
         return pre_tool_use(payload, _load_manifest())
     return stop(payload, _load_manifest())
 
