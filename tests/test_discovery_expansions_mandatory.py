@@ -101,3 +101,39 @@ def test_branch_promotion_initializes_expansion_check_as_not_run():
 
     assert branch["expansions"]["status"] == "NOT_RUN"
     assert branch["expansions"]["blocked_reason"]
+
+
+def test_expansion_branch_candidates_are_included_in_summary_count():
+    coverage = load(COVERAGE, "coverage_expansion_branch_count")
+    fixtures = load(COVERAGE_TESTS, "coverage_existing_branch_count_fixtures")
+    ledger = fixtures.full_ledger()
+
+    for seed in ledger["required_seeds"]:
+        ref = f"evidence/{seed['seed']}-google_serp_expansions.receipt.json"
+        seed["expansions"] = {"status": "PASS", "evidence_receipt_ref": ref}
+        ledger["upstream_input"]["source_receipts"].append(
+            {
+                "evidence_type": "google_serp_expansions",
+                "seed": seed["seed"],
+                "evidence_receipt_ref": ref,
+            }
+        )
+    for branch in ledger["required_branch_seeds"]:
+        branch["expansions"] = {
+            "status": "PASS",
+            "evidence_receipt_ref": f"evidence/{branch['branch_seed']}-google_serp_expansions.receipt.json",
+        }
+
+    ledger["branch_candidates"] = [
+        {
+            "candidate_id": "branch-expansion-1",
+            "keyword": "wedding alcohol calculator for beer and wine",
+            "source": "google_serp_expansions",
+            "source_seed": "wedding alcohol calculator",
+            "evidence_receipt_ref": "evidence/wedding alcohol calculator-google_serp_expansions.receipt.json",
+        }
+    ]
+
+    summary = coverage.summarize_coverage(ledger)
+
+    assert summary["branch_candidate_count"] == 1
