@@ -303,6 +303,11 @@ def summarize_coverage(ledger, production=False):
         ledger, production=production
     )
     summary.update(counts)
+    if isinstance(ledger, dict) and isinstance(ledger.get("branch_candidates"), list):
+        # The compatibility projection removes expansion-only branch candidates
+        # before invoking the legacy validator. Restore the real unprojected
+        # count in the public summary so Coverage reports what will be handed off.
+        summary["branch_candidate_count"] = len(ledger["branch_candidates"])
     legacy_errors = _legacy.validate_coverage(projected, production=production)
     errors = list(legacy_errors)
     for error in expansion_errors:
