@@ -4,20 +4,26 @@
 The local Discovery handoff remains the machine-authoritative artifact. Google
 Sheets is a mandatory delivery surface: export succeeds only when the current
 batch can be read back exactly, with no missing, extra, or duplicate candidate
-rows.
+rows. A successful real export writes a delivery receipt bound to the exact
+handoff and decorates that handoff with the receipt path so production handoff
+validation can fail closed when Sheet delivery did not happen.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
 UNKNOWN = "unknown"
 DEFAULT_WORKSHEET = "keyword_discovery"
+DELIVERY_SCHEMA = "seo-discovery-sheet-delivery/v1"
+DELIVERY_REF_FIELD = "sheet_delivery_receipt_ref"
 
 COLUMNS: tuple[tuple[str, str], ...] = (
     ("Batch ID", "batch_id"),
@@ -43,6 +49,36 @@ class SheetClient(Protocol):
 
 def expand_path(value: str) -> str:
     return os.path.expanduser(os.path.expandvars(str(value)))
+
+
+def file_sha256(path: str | Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _canonical_json_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def handoff_binding_payload(handoff: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact handoff content covered by a Sheet-delivery receipt.
+
+    The receipt path itself is excluded so the exporter can compute the binding
+    before the receipt exists and the validator can recompute it after the
+    handoff is decorated with that path. Every other field remains bound.
+    """
+    if not isinstance(handoff, dict):
+        raise ValueError("Discovery handoff must be an object")
+    return {key: value for key, value in handoff.items() if key != DELIVERY_REF_FIELD}
+
+
+def handoff_binding_sha256(handoff: dict[str, Any]) -> str:
+    return _canonical_json_sha256(handoff_binding_payload(handoff))
 
 
 def format_cell(value: Any) -> str:
@@ -191,6 +227,61 @@ def export(client: SheetClient, handoff: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def default_delivery_receipt_path(handoff_path: str | Path) -> Path:
+    path = Path(expand_path(str(handoff_path)))
+    if path.suffix:
+        return path.with_name(path.stem + ".sheet-delivery.receipt.json")
+    return Path(str(path) + ".sheet-delivery.receipt.json")
+
+
+def build_delivery_receipt(
+    handoff: dict[str, Any],
+    result: dict[str, Any],
+    sheet_id: str,
+    worksheet: str,
+) -> dict[str, Any]:
+    _validate_handoff(handoff)
+    if result.get("status") != "PASS":
+        raise ValueError("Sheet export result must be PASS before a delivery receipt can be issued")
+    expected_count = len(handoff["keywords"])
+    if result.get("record_count") != expected_count or result.get("verified_count") != expected_count:
+        raise ValueError("Sheet export result is not an exact verified handoff")
+    return {
+        "schema": DELIVERY_SCHEMA,
+        "status": "PASS",
+        "batch_id": str(handoff["batch_id"]).strip(),
+        "worksheet": str(worksheet).strip(),
+        "sheet_id": str(sheet_id).strip(),
+        "record_count": expected_count,
+        "verified_count": expected_count,
+        "handoff_binding_sha256": handoff_binding_sha256(handoff),
+        "exporter_source_sha256": file_sha256(Path(__file__).resolve()),
+        "verified_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def persist_delivery_receipt(
+    handoff_path: str | Path,
+    handoff: dict[str, Any],
+    result: dict[str, Any],
+    sheet_id: str,
+    worksheet: str,
+    receipt_path: str | Path | None = None,
+) -> Path:
+    target = Path(expand_path(str(receipt_path))) if receipt_path else default_delivery_receipt_path(handoff_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    receipt = build_delivery_receipt(handoff, result, sheet_id, worksheet)
+    target.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    decorated = dict(handoff)
+    decorated[DELIVERY_REF_FIELD] = str(target)
+    Path(expand_path(str(handoff_path))).write_text(
+        json.dumps(decorated, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
 def open_worksheet(sheet_id: str, worksheet: str, credentials: str) -> SheetClient:
     try:
         import gspread
@@ -216,10 +307,11 @@ def load_handoff(path: str) -> dict[str, Any]:
 
 def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--handoff", required=True, help="validated discovery_handoff JSON")
+    parser.add_argument("--handoff", required=True, help="Discovery handoff JSON to deliver and decorate")
     parser.add_argument("--sheet-id")
     parser.add_argument("--worksheet", default=DEFAULT_WORKSHEET)
     parser.add_argument("--credentials")
+    parser.add_argument("--receipt", help="optional Sheet-delivery receipt path")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -254,10 +346,19 @@ def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
     try:
         worksheet = worksheet_factory(sheet_id, args.worksheet, credentials)
         result = export(worksheet, handoff)
+        result["worksheet"] = args.worksheet
+        receipt_path = persist_delivery_receipt(
+            args.handoff,
+            handoff,
+            result,
+            str(sheet_id),
+            args.worksheet,
+            args.receipt,
+        )
+        result[DELIVERY_REF_FIELD] = str(receipt_path)
     except Exception as exc:
         print(f"BLOCKED: sheet delivery failed: {exc}", file=sys.stderr)
         return 2
-    result["worksheet"] = args.worksheet
     print(json.dumps(result, ensure_ascii=False))
     return 0
 
