@@ -324,15 +324,19 @@ def _verify_google_semantics(evidence_type, normalized, role_paths):
         if normalized.get("source") != "google_autocomplete":
             raise EvidenceIntegrityError("Google autocomplete source mismatch")
     elif evidence_type == "google_serp_expansions":
-        fields = ["seed", "people_also_ask", "related_searches", "market", "language", "observed_at"]
+        fields = [
+            "seed", "people_also_ask", "related_searches", "expansion_count",
+            "result_status", "market", "language", "observed_at",
+        ]
         if normalized.get("source") != "google_serp_expansions":
             raise EvidenceIntegrityError("Google SERP expansions source mismatch")
         paa = normalized.get("people_also_ask")
         related = normalized.get("related_searches")
         if not isinstance(paa, list) or not isinstance(related, list):
             raise EvidenceIntegrityError("Google SERP expansions lists are malformed")
-        if not paa and not related:
-            raise EvidenceIntegrityError("Google SERP expansions observed neither block")
+        expected_status = "observed" if paa or related else "not_present"
+        if normalized.get("result_status") != expected_status:
+            raise EvidenceIntegrityError("Google SERP expansions result status differs from observed terms")
         # The stage contract gates on the count, so it must be derived from the
         # observed terms rather than trusted alongside them.
         if normalized.get("expansion_count") != len(paa) + len(related):
@@ -505,5 +509,5 @@ def verify_kgr_payload(payload):
     if str(exact.get("provenance_ref") or "") != str(payload.get("exact_provenance_ref") or ""):
         raise EvidenceIntegrityError("KGR exact provenance differs from collector evidence")
     if str(intitle.get("evidence_ref") or "") != str(payload.get("intitle_provenance_ref") or ""):
-        raise EvidenceIntegrityError("KGR intitle provenance differs from collector evidence")
+        raise EvidenceIntegrityError("KGR intitle provenance differs from Google collector evidence")
     return True

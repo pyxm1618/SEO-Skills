@@ -768,7 +768,8 @@ def expansions(context, seed, market, language, evidence_dir):
     Both blocks render on the same result page the SERP collector already
     opens, so they cost no extra page load and carry the same observed
     provenance as the organic results. They expose tool and format demand that
-    autocomplete does not return for the same seed.
+    autocomplete does not return for the same seed. A page that genuinely
+    exposes neither block is still a completed check and is recorded explicitly.
     """
     page = context.new_page()
     goto_google(page, f"https://www.google.com/search?q={quote_plus(seed)}&gl={quote_plus(market)}&hl={quote_plus(language)}")
@@ -776,8 +777,7 @@ def expansions(context, seed, market, language, evidence_dir):
     page.wait_for_timeout(2500)
     paa = _collect_paa(page)
     related = _collect_related(page, seed)
-    if not paa and not related:
-        raise RuntimeError("Google SERP exposed neither People-Also-Ask nor Related-Searches blocks")
+    result_status = "observed" if paa or related else "not_present"
     observed_at = now()
     slug = _evidence_slug("expansions", seed, market, language)
     evidence = screenshot(page, evidence_dir, f"{slug}.png")
@@ -789,6 +789,8 @@ def expansions(context, seed, market, language, evidence_dir):
             "seed": seed,
             "people_also_ask": paa,
             "related_searches": related,
+            "expansion_count": len(paa) + len(related),
+            "result_status": result_status,
             "market": market,
             "language": language,
             "observed_at": observed_at,
@@ -799,6 +801,7 @@ def expansions(context, seed, market, language, evidence_dir):
         "people_also_ask": paa,
         "related_searches": related,
         "expansion_count": len(paa) + len(related),
+        "result_status": result_status,
         "market": market,
         "language": language,
         "observed_at": observed_at,
