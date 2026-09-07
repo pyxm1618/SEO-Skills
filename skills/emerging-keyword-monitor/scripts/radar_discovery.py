@@ -13,7 +13,7 @@ def canonical_keyword(value: Any) -> str:
 
 
 def _tokens(value: Any) -> set[str]:
-    return {token for token in re.findall(r"[a-z0-9]+", canonical_keyword(value)) if len(token) > 1}
+    return {token for token in re.findall(r"[^\W_]+", canonical_keyword(value), flags=re.UNICODE) if len(token) > 1}
 
 
 def _root_is_relevant(root: dict[str, Any], domain: str) -> bool:
@@ -91,10 +91,11 @@ def build_anchor_pool(
 
 
 def default_domain_relation(domain: str, keyword: str, parent_anchor: str) -> tuple[str, str]:
-    candidate_tokens = _tokens(keyword)
-    if not candidate_tokens:
+    candidate_text = canonical_keyword(keyword)
+    if not candidate_text:
         return "out_of_scope", "candidate keyword is empty"
 
+    candidate_tokens = _tokens(keyword)
     navigation_tokens = {
         "login",
         "signin",
@@ -108,10 +109,14 @@ def default_domain_relation(domain: str, keyword: str, parent_anchor: str) -> tu
     if candidate_tokens & navigation_tokens and ("login" in candidate_tokens or "signin" in candidate_tokens or "official" in candidate_tokens):
         return "out_of_scope", "brand_or_navigation_query"
 
+    domain_text = canonical_keyword(domain)
+    parent_text = canonical_keyword(parent_anchor)
     domain_tokens = _tokens(domain)
     parent_tokens = _tokens(parent_anchor)
     if candidate_tokens & (domain_tokens | parent_tokens):
         return "in_scope", "candidate shares a domain or parent-anchor term"
+    if any(reference and reference in candidate_text for reference in (domain_text, parent_text)):
+        return "in_scope", "candidate contains the domain or parent-anchor expression"
     return "unknown", "lexical domain relationship is not established"
 
 
@@ -148,6 +153,8 @@ def _candidate_from_row(domain: str, parent: dict[str, Any], row: dict[str, Any]
         "keyword": " ".join(str(row.get("query") or row.get("keyword") or "").split()),
         "domain": domain,
         "root_id": parent.get("root_id"),
+        "root_status": parent.get("root_status"),
+        "root_verified": parent.get("root_verified") is True,
         "root_relation": "existing_root" if parent.get("root_verified") else "root_candidate" if parent.get("root_status") == "candidate" else "unresolved",
         "parent_anchor": parent["keyword"],
         "discovery_depth": int(parent["discovery_depth"]) + 1,
