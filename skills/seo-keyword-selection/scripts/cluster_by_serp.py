@@ -22,11 +22,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 def canonical_url(value):
-    """Normalize a result URL so trivial differences do not break overlap.
-
-    Scheme, `www.`, trailing slash, query and fragment are dropped: the same
-    document reached two ways is one shared result, not two.
-    """
+    """Normalize a result URL without discarding document-selecting parameters."""
     text = str(value or "").strip()
     if not text:
         return ""
@@ -35,7 +31,7 @@ def canonical_url(value):
     if host.startswith("www."):
         host = host[4:]
     path = (parts.path or "/").rstrip("/") or "/"
-    return urlunsplit(("", host, path, "", "")).lstrip("/") or host
+    return urlunsplit(("", host, path, parts.query, "")).lstrip("/") or host
 
 
 def load_serp(path):
