@@ -26,6 +26,22 @@ Classification outputs:
 
 These fields make state changes inspectable rather than score-only decisions.
 
+`previous_status` is lifecycle context from the prior persisted observation of the same `(domain, keyword)`. It is not inferred from the current run and must not be reset merely because the keyword was absent from the latest Rising discovery.
+
+## Cross-run observation lifecycle
+
+The persisted radar database derives a separate `observation_state` from the classifier state:
+
+| classifier status | observation_state | next-run behavior |
+|---|---|---|
+| `new_signal`, `watch`, `insufficient_evidence` | `watching` | carry forward and collect a new timeline even if current Rising discovery does not rediscover the keyword |
+| `emerging`, `breakout` | `graduated` | retain history but stop default carry-forward after downstream handoff |
+| `mature`, `noise` | `retired` | retain history but stop default carry-forward |
+
+Unknown/unrecognized classifier states remain `watching`; unknown is not a retirement verdict.
+
+`run_emerging_radar.py` loads the existing database before timeline collection and merges eligible `watching` records into the current candidate pool. If a keyword is also rediscovered in the current run, current discovery context wins and historical fields only fill missing values. Carry-forward does not create a synthetic Rising event and must not overwrite current `google_rising_label`, `parent_anchor`, `discovery_depth`, or root/discovery context.
+
 ## Confidence
 
 Confidence is discrete and explainable. Persistence and multiple independently verified sources can strengthen confidence. No composite Emerging Score is used.
