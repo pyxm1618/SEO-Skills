@@ -167,10 +167,11 @@ def autocomplete(context, seed, country, language, evidence_dir):
     if not values:
         raise RuntimeError("Google visible autocomplete dropdown unavailable or returned 0 suggestions")
     observed_at = now()
-    evidence = screenshot(page, evidence_dir, f"autocomplete-{re.sub(r'[^a-zA-Z0-9]+','-',seed).strip('-')}.png")
+    evidence_key = _evidence_slug("autocomplete", seed, country, language)
+    evidence = screenshot(page, evidence_dir, f"{evidence_key}.png")
     observation = evidence_json(
         evidence_dir,
-        f"autocomplete-{re.sub(r'[^a-zA-Z0-9]+','-',seed).strip('-')}.json",
+        f"{evidence_key}.json",
         {"page_url": page.url, "seed": seed, "suggestions": values, "country": country, "language": language, "observed_at": observed_at},
     )
     return {
@@ -203,10 +204,11 @@ def intitle(context, keyword, market, evidence_dir):
     if not digits:
         raise RuntimeError("Google intitle result count could not be parsed")
     observed_at = now()
-    evidence = screenshot(page, evidence_dir, f"intitle-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png")
+    evidence_key = _evidence_slug("intitle", keyword, market)
+    evidence = screenshot(page, evidence_dir, f"{evidence_key}.png")
     observation = evidence_json(
         evidence_dir,
-        f"intitle-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.json",
+        f"{evidence_key}.json",
         {"page_url": page.url, "query": query, "result_stats_text": text, "intitle_results": int(digits), "market": market, "observed_at": observed_at},
     )
     return {
@@ -327,9 +329,8 @@ def serp(context, keyword, market, evidence_dir):
     rows = []
     seen = set()
     page_urls = [page.url]
-    first_page_screenshot = screenshot(
-        page, evidence_dir, f"serp-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.png"
-    )
+    evidence_key = _evidence_slug("serp", keyword, market)
+    first_page_screenshot = screenshot(page, evidence_dir, f"{evidence_key}.png")
     max_pages = 5
     while len(rows) < 10 and len(page_urls) <= max_pages:
         for item in _organic_rows(page, seen):
@@ -349,7 +350,7 @@ def serp(context, keyword, market, evidence_dir):
     observed_at = now()
     observation = evidence_json(
         evidence_dir,
-        f"serp-{re.sub(r'[^a-zA-Z0-9]+','-',keyword).strip('-')}.json",
+        f"{evidence_key}.json",
         {
             "page_url": page_urls[-1],
             "page_urls": page_urls,

@@ -28,7 +28,7 @@ from aggregate_signals import aggregate
 from classify_emergence import classify_candidate, load_thresholds
 from radar_discovery import build_anchor_pool, canonical_keyword, default_domain_relation, discover_rising_bfs
 from route_candidates import route_candidate
-from update_emerging_database import load_database, merge_database, write_database
+from update_emerging_database import carry_forward, load_database, merge_database, write_database
 
 
 TIMEFRAME_DEFAULTS = (
@@ -105,6 +105,52 @@ def _supplemental_candidates(
                 "supplemental_evidence_ref": payload.get("evidence_ref") if isinstance(payload, dict) else None,
             }
         )
+    return candidates
+
+
+def _database_snapshot(
+    existing_database: dict[str, Any] | None,
+    database_path: Path | None,
+) -> dict[str, Any]:
+    if existing_database is not None:
+        return existing_database
+    if database_path is not None:
+        return load_database(Path(database_path))
+    return {"schema_version": 1, "records": []}
+
+
+def _merge_carry_forward_candidates(
+    domain: str,
+    current_candidates: list[dict[str, Any]],
+    database: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Add still-watching records to the timeline pool without overwriting fresh discovery."""
+    candidates: list[dict[str, Any]] = []
+    by_keyword: dict[str, int] = {}
+
+    for candidate in current_candidates:
+        identity = canonical_keyword(candidate.get("keyword"))
+        if not identity:
+            continue
+        by_keyword[identity] = len(candidates)
+        candidates.append({"domain": domain, **candidate})
+
+    normalized_domain = canonical_keyword(domain)
+    for carried in carry_forward(database):
+        if canonical_keyword(carried.get("domain")) != normalized_domain:
+            continue
+        identity = canonical_keyword(carried.get("keyword"))
+        if not identity:
+            continue
+        if identity in by_keyword:
+            current = candidates[by_keyword[identity]]
+            for field, value in carried.items():
+                if field not in current or current.get(field) is None:
+                    current[field] = value
+            continue
+        by_keyword[identity] = len(candidates)
+        candidates.append({"domain": domain, **carried})
+
     return candidates
 
 
@@ -265,16 +311,24 @@ def run_pipeline(
                 )
 
     discovered_candidates = list(discovery.get("candidates") or [])
-    candidates: list[dict[str, Any]] = []
+    current_candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
     for candidate in discovered_candidates + supplemental_candidates:
         identity = canonical_keyword(candidate.get("keyword"))
         if not identity or identity in seen:
             continue
-        if len(candidates) >= max_candidates:
+        if len(current_candidates) >= max_candidates:
             break
         seen.add(identity)
-        candidates.append({"domain": domain, **candidate})
+        current_candidates.append({"domain": domain, **candidate})
+
+    database_requested = database_path is not None or csv_path is not None or existing_database is not None
+    database_source = _database_snapshot(existing_database, database_path) if database_requested else {"schema_version": 1, "records": []}
+    candidates = (
+        _merge_carry_forward_candidates(domain, current_candidates, database_source)
+        if database_requested
+        else current_candidates
+    )
 
     observations: list[dict[str, Any]] = []
     if timeline_fetcher is not None:
@@ -292,6 +346,7 @@ def run_pipeline(
         for candidate in aggregate_result.get("candidates", [])
     }
     classified: list[dict[str, Any]] = []
+    thresholds = load_thresholds()
     for discovery_candidate in candidates:
         keyword = canonical_keyword(discovery_candidate.get("keyword"))
         current = dict(aggregate_by_keyword.get(keyword) or {
@@ -304,7 +359,7 @@ def run_pipeline(
             if field not in current or current.get(field) is None:
                 current[field] = value
         current["domain"] = domain
-        classified.append(classify_candidate(current, load_thresholds()))
+        classified.append(classify_candidate(current, thresholds))
 
     routes: list[dict[str, Any]] = []
     for candidate in classified:
@@ -313,9 +368,9 @@ def run_pipeline(
         routes.append(route)
 
     database = None
-    if database_path is not None or csv_path is not None or existing_database is not None:
+    if database_requested:
         database = merge_database(
-            existing_database if existing_database is not None else load_database(Path(database_path)) if database_path else {"schema_version": 1, "records": []},
+            database_source,
             classified,
             routes,
             discovered_at or _now(),
