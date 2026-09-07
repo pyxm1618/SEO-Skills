@@ -99,6 +99,6 @@ Return a compact pool containing:
 root | scope | demand_category | primary_intent | status | evidence_level | evidence_ref | why_relevant
 ```
 
-Separate domain-specific roots, relevant universal roots, and unverified candidates. Do not generate Seeds until the caller moves to Seed expansion.
+Separate domain-specific roots, relevant universal roots, and unverified candidates. Do not generate Seeds until the caller moves to `seo-keyword-discovery`.
 
-The downstream keyword-selection workflow owns Seed generation, expansion, metrics, KGR, SERP validation, opportunity clustering, and product decisions. This skill owns only the root asset and its evidence lifecycle.
+`seo-keyword-discovery` owns Seed generation, live keyword expansion, low-risk discovery cleaning, finite branch coverage, and the formal Discovery handoff. `seo-keyword-selection` begins from concrete candidates and owns Exact metrics, KGR, optional SERP review/clustering, KDRoi, and opportunity decisions. This skill owns only the root asset and its evidence lifecycle.
