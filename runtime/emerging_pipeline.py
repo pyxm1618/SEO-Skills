@@ -24,6 +24,18 @@ SCRIPT_PATHS = {
 THRESHOLDS_PATH = ROOT.parent / "skills" / "emerging-keyword-monitor" / "references" / "thresholds.json"
 PIPELINE_SOURCE_PATH = Path(__file__).resolve()
 
+# These are candidate-level analysis/lifecycle fields, not temporal metrics. The
+# aggregator deliberately rebuilds temporal candidates, so the canonical runner
+# must re-attach this context before classification/routing.
+CANDIDATE_CONTEXT_FIELDS = (
+    "domain",
+    "variant_subtype",
+    "variant_evidence",
+    "root_relation",
+    "root_candidate_hypothesis",
+    "previous_status",
+)
+
 
 def _load_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -60,6 +72,44 @@ def parse_as_of(value: str) -> datetime:
     return _as_of_datetime(value, _modules()["aggregate"])
 
 
+def _is_missing(value: Any) -> bool:
+    return value is None or (
+        isinstance(value, str)
+        and value.strip().casefold() in {"", "unknown", "null", "none", "n/a", "na"}
+    )
+
+
+def _candidate_context(raw_rows: list[dict[str, Any]], aggregate: Any) -> dict[str, dict[str, Any]]:
+    """Collect stable non-temporal context by keyword without guessing conflicts."""
+    contexts: dict[str, dict[str, Any]] = {}
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        keyword = aggregate.canonical_keyword(row.get("keyword"))
+        if not keyword:
+            continue
+        context = contexts.setdefault(keyword, {})
+        for field in CANDIDATE_CONTEXT_FIELDS:
+            value = row.get(field)
+            if _is_missing(value):
+                continue
+            if field in context and context[field] != value:
+                raise ValueError(f"conflicting candidate context for {keyword}: {field}")
+            context[field] = value
+    return contexts
+
+
+def _merge_candidate_context(aggregated: dict[str, Any], raw_rows: list[dict[str, Any]], aggregate: Any) -> None:
+    contexts = _candidate_context(raw_rows, aggregate)
+    for candidate in aggregated.get("candidates", []):
+        if not isinstance(candidate, dict):
+            continue
+        context = contexts.get(aggregate.canonical_keyword(candidate.get("keyword")), {})
+        for field, value in context.items():
+            if _is_missing(candidate.get(field)):
+                candidate[field] = value
+
+
 def replay_pipeline(input_path: Path, as_of: str | datetime) -> dict[str, dict[str, Any]]:
     modules = _modules()
     input_path = Path(input_path)
@@ -67,6 +117,7 @@ def replay_pipeline(input_path: Path, as_of: str | datetime) -> dict[str, dict[s
     raw_rows = modules["validate"].load_rows(input_path)
     validated_rows = modules["validate"].validate_rows(raw_rows, as_of_datetime)
     aggregated = modules["aggregate"].aggregate(raw_rows, as_of_datetime)
+    _merge_candidate_context(aggregated, raw_rows, modules["aggregate"])
     thresholds = modules["classify"].load_thresholds()
     classified_rows = [
         modules["classify"].classify_candidate(candidate, thresholds)
