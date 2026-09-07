@@ -18,7 +18,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+
+def _query_affects_identity(key):
+    return not str(key or "").casefold().startswith("utm_")
 
 
 def canonical_url(value):
@@ -31,7 +35,14 @@ def canonical_url(value):
     if host.startswith("www."):
         host = host[4:]
     path = (parts.path or "/").rstrip("/") or "/"
-    return urlunsplit(("", host, path, parts.query, "")).lstrip("/") or host
+    query = urlencode(
+        sorted(
+            (key, item)
+            for key, item in parse_qsl(parts.query, keep_blank_values=True)
+            if _query_affects_identity(key)
+        )
+    )
+    return urlunsplit(("", host, path, query, "")).lstrip("/") or host
 
 
 def load_serp(path):
