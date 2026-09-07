@@ -8,7 +8,7 @@ Every value is one of: **observed**, **calculated**, **analysis**, or **unknown*
 
 Preserve when available:
 
-`keyword | observed_at | source | source_type | source_url | root_id | signal_value | signal_unit | country | time_window | metric_source | metric_database | first_observed_at | anchor_event | anchor_event_date | anchor_event_source | provenance_status`
+`keyword | domain | observed_at | source | source_type | source_url | root_id | root_relation | root_candidate_hypothesis | variant_subtype | variant_evidence | previous_status | signal_value | signal_unit | country | time_window | metric_source | metric_database | first_observed_at | anchor_event | anchor_event_date | anchor_event_source | provenance_status`
 
 Required provenance dimensions for a complete observation are:
 
@@ -20,9 +20,21 @@ If any are missing, `provenance_status=incomplete`. The row may still be structu
 
 Aggregation/classification may preserve:
 
-`keyword | root_id | signal_type | variant_subtype | demand_history_type | first_observed_at | estimated_birth_window | birth_window_start | birth_window_end | birth_source_resolution | birth_confidence | birth_reason | birth_evidence_series | resurgence_window | long_history_positive_seen | long_history_positive_observations | long_history_positive_windows | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | kgr_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
+`keyword | domain | root_id | root_relation | root_candidate_hypothesis | signal_type | variant_subtype | variant_evidence | demand_history_type | previous_status | first_observed_at | estimated_birth_window | birth_window_start | birth_window_end | birth_source_resolution | birth_confidence | birth_reason | birth_evidence_series | resurgence_window | long_history_positive_seen | long_history_positive_observations | long_history_positive_windows | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | kgr_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
 
 Fields are optional unless a rule explicitly requires them. Unknown fields stay unknown.
+
+### Candidate context through the canonical pipeline
+
+`aggregate_signals.py` owns temporal-series aggregation; it is not the owner of stable candidate business/lifecycle context. The canonical runner `runtime/emerging_pipeline.py` therefore re-attaches the non-temporal context carried by the validated input before classification and routing.
+
+The context currently preserved this way is:
+
+`domain | variant_subtype | variant_evidence | root_relation | root_candidate_hypothesis | previous_status`
+
+The runner keys this context by canonical keyword. A non-missing value must survive `validate -> aggregate -> classify -> route`; if the same canonical keyword supplies conflicting non-missing values for one of these fields in the same input, the runner fails rather than guessing which value is authoritative.
+
+`root_id` and temporal/history fields continue to follow their existing aggregator/classifier contracts; this context merge does not redefine thresholds, state transitions, or routing rules.
 
 ## Comparable-series key
 
@@ -92,6 +104,10 @@ These remain relative source observations. A zero novelty baseline does **not** 
 `first_observed_at` is the earliest known timestamp carried by the available evidence, not the first search ever made for the keyword.
 
 For incremental runs, if an input observation/candidate carries a prior `first_observed_at`, aggregation takes the minimum of that carried timestamp and current observation timestamps. A daily incremental input therefore must not reset the first-seen date or `age_days`.
+
+A persisted radar record in `observation_state=watching` is eligible for the next radar run even when the current Rising discovery does not rediscover the keyword. `run_emerging_radar.py` loads the existing database before timeline collection, merges those carry-forward records into the timeline candidate pool, and supplies their prior classifier status as `previous_status`. Current-run discovery context is authoritative for overlapping fields; historical context only fills missing values.
+
+Carry-forward is lifecycle continuation, not a new discovery event. A carried record must not be relabeled as `google_trends_rising` merely because it is being observed again.
 
 `estimated_birth_window` is optional and must be evidence-backed. It must not be synthesized from the first non-zero Google Trends point alone.
 
