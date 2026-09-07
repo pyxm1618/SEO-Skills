@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | [`keyword-root-library`](skills/keyword-root-library/SKILL.md) | 找、查、维护可复用的 SEO **需求词根库** | `使用 keyword-root-library，帮我找并整理 [行业] 的需求词根。` |
 | [`seo-keyword-discovery`](skills/seo-keyword-discovery/SKILL.md) | 把 domain/root/Seed 通过真实 Google + Semrush 及显式配置的补漏来源扩展为 **concrete candidates**，并验证成熟需求覆盖 | `使用 seo-keyword-discovery，从这些 roots 和 Seeds 发现候选关键词。` |
-| [`emerging-keyword-monitor`](skills/emerging-keyword-monitor/SKILL.md) | 从时间序列证据中发现 **正在形成、加速或出现新表达的搜索需求** | `使用 emerging-keyword-monitor，分析这批趋势数据里有哪些新兴关键词。` |
+| [`emerging-keyword-monitor`](skills/emerging-keyword-monitor/SKILL.md) | 从时间序列证据中发现并持续观察 **正在形成、加速或出现新表达的搜索需求** | `使用 emerging-keyword-monitor，分析这批趋势数据里有哪些新兴关键词。` |
 | [`seo-keyword-selection`](skills/seo-keyword-selection/SKILL.md) | 用真实指标、KGR、SERP 等证据 **筛选值得继续做的 SEO 关键词机会** | `使用 seo-keyword-selection，筛选这批候选关键词，告诉我哪些值得继续做。` |
 | [`seo-page-keyword-mapping`](skills/seo-page-keyword-mapping/SKILL.md) | 把已确认的搜索需求 **分配给已知/规划页面**，确定 Primary / Secondary keyword 和页面归属 | `使用 seo-page-keyword-mapping，把这批关键词映射到这些页面。` |
 
@@ -49,6 +49,8 @@ emerging-keyword-monitor
 
 Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 时不得重新跑 Seed -> Google Autocomplete -> Semrush Ideas discovery；已有 fresh compatible evidence 应复用，缺哪个 selection stage 就从最早缺失位置继续。
 
+Emerging Radar 不是一次性扫描。持久化数据库中仍处于 `watching` 的 `new_signal` / `watch` / `insufficient_evidence` 会在下一轮 Radar 中自动进入 timeline candidate pool，即使本轮 Rising 没有再次发现它们；如果同一词本轮又被重新发现，当前 discovery context 优先，历史 DB 只补缺失字段。carry-forward 本身不是新的 Rising discovery。
+
 ## 数据与来源原则
 
 - `observed`：只能来自真实 source / collector。
@@ -57,11 +59,12 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 - `unknown`：就是没有取得，不能变成 0 或估算值。
 - `missing`、`invalid`、numeric `0`、`not_applicable`、`unknown` 必须区分。
 - 当前 Semrush acquisition 只允许项目 `sem.3ue.com` authenticated same-origin relay；失败时不切换 official API、Ahrefs 或其他 provider。
-- Google Autocomplete、intitle、Google Trends 以及任何主动请求的 SERP 都必须是当前真实 Google evidence。必需来源拿不到就 BLOCKED；SERP 是可选增强，拿不到时必须如实保持 absent/unavailable、不得用于晋级，也不得冒充 PASS/AEB，但不阻断 candidate、batch 或 release。若 collector 已生成 blocker artifact 就原样保留；若 collector 未持久化 blocker，只能把现场诊断另记为 diagnostic，不能伪称 collector receipt。
-- Full Traditional Discovery 的 required Seed 与 required Branch Seed 都必须完成 Google Autocomplete + Semrush Ideas/Related；Google PASS 不等于 Coverage PASS。
+- Google Autocomplete、PAA/Related Searches、intitle、Google Trends 以及任何主动请求的 SERP 都必须是当前真实 Google evidence。必需来源拿不到就 BLOCKED；SERP 是可选增强，拿不到时必须如实保持 absent/unavailable、不得用于晋级，也不得冒充 PASS/AEB，但不阻断 candidate、batch 或 release。若 collector 已生成 blocker artifact 就原样保留；若 collector 未持久化 blocker，只能把现场诊断另记为 diagnostic，不能伪称 collector receipt。
+- Full Traditional Discovery 的 required Seed 与 required Branch Seed 都必须完成 Google Autocomplete + Google PAA/Related check + Semrush Ideas/Related；Google PASS 不等于 Coverage PASS。真实页面成功检查但 PAA/Related 两块都不存在时，`result_status=not_present`、`expansion_count=0` 是合法 PASS；未执行或 CAPTCHA/网络/DOM 无法确认则是 BLOCKED/NOT_RUN。
 - Competitor Organic 是 domain/root-cluster 级补漏来源，仅在显式配置 competitor domains 时 mandatory；未配置记录 `not_configured`，配置后失败则 BLOCKED。
 - `discovery_coverage` 必须绑定 production-verified `discovery_input_manifest`，并逐项核对 Root/Natural Seeds 原始总数、Candidate inventory 与完整 Candidate analysis；partial evidence 保留，失败项不能从 ledger 删除。
 - `discovery_handoff` 只能在 validator 签发时重新验证 exact production `discovery_coverage` PASS receipt；不存在或被篡改的 receipt 不能生成 PASS handoff。
+- Google collector 的 evidence 文件身份包含 UTF-8 输入的稳定 hash；纯中文/Unicode keyword 不会因为 ASCII slug 为空而相互覆盖。
 
 ## 真实采集浏览器
 
@@ -142,6 +145,8 @@ python3 runtime/emerging_pipeline.py \
 
 将 receipt 的路径写入 `emerging_pipeline_receipt_ref`，将 `outputs.routed.path` 原样写入 `route_handoff_ref`；只有 pipeline 实际产出的 `selection_handoff` 才能在 manifest 中建立匹配的 `keyword`、`root_id`、`status` candidate。`no_handoff`、`watch`、`insufficient_evidence` 等真实结果必须如实保留，不得伪造 handoff。
 
+需要域级持续 Radar 时使用 `skills/emerging-keyword-monitor/scripts/run_emerging_radar.py`。它在 timeline 采集前加载已有数据库并自动合并仍需观察的 `watching` 记录；这与上面的 attested four-stage pipeline 是同一套 classifier/router 语义，不是第二套状态机。
+
 项目 `.codex/hooks.json` 需要在 Codex 中审阅并信任；配置变化后可能需要重新确认。普通 pytest/compileall 只能证明代码契约，不能代替真实 Host 自动触发的 PreToolUse/Stop 验收。
 
 ## 仓库结构
@@ -220,6 +225,7 @@ python3 -m pytest tests/test_claude_hooks_template.py -q   # 路径漂移即报�
 
 ```bash
 python3 -m pytest skills/keyword-root-library/tests/test_root_library.py -q
+python3 -m pytest skills/seo-keyword-discovery/tests -q
 python3 -m pytest skills/seo-keyword-selection/tests/test_selection.py -q
 python3 -m pytest skills/emerging-keyword-monitor/tests -q
 python3 -m pytest skills/seo-page-keyword-mapping/tests -q

@@ -117,6 +117,20 @@ Rules:
 
 For CSV input, encode `serp_weak_evidence` as a JSON array string. For JSON input, it may be a native array.
 
+### SERP URL identity for overlap clustering
+
+`cluster_by_serp.py` canonicalizes URLs only enough to remove transport/tracking noise without collapsing distinct documents.
+
+Current rules:
+
+- scheme and leading `www.` do not affect identity;
+- fragments do not affect identity;
+- trailing slash is normalized;
+- query parameters beginning with `utm_` are removed as tracking noise;
+- every other query parameter is preserved and sorted deterministically.
+
+Therefore `article.php?id=101` and `article.php?id=202` are different documents, while `article.php?id=101&utm_source=google` and `article.php?id=101` are the same document for overlap purposes. Do not broaden the tracking-parameter removal list without a separate verified requirement: unknown query parameters default to identity-bearing.
+
 ## Metric provenance
 
 Where available preserve:

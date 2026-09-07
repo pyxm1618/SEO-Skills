@@ -47,6 +47,13 @@ hashes and deterministically replays all four stages. A real `no_handoff`,
 `watch`, or `insufficient_evidence` result stays that way; never hand-write a
 `selection_handoff` to force downstream work.
 
+The canonical runner preserves stable candidate context across the temporal
+aggregation boundary. `domain`, `variant_subtype`, `variant_evidence`,
+`root_relation`, `root_candidate_hypothesis`, and `previous_status` supplied by
+the validated input are re-attached before classification/routing. Conflicting
+non-missing values for the same canonical keyword are an error rather than a
+reason to guess which context is correct.
+
 The standalone router accepts a confirmed `emerging`/`breakout` state only
 when the input is a valid, error-free structured output from
 `classify_emergence.py`; it does not promote a hand-written status.
@@ -91,16 +98,34 @@ python scripts/route_candidates.py --input classified.json --format json
 
 ## Record lifecycle across runs
 
-`update_emerging_database.py` persists radar records and carries
-`previous_status` forward. Each record also holds an `observation_state`
-derived from the classifier status, so a run knows what to look at next:
+`update_emerging_database.py` persists radar records and derives an
+`observation_state` from the classifier status:
 
 - `new_signal`, `watch`, `insufficient_evidence` stay `watching`
-- `emerging`, `breakout` become `graduated` and stop being carried forward
+- `emerging`, `breakout` become `graduated` and stop default carry-forward
 - `noise`, `mature` become `retired`, keeping the record so a decayed spike is
   not re-adopted as a fresh signal on a later batch
 
-Export the next batch's observation set with its prior status:
+The live/domain radar runner performs this continuation automatically. Before
+collecting timelines, `run_emerging_radar.py` loads the existing database and
+adds eligible `watching` records to the timeline candidate pool even when the
+current Google Trends Rising discovery no longer returns those keywords.
+Their prior classifier state is supplied as `previous_status`.
+
+When a carried keyword is also rediscovered in the current run, the current
+discovery context is authoritative. Historical database fields only fill
+missing values; they must not overwrite a fresh `google_rising_label`,
+`parent_anchor`, `discovery_depth`, root relationship, or other current
+discovery evidence. Carry-forward is lifecycle continuation, not a new Rising
+discovery event, and must not be labelled as `google_trends_rising` unless the
+current run actually observed it there.
+
+`max_candidates` limits the current discovery pool. Existing watching records
+are appended for continued observation rather than silently dropped merely
+because current discovery filled that cap.
+
+For inspection or external batch preparation, the database utility can still
+export the next observation set explicitly:
 
 ```bash
 python scripts/update_emerging_database.py --database radar.json \
@@ -111,7 +136,9 @@ The state is derived from what the classifier produced. An unrecognised status
 leaves a record `watching` rather than retiring it, because unknown is not a
 verdict.
 
-For a domain-level radar, start with a domain/anchor pool and use Trends Rising as the recursive edge. Autocomplete and Semrush Ideas may be supplemental evidence but are not recursive BFS edges by default. Persist radar records and handoffs under `.seo-run/`; the monitor still does not invoke selection decisions.
+For a domain-level radar, start with a domain/anchor pool and use Trends Rising as the recursive edge. Autocomplete and Semrush Ideas may be supplemental evidence but are not recursive BFS edges by default. A verified root relationship must propagate through recursive Rising children: descendants keep the same `root_id`, `root_status`, `root_verified=true`, and `root_relation=existing_root` unless an explicit later review changes that relationship. Persist radar records and handoffs under `.seo-run/`; the monitor still does not invoke selection decisions.
+
+Lexical domain-relation checks are Unicode-aware. A non-empty CJK keyword must not be treated as an empty keyword merely because it contains no ASCII tokens; where token overlap is unavailable, canonical expression containment may still establish an in-scope relationship.
 
 The live radar CLI may receive repeatable `--semrush-request PATH` options. Each path must be a current authenticated same-origin Semrush Ideas request descriptor for its captured seed; unmatched anchors remain without Semrush supplemental evidence, and any attempted relay/schema failure is a blocker. The CLI never constructs a Semrush endpoint or falls back to an API/provider.
 

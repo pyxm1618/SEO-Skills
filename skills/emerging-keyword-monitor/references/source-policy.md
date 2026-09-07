@@ -26,6 +26,12 @@ Every observation should answer where it came from, when it was observed, which 
 
 `source_count` counts unique source identities, not rows and not multiple series from the same source. Cross-source evidence may raise confidence, but the monitor does not use a fixed `N-of-M signals = build` rule.
 
+## Google evidence artifact identity
+
+The shared Google live collector uses collision-safe evidence identities for Autocomplete, `intitle`, SERP, Trends, and related acquisitions. Artifact names include a deterministic hash of the full UTF-8 acquisition identity, so two different Unicode-only/CJK keywords cannot collapse to the same empty ASCII slug and overwrite one another.
+
+Readable ASCII fragments in a filename are convenience only; the hash is the identity guard. Do not derive acquisition equality from the readable slug alone.
+
 ## Google Trends caution
 
 Google Trends values are relative indexes and are normalized independently for each timeframe. `5y`, `12m`, `90d`, `30d`, and `7d` are separate comparable series: never compare their index values arithmetically or concatenate them. Preserve each timeframe's source URL, requested timeframe, actual bucket resolution, and evidence reference. Historical zero does not prove zero absolute searches, and the first non-zero point does not prove an absolute keyword birth date.

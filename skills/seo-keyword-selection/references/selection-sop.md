@@ -100,6 +100,13 @@ Cluster only candidates that actually hold `serp_review` evidence. A candidate
 whose optional review was skipped or `BLOCKED` has no observed SERP and stays
 unclustered rather than being grouped on assumption.
 
+Before overlap is counted, URL identity is canonicalized conservatively: scheme,
+leading `www.`, fragment, and trailing slash differences are normalized, and
+`utm_*` parameters are removed. Other query parameters are preserved because
+they may select different documents; for example `article.php?id=101` and
+`article.php?id=202` must not collapse to one result. Unknown query parameters
+default to identity-bearing rather than tracking noise.
+
 Keywords sharing at least the threshold number of top-10 URLs can be served by
 one page; keywords below it need separate pages even when they share a root.
 

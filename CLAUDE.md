@@ -1,46 +1,38 @@
 # CLAUDE.md
 
-Skill 与 runtime 说明见 `README.md`；宿主接线与 `.seo-run` 运行期状态见 README 的「在 Claude Code 中启用」。
+项目方法、Skill 边界、真实采集浏览器、生产 manifest 与 Claude Code hook 接线以 [`README.md`](README.md) 和 [`runtime/TRUST_BOUNDARY.md`](runtime/TRUST_BOUNDARY.md) 为准。本文件只保留 Claude Code 中仍长期有效的宿主操作原则，不记录单次事故现场。
 
-本文件只记录在此仓库工作时遇到的**环境约束与应对**，不重复项目文档。
+## 区分平台权限故障与仓库门禁拒绝
 
-## auto 权限模式的分类器故障
+Claude Code 的平台权限/安全分类器故障与本仓库 `runtime/stage_hook.py` 的 fail-closed 拒绝是两类问题，不要混在一起排查。
 
-### 识别特征
+先用只读操作确认仓库状态，例如：
 
-工具调用被拒，错误形如：
-
+```bash
+git status
+git log -1 --oneline
+git diff
 ```
-claude-opus-5[1m] is temporarily unavailable (server error / connection failed),
-so auto mode cannot determine the safety of Bash right now.
-```
 
-auto 模式下每个**非只读**调用都要先由安全分类器预判，分类器本身跑在上游模型上。该模型不可用时，所有写入与代码执行一律被拒。
+如果只读操作正常，而平台明确报告 auto/permission classifier 或上游模型不可用，按 Claude Code 当前 UI/平台指引切换到可执行的权限模式或重新开始会话；不要通过修改本仓库 hook、放宽 stage contract、伪造 receipt 或删除 evidence 来绕过平台故障。
 
-这是平台侧可用性问题，**不是仓库配置问题，无法在仓库内修复**。
+如果错误来自 `runtime/stage_hook.py`，则按 `runtime/TRUST_BOUNDARY.md` 的 fail-closed 规则处理：先确认 active manifest、前置 stage、candidate identity、hook wiring 与当前工作目录，再修复真实根因。
 
-判据：`Read`、`git log`、`ls`、`cat`、`grep` 全程正常，而 `mkdir`、`cat > file`、`python3`、`pytest` 全部失败 —— 即可确认是本故障，不必再排查权限规则或命令写法。
+## Hook 配置变更
 
-### 应对：唯一已验证有效的手段
+Claude Code 在会话启动时读取项目 hook wiring。修改 `.claude/settings.json`、hook 命令或 hook 脚本路径后，应重新启动 Claude Code 会话并重新确认信任；不要假设已运行的会话会自动采用磁盘上的新配置。
 
-**切出 auto 模式** —— 按 `Shift+Tab` 循环权限模式，切到默认模式或 acceptEdits。分类器不在这两种模式的调用链上，写入立即恢复。
+变更 hook 路径时，遵守 `runtime/TRUST_BOUNDARY.md` 的顺序：先保留旧路径、更新配置、重启受影响会话并确认新 wiring 生效，最后再删除旧路径。这样可以避免运行中的会话继续引用已经不存在的脚本。
 
-2026-08-29 的一次故障中此法即时生效。在此之前 20+ 次重试全部失败，**等待与重试无效**；`Agent` 与 `CronCreate` 同样走分类器，无法用作绕行。
+## 运行期状态
 
-### 故障期间仍可用的操作
+`.seo-run/active.json` 是运行期状态，不是项目配置。不要把调试残留的 `IN_PROGRESS` manifest 当成正常仓库状态，也不要在同一 worktree 中并发运行多个 production host session。并发隔离要求见 README 与 `runtime/TRUST_BOUNDARY.md`。
 
-平台内置一份**静态只读白名单**，这些不经过分类器，故障期间始终可用：
+## 证据原则不因宿主故障而改变
 
-- `git log` / `git status` / `git diff` / `git worktree list`
-- `ls` / `cat` / `head` / `grep` / `wc` / `find`
-- `Read` 工具
+无论 Claude Code 当前处于什么权限模式：
 
-可借此继续做静态审计。注意 `python3 -c "print(1)"` **不在**白名单内 —— 任意代码执行一律需要分类器。
-
-故障期间曾出现"时好时坏"的假象，实为只读命令与写入命令交替所致，并非分类器间歇恢复。
-
-### 尚未验证的思路（勿当作已知方案）
-
-在 `.claude/settings.json` 增加 `permissions.allow` 白名单，理论上可让命中显式规则的调用跳过分类器判定。
-
-**该做法在 2026-08-29 故障期间无法测试，未经验证**，因此没有写入本仓库配置。下次故障复现时可顺手验证；确认有效后再固化，并注意白名单是以放宽权限控制换取可用性，范围应只覆盖 `pytest` / `compileall` / `git` 只读这类例行校验。
+- `unknown` 不得改写成 `0`；
+- Google/Semrush 必需来源失败时保留真实 `BLOCKED`；
+- 不使用替代 provider 或手写 observed 数据补齐流程；
+- 不为了让 Hook 放行而改写 validator、receipt、manifest 或 evidence。

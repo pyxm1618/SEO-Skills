@@ -6,6 +6,8 @@ The monitor discovers, validates, classifies, and routes. It never makes final S
 
 When `root_relation=existing_root`, a valid `root_id` links the candidate to `keyword-root-library` without copying its CSV.
 
+A verified root relationship is inherited through recursive Google Trends Rising discovery. When an anchor has `root_verified=true`, every generated descendant must retain the same `root_id`, `root_status`, `root_verified=true`, and `root_relation=existing_root` unless a later explicit review changes the relationship. Entering the next BFS depth must not silently downgrade a verified existing root to `unresolved` or `root_candidate`.
+
 Confirmed `emerging`/`breakout` candidates produce a `selection_handoff` containing at least:
 
 `domain | keyword | root_id | signal_type | demand_history_type | estimated_birth_window | birth_source_resolution | birth_reason | first_observed_at | age_days | growth | persistence | source_count | source_evidence | volume | kd | cpc | intitle_results | metric_status | metric_provenance | metric_compatibility_status | kgr_compatibility_status | discovery_depth | parent_anchor | google_rising_label`
