@@ -172,6 +172,22 @@ def canonical_keyword(value: Any) -> str:
     return collapse_keyword(value).casefold()
 
 
+def canonical_language(value: Any) -> str:
+    """Canonicalize a BCP47-like language tag without guessing missing context."""
+    parts = [part for part in str(value or "").strip().replace("_", "-").split("-") if part]
+    if not parts:
+        return ""
+    out = [parts[0].lower()]
+    for part in parts[1:]:
+        if len(part) == 2 and part.isalpha():
+            out.append(part.upper())
+        elif len(part) == 4 and part.isalpha():
+            out.append(part.title())
+        else:
+            out.append(part.lower())
+    return "-".join(out)
+
+
 def format_cell(value: Any) -> str:
     if is_missing(value):
         return UNKNOWN
@@ -215,7 +231,7 @@ def resolve_identity(record: dict[str, Any], run_context: dict[str, Any] | None 
         raise ValueError("language is required for stable keyword identity")
     normalized = canonical_keyword(keyword)
     market_value = str(market).strip().upper()
-    language_value = str(language).strip().casefold()
+    language_value = canonical_language(language)
     return KeywordIdentity(keyword, normalized, market_value, language_value)
 
 
