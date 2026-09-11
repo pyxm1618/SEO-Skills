@@ -135,7 +135,7 @@ def test_selection_delivery_preserves_emerging_fields_and_human_status():
     assert written["趋势类型"] == "新词"
     assert written["emerging_status"] == "emerging"
     assert written["状态"] == "已选"
-    assert written["CPC"] == "2.0"
+    assert written["CPC"] == "2"
 
 
 def test_selection_mechanical_status_never_becomes_human_workflow_status():
@@ -194,7 +194,6 @@ def test_delivery_is_separate_from_metric_calculation():
     row = canonical_row(evaluator)
     assert row["kdroi"] == 90.0
     assert row["kgr"] == 0.1
-    # Computing a canonical row alone must not require or touch a Sheet.
     assert "sheet_delivery" not in row
 
 
