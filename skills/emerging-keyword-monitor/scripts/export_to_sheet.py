@@ -1,25 +1,15 @@
 #!/usr/bin/env python3
-"""Export the Emerging Keyword Radar database to a Google Sheet.
+"""Mirror Emerging Keyword Radar records into the unified keyword library.
 
-This is an export layer, not a data source. The authoritative outputs stay the
-local ``emerging-keywords.json`` / ``.csv`` written by ``update_emerging_database``.
-Nothing here participates in stage contracts, evidence receipts, or the pipeline
-source-hash binding, so a Sheet failure never changes whether a radar run is
-valid -- it only means the mirror is stale.
-
-Two invariants are enforced while building rows:
-
-1. ``unknown`` stays ``unknown``. A missing metric is never rendered as an empty
-   cell or as ``0``; that collapse is the exact failure this repository exists to
-   prevent.
-2. Google's own ``Breakout`` label is exported in its own column and is never
-   merged into the classifier's ``signal_type``/``status``. They answer different
-   questions and Google's label is a source fact, not a verdict.
+The authoritative Emerging outputs remain the local JSON/CSV database. This is
+an optional human-facing output layer: a Sheet failure never changes whether a
+Radar run is valid and never rewrites the local database.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import sys
@@ -32,46 +22,22 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from update_emerging_database import canonical_keyword, load_database
 
-UNKNOWN = "unknown"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+LIBRARY_PATH = REPO_ROOT / "runtime" / "keyword_library_sheet.py"
+DEFAULT_WORKSHEET = "关键词库"
 
-# (header, record field). Order is the column order in the sheet.
-COLUMNS: tuple[tuple[str, str], ...] = (
-    ("Domain", "domain"),
-    ("Keyword", "keyword"),
-    ("Discovery source", "discovery_source"),
-    ("Discovery depth", "discovery_depth"),
-    ("Parent anchor", "parent_anchor"),
-    ("First observed", "first_observed_at"),
-    ("Birth window", "estimated_birth_window"),
-    ("Birth confidence", "birth_confidence"),
-    ("Birth reason", "birth_reason"),
-    ("Demand history", "demand_history_type"),
-    ("Growth rate", "growth_rate"),
-    ("Growth status", "growth_status"),
-    ("Persistence", "persistence"),
-    ("Signal type (classifier)", "signal_type"),
-    ("Status (classifier)", "status"),
-    ("Confidence", "confidence"),
-    ("Google rising label (source)", "google_rising_label"),
-    ("Google breakout flag (source)", "is_google_breakout"),
-    ("Root id", "root_id"),
-    ("Root relation", "root_relation"),
-    ("Volume", "volume"),
-    ("KD", "kd"),
-    ("Metric status", "metric_status"),
-    ("Route", "route"),
-    ("Route reason", "route_reason"),
-    ("Previous status", "previous_status"),
-    ("Last seen", "last_seen_at"),
-)
 
-HEADER: list[str] = [header for header, _ in COLUMNS]
-KEY_COLUMNS = 2  # Domain + Keyword identify a row.
+def _load_library():
+    spec = importlib.util.spec_from_file_location("seo_keyword_library_sheet_for_emerging", LIBRARY_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+library = _load_library()
 
 
 class SheetClient(Protocol):
-    """Minimal worksheet surface, satisfied by a gspread worksheet."""
-
     def get_all_values(self) -> list[list[str]]: ...
 
     def update(self, range_name: str, values: list[list[Any]]) -> Any: ...
@@ -80,157 +46,120 @@ class SheetClient(Protocol):
 
 
 def expand_path(value: str) -> str:
-    """Expand ~ and environment variables.
-
-    Credential and database paths are typed by hand and are routinely given as
-    ``~/...``; the underlying libraries do not expand it and would report a
-    confusing "file not found" instead.
-    """
     return os.path.expanduser(os.path.expandvars(str(value)))
 
 
-def format_cell(value: Any) -> str:
-    """Render one value without ever collapsing unknown into blank or zero."""
-    if value is None:
-        return UNKNOWN
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, str):
-        text = value.strip()
-        return text if text else UNKNOWN
-    if isinstance(value, (int, float)):
-        return repr(value) if isinstance(value, float) else str(value)
-    if isinstance(value, (list, dict)):
-        if not value:
-            return UNKNOWN
-        return json.dumps(value, ensure_ascii=False, sort_keys=True)
-    return str(value)
-
-
-def build_row(record: dict[str, Any]) -> list[str]:
-    return [format_cell(record.get(field)) for _, field in COLUMNS]
-
-
-def build_rows(database: dict[str, Any]) -> list[list[str]]:
-    """Build one row per database record, ordered by domain then keyword."""
+def _records(database: dict[str, Any]) -> list[dict[str, Any]]:
     records = database.get("records") if isinstance(database, dict) else None
     if not isinstance(records, list):
         raise ValueError("database must contain a records list")
-    rows = []
+    out: list[dict[str, Any]] = []
     for record in records:
         if not isinstance(record, dict):
             raise ValueError("database records must be objects")
         if not canonical_keyword(record.get("keyword")):
             raise ValueError("database record is missing a keyword")
-        rows.append(build_row(record))
-    rows.sort(key=lambda row: (row[0].casefold(), row[1].casefold()))
-    return rows
+        out.append(dict(record))
+    return out
 
 
-def _row_key(row: list[str]) -> tuple[str, str]:
-    domain = canonical_keyword(row[0]) if len(row) > 0 else ""
-    keyword = canonical_keyword(row[1]) if len(row) > 1 else ""
-    return domain, keyword
-
-
-def _a1(row_number: int, width: int) -> str:
-    last = ""
-    index = width
-    while index > 0:
-        index, remainder = divmod(index - 1, 26)
-        last = chr(ord("A") + remainder) + last
-    return f"A{row_number}:{last}{row_number}"
-
-
-def plan_writes(existing: list[list[str]], rows: list[list[str]]) -> dict[str, Any]:
-    """Decide header/update/append operations without touching the network."""
-    header_needed = not existing or [cell.strip() for cell in existing[0]] != HEADER
-    index: dict[tuple[str, str], int] = {}
-    if existing and not header_needed:
-        for offset, row in enumerate(existing[1:], start=2):
-            key = _row_key(row)
-            if key != ("", ""):
-                index.setdefault(key, offset)
-
-    updates: list[tuple[str, list[str]]] = []
-    appends: list[list[str]] = []
-    for row in rows:
-        target = index.get(_row_key(row))
-        if target is None:
-            appends.append(row)
-        else:
-            updates.append((_a1(target, len(HEADER)), row))
-    return {"header_needed": header_needed, "updates": updates, "appends": appends}
-
-
-def export(client: SheetClient, database: dict[str, Any]) -> dict[str, Any]:
-    """Upsert every record by (domain, keyword); never append a duplicate row."""
-    rows = build_rows(database)
-    existing = client.get_all_values() or []
-    plan = plan_writes(existing, rows)
-
-    if plan["header_needed"]:
-        client.update(range_name=_a1(1, len(HEADER)), values=[HEADER])
-    for range_name, row in plan["updates"]:
-        client.update(range_name=range_name, values=[row])
-    if plan["appends"]:
-        client.append_rows(plan["appends"])
-
+def build_identity_summary(
+    database: dict[str, Any],
+    delivery_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    records = _records(database)
+    identities = [
+        library.resolve_identity(
+            record,
+            run_context=database,
+            delivery_context=delivery_context,
+        )
+        for record in records
+    ]
     return {
-        "status": "PASS",
-        "record_count": len(rows),
-        "updated_count": len(plan["updates"]),
-        "appended_count": len(plan["appends"]),
-        "header_written": plan["header_needed"],
+        "record_count": len(records),
+        "stable_row_count": len({identity.stable_key for identity in identities}),
+        "stable_keys": [identity.stable_key for identity in identities],
     }
 
 
+def export(
+    client: SheetClient,
+    database: dict[str, Any],
+    delivery_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Patch Emerging-owned fields in stable keyword rows only."""
+    records = _records(database)
+    return library.upsert_records(
+        client,
+        "emerging",
+        records,
+        run_context=database,
+        delivery_context=delivery_context,
+    )
+
+
 def open_worksheet(sheet_id: str, worksheet: str, credentials: str) -> SheetClient:
-    """Open a gspread worksheet. Imported lazily so the pure logic needs no deps."""
-    try:
-        import gspread
-    except ImportError as exc:  # pragma: no cover - depends on optional install
-        raise RuntimeError(
-            "gspread is not installed; install it or run with --dry-run"
-        ) from exc
-    client = gspread.service_account(filename=expand_path(credentials))
-    spreadsheet = client.open_by_key(sheet_id)
-    try:
-        return spreadsheet.worksheet(worksheet)
-    except Exception:
-        return spreadsheet.add_worksheet(title=worksheet, rows=1000, cols=len(HEADER))
+    return library.open_worksheet(sheet_id, worksheet, credentials)
 
 
 def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", required=True, help="emerging-keywords.json")
     parser.add_argument("--sheet-id")
-    parser.add_argument("--worksheet", default="emerging_keywords")
+    parser.add_argument(
+        "--worksheet",
+        default=os.environ.get("SEO_KEYWORD_LIBRARY_WORKSHEET", DEFAULT_WORKSHEET),
+    )
     parser.add_argument("--credentials", help="Google service account JSON path")
+    parser.add_argument("--market", help="explicit delivery market when record/run metadata does not carry one")
+    parser.add_argument("--language", help="explicit delivery language when record/run metadata does not carry one")
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="build and print the rows without contacting Google",
+        help="resolve stable identities without contacting Google",
     )
     args = parser.parse_args()
 
-    database = load_database(Path(expand_path(args.database)))
+    try:
+        database = load_database(Path(expand_path(args.database)))
+        context = library.delivery_context_from_env(args.market, args.language)
+        summary = build_identity_summary(database, delivery_context=context)
+    except Exception as exc:
+        print(f"BLOCKED: {exc}", file=sys.stderr)
+        return 2
+
     if args.dry_run:
-        rows = build_rows(database)
-        print(json.dumps({"header": HEADER, "rows": rows}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"worksheet": args.worksheet, **summary},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
 
-    missing = [name for name, value in (("--sheet-id", args.sheet_id), ("--credentials", args.credentials)) if not value]
+    sheet_id = args.sheet_id or os.environ.get("SEO_KEYWORD_SHEET_ID")
+    credentials = args.credentials or os.environ.get("SEO_SHEETS_CREDENTIALS")
+    missing = [
+        name
+        for name, value in (
+            ("--sheet-id/SEO_KEYWORD_SHEET_ID", sheet_id),
+            ("--credentials/SEO_SHEETS_CREDENTIALS", credentials),
+        )
+        if not value
+    ]
     if missing:
         print(f"BLOCKED: {' and '.join(missing)} are required without --dry-run", file=sys.stderr)
         return 2
 
     try:
-        worksheet = worksheet_factory(args.sheet_id, args.worksheet, args.credentials)
-        result = export(worksheet, database)
+        worksheet = worksheet_factory(sheet_id, args.worksheet, credentials)
+        result = export(worksheet, database, delivery_context=context)
+        result["worksheet"] = args.worksheet
     except Exception as exc:
-        # The export is a mirror. Report the failure loudly and exit non-zero,
-        # but never rewrite or invalidate the local authoritative outputs.
+        # Mirror failure remains output-only. Local JSON/CSV is authoritative
+        # and is deliberately never mutated here.
         print(f"BLOCKED: sheet export failed: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False))
