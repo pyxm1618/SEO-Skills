@@ -197,24 +197,34 @@ def _upgrade_coverage_input(module, input_path):
 
 
 def _decorate_handoff_with_sheet_receipt(input_path):
+    """Upgrade legacy coverage success fixtures to the current Sheet receipt."""
     path = Path(input_path)
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("sheet_delivery_receipt_ref"):
         return
+    # These legacy fixtures already use US Google/Semrush evidence. Make that
+    # identity context explicit rather than relying on a delivery default.
+    payload.setdefault("market", "US")
+    payload.setdefault("language", "en")
     exporter = _load(EXPORTER, "legacy_coverage_sheet_fixture_exporter")
-    keywords = payload.get("keywords")
-    count = len(keywords) if isinstance(keywords, list) else 0
+    bindings = exporter.build_candidate_bindings(payload)
+    candidate_count = len(bindings)
+    stable_count = len({item["stable_key"] for item in bindings})
     receipt_path = path.with_name(path.stem + ".sheet-delivery.receipt.json")
     receipt_path.write_text(
         json.dumps(
             {
-                "schema": "seo-discovery-sheet-delivery/v1",
+                "schema": "seo-discovery-sheet-delivery/v2",
                 "status": "PASS",
                 "batch_id": payload.get("batch_id"),
-                "worksheet": "keyword_discovery",
+                "worksheet": "关键词库",
                 "sheet_id": "test-sheet",
-                "record_count": count,
-                "verified_count": count,
+                "candidate_count": candidate_count,
+                "verified_candidate_count": candidate_count,
+                "stable_row_count": stable_count,
+                "verified_stable_row_count": stable_count,
+                "candidate_bindings": bindings,
+                "delivery_context": {},
                 "handoff_binding_sha256": exporter.handoff_binding_sha256(payload),
                 "exporter_source_sha256": hashlib.sha256(EXPORTER.read_bytes()).hexdigest(),
                 "verified_at": "2026-09-02T10:00:00+00:00",
