@@ -19,8 +19,6 @@ UNKNOWN = "unknown"
 DEFAULT_WORKSHEET = "关键词库"
 HUMAN_STATUSES = frozenset({"新发现", "已选", "已建站", "放弃"})
 
-# Visible columns must stay first and intentionally small. Everything after
-# these is technical/audit context and is hidden by the real Sheet bootstrap.
 COLUMNS: tuple[tuple[str, str], ...] = (
     ("关键词", "keyword"),
     ("月搜索量", "volume"),
@@ -236,7 +234,7 @@ def resolve_identity(record: dict[str, Any], run_context: dict[str, Any] | None 
 
 
 def derive_trend_type(record: dict[str, Any]) -> str:
-    """Map existing canonical temporal classification to the display label only."""
+    """Map existing canonical temporal classification to a display label only."""
     signal_type = str(record.get("signal_type") or "").strip().casefold()
     demand_history = str(record.get("demand_history_type") or "").strip().casefold()
     status = str(record.get("status") or record.get("emerging_status") or "").strip().casefold()
@@ -244,6 +242,8 @@ def derive_trend_type(record: dict[str, Any]) -> str:
         return "新词"
     if signal_type == "breakout" or status == "breakout":
         return "上升"
+    if status == "mature":
+        return "成熟需求"
     return UNKNOWN
 
 
@@ -279,11 +279,8 @@ def _hide_technical_columns(client: SheetClient) -> None:
 
 
 def ensure_capacity(client: SheetClient, minimum_columns: int = len(HEADER)) -> bool:
-    """Resize real gspread worksheets before writes that exceed grid capacity."""
     raw_count = getattr(client, "col_count", None)
     if isinstance(raw_count, bool) or not isinstance(raw_count, (int, float)):
-        # Lightweight adapters/fakes without grid metadata are not assumed to be
-        # capacity-constrained. Real gspread Worksheet exposes col_count.
         return False
     current_columns = int(raw_count)
     if current_columns >= minimum_columns:
@@ -324,7 +321,6 @@ def ensure_schema(client: SheetClient) -> tuple[list[list[str]], list[str], dict
         missing = [name for name in HEADER if name not in header]
         raise RuntimeError(f"keyword library sheet schema mismatch with existing data; missing={missing}")
 
-    # Empty legacy/header-only worksheet: safe one-time bootstrap.
     client.update(range_name=_row_a1(1, len(HEADER)), values=[HEADER])
     _hide_technical_columns(client)
     header_written = True
@@ -418,6 +414,12 @@ def _emerging_patch(record: dict[str, Any]) -> dict[str, Any]:
         "root_id": "emerging_root_id",
     }
     patch = {target: record.get(source) for source, target in aliases.items() if source in record}
+    birth_reason = str(record.get("birth_reason") or "").strip().casefold()
+    birth_window = record.get("estimated_birth_window")
+    if birth_reason == "before_available_history" and (
+        is_missing(birth_window) or str(birth_window).strip().casefold() == "before_available_history"
+    ):
+        patch["estimated_birth_window"] = "早于可观测窗口"
     if any(name in record for name in ("signal_type", "demand_history_type", "status", "emerging_status")):
         patch["trend_type"] = derive_trend_type(record)
     refs = []
@@ -534,7 +536,6 @@ def upsert_records(client: SheetClient, owner: str, records: list[dict[str, Any]
         current = _row_as_fields(state["row"], header_map)
         patch = _owner_patch(owner, record, current)
         for field, value in patch.items():
-            # Human workflow status is intentionally not an owner-patch field.
             header_name = FIELD_TO_HEADER[field]
             column = header_map[header_name]
             state["row"][column] = format_cell(value)
@@ -615,7 +616,7 @@ def expand_path(value: str) -> str:
 def open_worksheet(sheet_id: str, worksheet: str, credentials: str) -> SheetClient:
     try:
         import gspread
-    except ImportError as exc:  # pragma: no cover - optional production dependency
+    except ImportError as exc:  # pragma: no cover
         raise RuntimeError("gspread is not installed") from exc
     client = gspread.service_account(filename=expand_path(credentials))
     spreadsheet = client.open_by_key(sheet_id)
