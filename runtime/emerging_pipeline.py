@@ -273,8 +273,10 @@ def run_pipeline(
         ]
     reconciliation = reconcile_identity_sets(candidate_ledger, classified_rows, routed_rows)
 
+    # Keep the established v1 schema for the release hook. Candidate-ledger
+    # attestation and reconciliation are additive, backward-compatible fields.
     receipt = {
-        "schema": "seo-emerging-pipeline/v2",
+        "schema": "seo-emerging-pipeline/v1",
         "as_of": as_of_datetime.isoformat(),
         "observation_input": {"path": str(input_path), "sha256": _sha256(input_path)},
         "candidate_ledger": ledger_ref,
