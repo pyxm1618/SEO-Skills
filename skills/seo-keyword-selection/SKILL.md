@@ -66,6 +66,18 @@ Production decisions are separately gated:
 
 New/current Semrush acquisition is only through the authenticated same-origin `sem.3ue.com` collector. No official API or alternative-provider fallback is permitted.
 
+## Unified keyword library delivery
+
+The shared human-facing delivery surface is the existing spreadsheet `SEO关键词库`, worksheet `关键词库`. Selection writes through `runtime/keyword_library_sheet.py` after the canonical final evaluator output exists; it does not calculate metrics inside the Sheet layer.
+
+Selection owns only its delivery fields such as Volume, KD, CPC, KDRoi, Intent, KGR/intitle/SERP evidence, metric provenance, and the hidden `selection_mechanical_status`. It must not overwrite Discovery provenance, Emerging temporal fields, or the human workflow column `状态`.
+
+Stable row identity is `normalized_keyword + market + language`. `market` and `language` must be resolved from an explicit record value, then an explicit run/batch value, then an explicitly configured delivery context; if still absent, delivery is `BLOCKED`. There is no silent `US/en` fallback.
+
+The human workflow column remains exactly `新发现 / 已选 / 已建站 / 放弃`. Only creation of a previously absent stable row may initialize `状态=新发现`. `do_candidate`, `observe_*`, `principle_eliminate_*`, `excluded_manual`, and every other mechanical Selection result stay in the hidden mechanical-status field and never promote or reject the human workflow automatically.
+
+The standalone evaluator CLI keeps `--sheet-output` opt-in so unit tests, diagnostics, and local calculation can run without credentials. That CLI convenience is **not** the production completion rule. When this Skill is executing a formal final Selection workflow, it must perform the unified Sheet upsert and successful readback itself as part of completion; the user must not be required to remember an extra flag. A formal final Selection whose canonical output exists but whose unified Sheet delivery failed, was skipped, or could not resolve stable identity is incomplete delivery.
+
 ## Evidence discipline
 
 Keep the existing `observed`, `calculated`, `analysis`, `unknown` meanings. Missing, invalid, numeric zero, and `not_applicable` remain distinct. Never manufacture Volume, KD, CPC, `intitle`, rank/url, DR, or trend observations.
@@ -73,3 +85,5 @@ Keep the existing `observed`, `calculated`, `analysis`, `unknown` meanings. Miss
 ## Completion
 
 Blocked required stages retain their reason; complete candidates may continue. Optional SERP may be omitted or recorded as `serp_review.status=BLOCKED` with a real reason without terminally blocking the candidate. A finished batch exposes complete/blocked counts and preserves the human decision; `do_candidate` is not an automatic final choice.
+
+For a **formal final Selection**, completion additionally requires the canonical final rows to be successfully upserted into `SEO关键词库 / 关键词库` under the correct stable identities and read back successfully. If that delivery does not succeed, Selection may retain all evidence and calculated outputs, but it must not report the formal final workflow as completely delivered.
