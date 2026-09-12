@@ -5,7 +5,7 @@ description: Use when reusable demand roots must be turned into concrete traditi
 
 # SEO Keyword Discovery
 
-Own the former `seo-keyword-selection` Steps 0–4 only: candidate-domain context, root handoff, Seed generation, real keyword expansion, low-risk cleaning, and finite traditional-demand branch coverage. Produce a discovery handoff of concrete keywords only after the Coverage Contract passes and the exact handoff has been written to and read back from Google Sheets; do not make final opportunity decisions.
+Own the former `seo-keyword-selection` Steps 0–4 only: candidate-domain context, root handoff, Seed generation, real keyword expansion, low-risk cleaning, and finite traditional-demand branch coverage. Produce a discovery handoff of concrete keywords only after the Coverage Contract passes and the exact handoff has been written to and read back from the unified Google keyword library; do not make final opportunity decisions.
 
 ## Boundaries
 
@@ -121,11 +121,17 @@ Full coverage is `PASS` only when every required Seed and Branch Seed has Google
 
 Historical captured endpoints may help locate the current UI request but are not current evidence. A relay request becomes usable only after current live HTTP/RPC success and response-shape verification.
 
-## Mandatory Google Sheet delivery
+## Mandatory unified Google Sheet delivery
 
-The complete handoff keyword set must be delivered to Google Sheets. JSON remains the machine-authoritative handoff; Google Sheets is the mandatory human-facing delivery surface, not a replacement for the JSON evidence ledger.
+The complete handoff keyword set must be delivered to the existing spreadsheet `SEO关键词库`, worksheet `关键词库`. JSON remains the machine-authoritative handoff and Discovery ledger; the Sheet is the mandatory human-facing projection, not a replacement evidence store.
 
-Use the same Google Spreadsheet already used by the SEO keyword system and a separate worksheet tab named `keyword_discovery`. The exporter uses a Google service-account credential file, so the executing AI does not need its own Google connector. Configure the environment once:
+All keyword-producing skills share `runtime/keyword_library_sheet.py`. Stable row identity is `normalized_keyword + market + language`. `market` and `language` resolve only from: record explicit value → run/batch explicit value → explicitly configured delivery context → otherwise `BLOCKED`. They participate in stable identity and must never silently default to `US/en`.
+
+Discovery may create a missing stable row and initialize the human workflow column to `状态=新发现`. On an existing stable row it owns only Discovery provenance/context fields and must preserve the human status and fields owned by Emerging or Selection. Traditional Discovery is only a discovery path: it does **not** classify keyword age or trend. Unless real canonical temporal evidence already exists on the stable row, the visible `趋势类型` remains `unknown`.
+
+Different Discovery candidates/sources can resolve to the same stable row. The unified library still contains only one row for that stable identity, while the Discovery ledger and delivery receipt retain every candidate/source/provenance binding. Candidate identity is therefore not the Sheet row primary key.
+
+Configure the existing spreadsheet/service-account context once:
 
 ```bash
 export SEO_KEYWORD_SHEET_ID="<existing spreadsheet id>"
@@ -139,11 +145,13 @@ python3 skills/seo-keyword-discovery/scripts/export_to_sheet.py \
   --handoff .seo-run/discovery-handoff.json
 ```
 
-The exporter upserts the current batch into `keyword_discovery`, reads the worksheet back, and requires the exact current-batch Candidate set and exact row contents to match the handoff. A partial write, missing row, extra row, duplicate Candidate, or differing row is `BLOCKED`.
+The exporter performs field-level upserts into `关键词库`, reads the worksheet back, and verifies that every handoff keyword-context resolves to the correct stable row while every candidate binding still points to that row with its original `candidate_id`, `source`, `source_seed`, and evidence provenance. It does **not** require one Sheet row per candidate.
 
-On successful readback the exporter writes a `seo-discovery-sheet-delivery/v1` receipt bound to the exact handoff and current exporter source, then adds `sheet_delivery_receipt_ref` to the handoff JSON. Production `discovery_handoff` validation re-verifies that receipt. Therefore a handoff that was never written to Google Sheets, was only partially written, or was changed after delivery cannot receive a production PASS receipt.
+On successful readback the exporter writes a `seo-discovery-sheet-delivery/v2` receipt bound to the exact handoff, unified stable-row bindings, candidate provenance bindings, and current exporter source, then adds `sheet_delivery_receipt_ref` to the handoff JSON. Production `discovery_handoff` validation re-verifies that receipt. Missing/partial delivery, wrong stable identity, lost candidate provenance, or handoff mutation after delivery blocks production PASS.
 
-No final CSV is required. If a CSV is generated for convenience it is supplemental only; the required outputs are the machine handoff/evidence artifacts plus verified Google Sheet delivery.
+The shared writer ensures worksheet column capacity is at least the current unified schema width before a header bootstrap. This is required because an existing header-only legacy worksheet may have fewer physical grid columns than the new schema.
+
+No final CSV is required. If a CSV is generated for convenience it is supplemental only; the required outputs are the machine handoff/evidence artifacts plus verified unified Google Sheet delivery.
 
 ## Evidence discipline
 
@@ -155,8 +163,8 @@ A formal `discovery_handoff` exists only after this sequence succeeds:
 
 1. production `discovery_coverage` re-verifies the frozen inputs and returns `coverage_status=PASS` with `formal_handoff_allowed=true`;
 2. the handoff `keywords` list reconciles exactly against the verified first-round Candidates plus reconciled Branch candidates;
-3. the exact handoff is written to the `keyword_discovery` Google Sheet tab and read back exactly;
-4. the exporter binds that delivery to `sheet_delivery_receipt_ref`;
+3. every valid handoff keyword-context is field-level upserted to the correct stable row in `SEO关键词库 / 关键词库` and read back;
+4. the v2 delivery receipt preserves all candidate/source/provenance bindings even where multiple candidates resolve to one stable row;
 5. production `discovery_handoff` validation re-verifies both the Coverage receipt and the Sheet-delivery receipt.
 
 If any mandatory Seed, Branch Seed, configured competitor domain, mandatory acquisition, or Sheet delivery fails or remains unreviewed, preserve the partial evidence, keep the batch non-complete, and do not silently shrink the handoff.
