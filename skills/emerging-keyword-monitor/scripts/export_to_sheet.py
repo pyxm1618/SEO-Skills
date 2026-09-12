@@ -66,7 +66,8 @@ def _records(database: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _run_status(database: dict[str, Any], run_context: dict[str, Any] | None) -> str:
     context = run_context or {}
-    return str(context.get("status") or database.get("run_status") or "PASS").strip().upper()
+    value = context.get("status") or database.get("run_status")
+    return str(value).strip().upper() if value not in (None, "") else "UNKNOWN"
 
 
 def _candidate_id(record: dict[str, Any]) -> str | None:
@@ -82,17 +83,19 @@ def select_delivery_records(
 ) -> dict[str, Any]:
     """Resolve the Sheet delivery set and review set without touching a client.
 
-    New Radar databases explicitly carry ``delivery_eligible`` on every record.
-    For backward-compatible historical files that predate the field, all records
-    retain the previous mirror behavior; new production runs must not rely on
-    this legacy fallback.
+    Production delivery is fail-closed: a run must explicitly be PASS and every
+    database record must carry a delivery_eligible decision. Historical files
+    can still be inspected with allow_blocked_dry_run=True, but that mode cannot
+    authorize a production mutation.
     """
     records = _records(database)
     status = _run_status(database, run_context)
-    if status == "BLOCKED" and not allow_blocked_dry_run:
-        raise RuntimeError("BLOCKED run is not eligible for production Sheet mutation")
+    if status != "PASS" and not allow_blocked_dry_run:
+        raise RuntimeError(f"run status {status} is not eligible for production Sheet mutation")
 
-    has_explicit_eligibility = any("delivery_eligible" in record for record in records)
+    has_explicit_eligibility = all("delivery_eligible" in record for record in records)
+    if not has_explicit_eligibility and not allow_blocked_dry_run:
+        raise RuntimeError("production Sheet mutation requires explicit delivery_eligible on every record")
     if has_explicit_eligibility:
         delivery_records = [record for record in records if record.get("delivery_eligible") is True]
         review_records = [record for record in records if record.get("delivery_eligible") is not True]
@@ -117,7 +120,7 @@ def select_delivery_records(
 
     return {
         "run_status": status,
-        "blocked": status == "BLOCKED",
+        "blocked": status != "PASS",
         "delivery_records": delivery_records,
         "review_records": review_records,
         "delivery_count": len(delivery_records),

@@ -24,7 +24,7 @@ Canonical reconciliation invariant:
 
 `delivery_ids ⊆ route_ids = classified_ids ⊆ candidate_ids`.
 
-The receipt records all four identity sets plus an identity digest. A mismatch is a run error.
+The receipt records all four identity sets plus an identity digest and binds the candidate-ledger path/hash. Canonical replay and the Hook consume that same ledger-qualified set and recompute reconciliation. An explicit empty delivery set remains empty. Any mismatch is a run error.
 
 ## Independent state axes
 
@@ -129,7 +129,7 @@ A quiet gap followed by a persistent return may be `resurgent`. An isolated spik
 
 Generic lexical overlap alone is not enough to set `in_scope`.
 
-The same gate applies to Rising discovery, supplemental discovery, and carry-forward.
+The same gate applies to Rising discovery, supplemental discovery, and carry-forward. Carry-forward preserves its original `parent_anchor`/domain evidence; missing evidence remains `unknown` and the keyword itself is never substituted as parent proof.
 
 ## Historical persistence
 
@@ -143,7 +143,7 @@ Current-run acquisition fields include:
 
 `last_run_acquisition_status | last_run_acquisition_reason | acquisition_failure_count`
 
-A current acquisition failure must not overwrite a prior confirmed `status` or confirmed evidence. Repeated acquisition failure leads to bounded retry/review behavior, not automatic `noise`, `out_of_scope`, or deletion.
+A current acquisition failure must not overwrite a prior confirmed `status` or confirmed evidence. Repeated acquisition failure leads to bounded retry/review behavior, not automatic `noise`, `out_of_scope`, or deletion. Future `next_review_at` and `paused_review` are request-admission gates for both carry-forward and current rediscovery; neither state is bypassed merely because a source rediscovers the keyword.
 
 ## Metric ownership and compatibility
 
@@ -176,8 +176,8 @@ Never derive `平稳` from `mature`, and never derive `上升 / 下降 / 平稳`
 
 ## Production delivery gate
 
-A `BLOCKED` run performs zero production Sheet reads/writes.
+Production Sheet delivery is fail-closed: only explicit `run_status=PASS` is eligible. `BLOCKED`, missing, or unknown run status performs zero production Sheet reads/writes; legacy databases are dry-run inspection only.
 
-Monitoring database membership is not delivery eligibility. When run-level eligibility metadata is present, only records with explicit `delivery_eligible=true` may be delivered.
+Monitoring database membership is not delivery eligibility. Production delivery requires explicit `delivery_eligible` on every record and delivers only records with `delivery_eligible=true`; missing eligibility never falls back to all records.
 
 Unknown/out-of-scope/failed/not-attempted records remain auditable in run artifacts rather than being silently deleted.

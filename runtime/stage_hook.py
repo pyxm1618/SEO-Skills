@@ -439,6 +439,13 @@ def _verify_route_attestation(manifest):
         if thresholds_path is None:
             return False, reason
 
+        ledger_path, reason = _verify_hashed_file(receipt.get("candidate_ledger"), "emerging candidate ledger")
+        if ledger_path is None:
+            return False, reason
+        candidate_ledger = pipeline._load_candidate_ledger(ledger_path)
+        delivery_ids = [pipeline._candidate_id(row) for row in candidate_ledger if row.get("delivery_eligible") is True]
+        delivery_ids = [value for value in delivery_ids if value is not None]
+
         output_entries = receipt.get("outputs")
         if not isinstance(output_entries, dict):
             return False, "emerging pipeline output hashes are missing"
@@ -463,10 +470,18 @@ def _verify_route_attestation(manifest):
         ):
             if not isinstance(saved_outputs[name], expected_type):
                 return False, f"emerging {name} output must be an object"
-        replayed = pipeline.replay_pipeline(input_path, as_of)
+        replayed = pipeline.replay_pipeline(input_path, as_of, candidate_ledger)
         for name in replayed:
             if saved_outputs[name] != replayed[name]:
                 return False, f"emerging {name} output differs from deterministic replay"
+        reconciliation = pipeline.reconcile_identity_sets(
+            candidate_ledger,
+            saved_outputs["classified"].get("candidates") or [],
+            saved_outputs["routed"].get("routes") or [],
+            delivery_ids,
+        )
+        if receipt.get("reconciliation") != reconciliation:
+            return False, "emerging reconciliation differs from candidate ledger and routed outputs"
     except Exception as exc:
         return False, f"emerging pipeline attestation invalid: {exc}"
 

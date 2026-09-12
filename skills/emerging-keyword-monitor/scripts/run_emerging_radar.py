@@ -175,12 +175,22 @@ def _requalify_carry_forward(
     relation_gate: Callable[[str, str, str], Any] | None,
 ) -> dict[str, Any]:
     keyword = " ".join(str(carried.get("keyword") or "").split())
-    parent = str(carried.get("parent_anchor") or keyword)
-    relation, reason = _relation(relation_gate, domain, keyword, parent)
+    parent = " ".join(str(carried.get("parent_anchor") or "").split())
+    if parent:
+        relation, reason = _relation(relation_gate, domain, keyword, parent)
+    else:
+        prior_relation = str(carried.get("domain_relation") or "").strip()
+        prior_reason = str(carried.get("domain_relation_reason") or "").strip()
+        if prior_relation in {"in_scope", "out_of_scope", "unknown"} and prior_reason:
+            relation, reason = prior_relation, prior_reason
+        else:
+            relation = "unknown"
+            reason = "carry-forward record lacks parent_anchor/domain evidence; manual review required"
     return {
         "domain": domain,
         **carried,
         "keyword": keyword,
+        "parent_anchor": parent or carried.get("parent_anchor"),
         "domain_relation": relation,
         "domain_relation_reason": reason,
         "discovery_source": "carry_forward",
@@ -234,6 +244,62 @@ def _merge_candidate_pool(
             continue
         add(_requalify_carry_forward(domain, carried, relation_gate))
     return pooled, overflow
+
+
+def _parse_workflow_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _apply_collection_admission(
+    ledger: list[dict[str, Any]], database: dict[str, Any], as_of: datetime
+) -> None:
+    records = database.get("records") if isinstance(database, dict) else []
+    history: dict[tuple[str, str], dict[str, Any]] = {}
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        key = (canonical_keyword(record.get("domain")), canonical_keyword(record.get("keyword")))
+        if key[1]:
+            history[key] = record
+    now_value = as_of if as_of.tzinfo is not None else as_of.replace(tzinfo=timezone.utc)
+    now_value = now_value.astimezone(timezone.utc)
+    for row in ledger:
+        if row.get("domain_relation") != "in_scope" or row.get("acquisition_status") != "not_started":
+            continue
+        prior = history.get((canonical_keyword(row.get("domain")), canonical_keyword(row.get("keyword"))))
+        if not prior:
+            continue
+        monitoring_state = str(prior.get("monitoring_state") or "").strip()
+        next_review = _parse_workflow_time(prior.get("next_review_at"))
+        row["monitoring_state"] = monitoring_state or row.get("monitoring_state")
+        row["next_review_at"] = prior.get("next_review_at")
+        if monitoring_state == "paused_review":
+            row.update(
+                acquisition_status="not_attempted",
+                acquisition_reason="paused_review",
+                verification_status="not_run",
+                delivery_eligible=False,
+                final_disposition="paused_review",
+            )
+        elif next_review is not None and next_review > now_value:
+            row.update(
+                acquisition_status="not_attempted",
+                acquisition_reason="review_not_due",
+                verification_status="not_run",
+                delivery_eligible=False,
+                final_disposition="retry_scheduled",
+            )
 
 
 def _timeline_points(payload: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -368,7 +434,7 @@ def _collect_timelines(
     circuit_open = False
 
     for row in ledger:
-        if row.get("domain_relation") != "in_scope":
+        if row.get("domain_relation") != "in_scope" or row.get("acquisition_status") != "not_started":
             continue
         all_windows_verified = True
         saw_data = False
@@ -389,6 +455,9 @@ def _collect_timelines(
                     context = payload if isinstance(payload, dict) else {}
                     acquisition = str(context.get("acquisition_status") or "data_acquired")
                     verification = str(context.get("verification_status") or "verified")
+                    if verification != "verified":
+                        reason = context.get("failure_type") or context.get("failure_reason") or "pending_evidence"
+                        raise RuntimeError(str(reason))
                     if acquisition == "valid_no_data":
                         row["window_attempts"].append({"time_window": time_window, "status": "valid_no_data", "attempts": attempt + 1, "raw_evidence_ref": context.get("raw_evidence_ref")})
                         row["observed_windows"].append(time_window)
@@ -397,7 +466,7 @@ def _collect_timelines(
                         handled = True
                         all_windows_verified = False
                         break
-                    if verification != "verified" or context.get("delivery_eligible") is False:
+                    if context.get("delivery_eligible") is False:
                         reason = context.get("failure_type") or context.get("failure_reason") or "pending_evidence"
                         raise RuntimeError(str(reason))
                     rows = _observation_rows(row, time_window, requested_timeframe, payload)
@@ -636,6 +705,8 @@ def run_pipeline(
         row.update(acquisition_status="not_attempted", acquisition_reason="batch_candidate_limit", verification_status="not_run", delivery_eligible=False, final_disposition="not_attempted_batch_limit")
         ledger.append(row)
 
+    run_as_of = as_of or datetime.now(timezone.utc)
+    _apply_collection_admission(ledger, database_source, run_as_of)
     observations: list[dict[str, Any]] = []
     if timeline_fetcher is not None:
         observations = _collect_timelines(
@@ -648,7 +719,7 @@ def run_pipeline(
             max_collection_retries=max_collection_retries,
         )
 
-    aggregate_result, classified, routes = _classify_and_route(domain, ledger, observations, as_of or datetime.now(timezone.utc))
+    aggregate_result, classified, routes = _classify_and_route(domain, ledger, observations, run_as_of)
     _finalize_ledger(ledger, classified, routes)
     reconciliation = _reconciliation(ledger, classified, routes)
 

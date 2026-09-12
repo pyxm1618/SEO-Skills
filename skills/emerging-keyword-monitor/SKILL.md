@@ -61,7 +61,7 @@ python3 runtime/emerging_pipeline.py \
   --output-dir .seo-run/emerging/20260912T235959Z
 ```
 
-The established receipt schema remains `seo-emerging-pipeline/v1`; candidate-ledger and reconciliation fields are backward-compatible additions. When a candidate ledger is supplied, the receipt attests the complete identity sets for all candidates in scope, candidates actually classified, candidates routed, and candidates eligible for delivery.
+The established receipt schema remains `seo-emerging-pipeline/v1`; candidate-ledger and reconciliation fields are backward-compatible additions. The receipt binds the candidate-ledger path/hash and the complete identity sets for candidates in scope, candidates actually classified, candidates routed, and candidates eligible for delivery. Canonical replay and the Hook must consume that same ledger-qualified set and recompute reconciliation; an explicit empty `delivery_ids=[]` remains empty and must never fall back to all classified candidates.
 
 The invariant is:
 
@@ -75,7 +75,7 @@ Every discovered, supplemental, carried, excluded, unknown, failed, skipped, cla
 
 A candidate with no observations remains in the ledger with an explicit terminal disposition such as `pending_evidence`, `pending_domain_review`, `excluded_out_of_scope`, `valid_no_data`, or `not_attempted_batch_limit`. It is not silently dropped and it is not fed into classification.
 
-`max_total_candidates` is the hard run-scope cap. It covers current discovery, recursive expansion, supplemental candidates, carry-forward records, and overflow bookkeeping. Retry budgets are separate and explicitly bounded.
+`max_total_candidates` is the hard **collection-admission** cap across current discovery, recursive expansion, supplemental candidates, and carry-forward records. Candidates beyond the cap remain in the ledger as `not_attempted / batch_candidate_limit`, but they must not execute collector requests or become delivery-eligible. Overflow bookkeeping never expands the collection budget. Retry budgets are separate and explicitly bounded.
 
 ## Domain admission
 
@@ -87,7 +87,7 @@ Domain admission is a separate gate before formal temporal classification:
 
 Generic lexical overlap alone is insufficient. Generic terms such as `finder`, `search`, `tool`, `guide`, or `generator` cannot establish `in_scope` by themselves. Known homonyms/media intents must be explicitly excluded where the domain context makes them unrelated.
 
-The same domain gate applies to Rising discovery, supplemental sources, and carry-forward records. Carry-forward is never a bypass around current domain qualification.
+The same domain gate applies to Rising discovery, supplemental sources, and carry-forward records. Carry-forward is never a bypass around current domain qualification. Preserve the historical `parent_anchor`/domain evidence used for qualification; a carried keyword may never use itself as substitute parent evidence. If that evidence is absent, keep the relation `unknown` for review rather than self-proving `in_scope`.
 
 ## Live Google Trends evidence
 
@@ -101,6 +101,7 @@ For Trends Related and Timeline:
 - the required screenshot has a bounded timeout and at most one retry after the initial attempt;
 - screenshot failure after valid raw data returns `acquisition_status=data_acquired`, `verification_status=pending_evidence`, `delivery_eligible=false`;
 - raw data surviving a screenshot failure is not promoted to verified production evidence;
+- only a response whose required evidence is fully verified may become `valid_no_data / verified_no_data`; a screenshot or other required-evidence failure remains `pending_evidence` and blocks production classification/delivery instead of being promoted to verified no-data;
 - a verified response with no timeline data is `valid_no_data`, distinct from `payload_not_observed` and browser/transport failure.
 
 CAPTCHA, unusual-traffic, verification challenges, or an unresolved browser blocker produce `NEEDS_HUMAN` and exit code 3. `NEEDS_HUMAN` is top-level control flow: stop dependent collection immediately, preserve the blocker/browser state, and require human resolution. Do not switch to headless or direct HTTP to bypass it.
@@ -147,7 +148,7 @@ For a confirmed classification, persist `last_confirmed_status`, `last_confirmed
 
 For every run, separately persist `last_run_acquisition_status`, `last_run_acquisition_reason`, and `acquisition_failure_count`.
 
-A current acquisition failure cannot erase or downgrade a prior confirmed status/evidence. Failed acquisition retries are bounded; after the retry budget they move to paused review, not automatically to `noise`, `out_of_scope`, or deletion. Domain `not_applicable`/review states are not counted as browser acquisition failures.
+A current acquisition failure cannot erase or downgrade a prior confirmed status/evidence. Failed acquisition retries are bounded; after the retry budget they move to paused review, not automatically to `noise`, `out_of_scope`, or deletion. `next_review_at` and `paused_review` are enforced at the single request-admission boundary for carry-forward and rediscovered candidates alike; rediscovery does not silently reset the retry clock or reactivate a paused record. Domain `not_applicable`/review states are not counted as browser acquisition failures.
 
 Carry-forward remains lifecycle continuation. It is re-qualified through the domain gate and must not be labelled as a fresh Google Rising discovery unless the current run actually observed it there. Historical `previous_status` and `first_observed_at` must survive the observation/classification round trip.
 
@@ -172,8 +173,8 @@ python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json \
 
 Rules:
 
-- `BLOCKED` run => **zero production Sheet reads/writes**.
-- Delivery list is not the monitoring database. Only explicit `delivery_eligible=true` records from the current run may be delivered when eligibility metadata is present.
+- Production Sheet mutation is fail-closed: only an explicit `run_status=PASS` may proceed. `BLOCKED`, missing, or unknown run status => **zero production Sheet reads/writes**. Historical/legacy databases may be inspected in dry-run mode only.
+- Delivery list is not the monitoring database. Production delivery requires an explicit `delivery_eligible` decision on every record, and only records with `delivery_eligible=true` may be delivered; missing eligibility never falls back to full-database delivery.
 - Unknown/out-of-scope records remain in audit/review artifacts, not silently deleted.
 - Emerging must not overwrite Selection-owned metrics or human workflow status.
 - Missing commercial metrics remain `unknown`; never fill them from unrelated sources.

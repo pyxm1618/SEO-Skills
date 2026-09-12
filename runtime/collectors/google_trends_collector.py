@@ -18,12 +18,19 @@ implemented here.
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
+import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+
+COLLECTOR_DIR = Path(__file__).resolve().parent
+if str(COLLECTOR_DIR) not in sys.path:
+    sys.path.insert(0, str(COLLECTOR_DIR))
 
 import google_live_collector as base
 
@@ -70,19 +77,80 @@ def _request_object(url: str) -> tuple[dict[str, Any] | None, str | None]:
     return payload if isinstance(payload, dict) else None, None
 
 
+def _geo_country(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("country") or value.get("countryCode")
+    return str(value or "").strip().upper()
+
+
+def _keyword_values(container: Any) -> set[str]:
+    if not isinstance(container, dict):
+        return set()
+    restriction = container.get("complexKeywordsRestriction")
+    rows = restriction.get("keyword") if isinstance(restriction, dict) else None
+    values: set[str] = set()
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, dict):
+            value = row.get("value") or row.get("keyword")
+        else:
+            value = row
+        if value not in (None, ""):
+            values.add(_canonical(value))
+    legacy = container.get("keyword")
+    if legacy not in (None, ""):
+        values.add(_canonical(legacy))
+    return values
+
+
+def _subtract_months(value: datetime, months: int) -> datetime:
+    total = value.year * 12 + value.month - 1 - months
+    year, month0 = divmod(total, 12)
+    month = month0 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _timeframe_matches(actual: Any, requested: str) -> bool:
+    if _canonical(actual) == _canonical(requested):
+        return True
+    match = re.fullmatch(r"(?:today|now)\s+(\d+)-(d|m|y)", _canonical(requested))
+    range_match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})", str(actual or "").strip())
+    if not match or not range_match:
+        return False
+    start = datetime.fromisoformat(range_match.group(1))
+    end = datetime.fromisoformat(range_match.group(2))
+    count = int(match.group(1))
+    unit = match.group(2)
+    if unit == "d":
+        return abs((end - start).days - count) <= 1
+    if unit == "m":
+        expected_start = _subtract_months(end, count)
+    else:
+        try:
+            expected_start = end.replace(year=end.year - count)
+        except ValueError:
+            expected_start = end.replace(year=end.year - count, day=28)
+    return abs((start - expected_start).days) <= 1
+
+
 def _timeline_request_matches(payload: dict[str, Any], keyword: str, market: str, timeframe: str) -> bool:
     items = payload.get("comparisonItem")
     if not isinstance(items, list):
         return False
+    payload_time = payload.get("time")
+    if payload_time not in (None, "") and not _timeframe_matches(payload_time, timeframe):
+        return False
     for item in items:
         if not isinstance(item, dict):
             continue
-        if (
-            _canonical(item.get("keyword")) == _canonical(keyword)
-            and str(item.get("geo") or "").strip().upper() == str(market or "").strip().upper()
-            and _canonical(item.get("time")) == _canonical(timeframe)
-        ):
-            return True
+        item_time = item.get("time") if item.get("time") not in (None, "") else payload_time
+        if _canonical(keyword) not in _keyword_values(item):
+            continue
+        if _geo_country(item.get("geo")) != _geo_country(market):
+            continue
+        if item_time in (None, "") or not _timeframe_matches(item_time, timeframe):
+            continue
+        return True
     return False
 
 
@@ -90,21 +158,11 @@ def _related_request_matches(payload: dict[str, Any], keyword: str, market: str,
     restriction = payload.get("restriction")
     if not isinstance(restriction, dict):
         return False
-    geo = restriction.get("geo")
-    country = geo.get("country") if isinstance(geo, dict) else None
-    time_value = restriction.get("time") or restriction.get("originalTimeRangeForExploreUrl")
-    complex_keywords = restriction.get("complexKeywordsRestriction")
-    keyword_rows = complex_keywords.get("keyword") if isinstance(complex_keywords, dict) else None
-    values = []
-    for row in keyword_rows if isinstance(keyword_rows, list) else []:
-        if isinstance(row, dict):
-            values.append(row.get("value") or row.get("keyword"))
-        else:
-            values.append(row)
+    time_values = [restriction.get("originalTimeRangeForExploreUrl"), restriction.get("time")]
     return (
-        str(country or "").strip().upper() == str(market or "").strip().upper()
-        and _canonical(time_value) == _canonical(timeframe)
-        and _canonical(keyword) in {_canonical(value) for value in values if value not in (None, "")}
+        _geo_country(restriction.get("geo")) == _geo_country(market)
+        and any(_timeframe_matches(value, timeframe) for value in time_values if value not in (None, ""))
+        and _canonical(keyword) in _keyword_values(restriction)
     )
 
 

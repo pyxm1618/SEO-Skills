@@ -84,7 +84,9 @@ A carried record:
 
 - is re-qualified through the current domain gate;
 - does not create a synthetic Google Rising event;
-- cannot bypass current batch/retry limits;
+- cannot bypass current batch/retry limits, `next_review_at`, or `paused_review`;
+- preserves the historical parent/domain evidence used for re-qualification and never substitutes the keyword itself as parent proof;
+- remains `unknown` for review when that domain evidence is missing;
 - retains prior confirmed state when current evidence acquisition fails.
 
 If current discovery rediscovers the same keyword, current discovery context wins and historical fields only fill missing values.

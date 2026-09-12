@@ -144,11 +144,29 @@ def classify_and_route_rows(raw_rows: list[dict[str, Any]], as_of: str | datetim
     return {"aggregated": aggregated, "classified": classified_rows, "routed": routed_rows}
 
 
-def replay_pipeline(input_path: Path, as_of: str | datetime) -> dict[str, dict[str, Any]]:
+def _classification_eligible_ids(candidate_ledger: list[dict[str, Any]]) -> set[str]:
+    return {
+        candidate_id
+        for row in candidate_ledger
+        if row.get("domain_relation") == "in_scope"
+        and row.get("acquisition_status") == "data_acquired"
+        and row.get("verification_status") == "verified"
+        and (candidate_id := _candidate_id(row)) is not None
+    }
+
+
+def replay_pipeline(
+    input_path: Path,
+    as_of: str | datetime,
+    candidate_ledger: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
     modules = _modules()
     input_path = Path(input_path)
     as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
     raw_rows = modules["validate"].load_rows(input_path)
+    if candidate_ledger is not None:
+        eligible_ids = _classification_eligible_ids(candidate_ledger)
+        raw_rows = [row for row in raw_rows if _candidate_id(row) in eligible_ids]
     validated_rows = modules["validate"].validate_rows(raw_rows, as_of_datetime)
     canonical = classify_and_route_rows(raw_rows, as_of_datetime)
     return {
@@ -197,7 +215,8 @@ def reconcile_identity_sets(
     candidate_set = set(candidate_ids)
     classified_set = set(classified_ids)
     route_set = set(route_ids)
-    delivery_set = set(str(value) for value in (delivery_ids or classified_ids))
+    delivery_source = classified_ids if delivery_ids is None else delivery_ids
+    delivery_set = set(str(value) for value in delivery_source)
     if not classified_set <= candidate_set:
         raise ValueError("classified identity exists outside candidate ledger")
     if route_set != classified_set:
@@ -253,28 +272,51 @@ def run_pipeline(
 
     modules = _modules()
     as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
-    outputs = replay_pipeline(input_path, as_of_datetime)
-    for name, payload in outputs.items():
-        _write_json(output_paths[name], payload)
-
-    classified_rows = outputs["classified"]["candidates"]
-    routed_rows = outputs["routed"]["routes"]
     ledger_ref = None
+    candidate_ledger = None
     if candidate_ledger_path is not None:
         ledger_path = Path(candidate_ledger_path).expanduser().resolve()
         if not ledger_path.is_file():
             raise FileNotFoundError(f"Emerging candidate ledger is missing: {ledger_path}")
         candidate_ledger = _load_candidate_ledger(ledger_path)
         ledger_ref = {"path": str(ledger_path), "sha256": _sha256(ledger_path)}
-    else:
+
+    outputs = replay_pipeline(input_path, as_of_datetime, candidate_ledger)
+    for name, payload in outputs.items():
+        _write_json(output_paths[name], payload)
+
+    classified_rows = outputs["classified"]["candidates"]
+    routed_rows = outputs["routed"]["routes"]
+    if candidate_ledger is None:
         candidate_ledger = [
-            {"candidate_id": _candidate_id(row), "keyword": row.get("keyword"), "final_disposition": "classified"}
+            {
+                "candidate_id": _candidate_id(row),
+                "keyword": row.get("keyword"),
+                "domain_relation": "in_scope",
+                "acquisition_status": "data_acquired",
+                "verification_status": "verified",
+                "delivery_eligible": True,
+                "final_disposition": "classified",
+            }
             for row in classified_rows
         ]
-    reconciliation = reconcile_identity_sets(candidate_ledger, classified_rows, routed_rows)
+        internal_ledger_path = output_dir / "candidate-ledger.json"
+        if internal_ledger_path.exists():
+            raise FileExistsError(f"Emerging pipeline output already exists: {internal_ledger_path}")
+        internal_ledger_path.write_text(
+            json.dumps(candidate_ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        ledger_ref = {"path": str(internal_ledger_path.resolve()), "sha256": _sha256(internal_ledger_path)}
+        delivery_ids = [_candidate_id(row) for row in candidate_ledger]
+        delivery_ids = [value for value in delivery_ids if value is not None]
+    else:
+        delivery_ids = [
+            candidate_id
+            for row in candidate_ledger
+            if row.get("delivery_eligible") is True and (candidate_id := _candidate_id(row)) is not None
+        ]
+    reconciliation = reconcile_identity_sets(candidate_ledger, classified_rows, routed_rows, delivery_ids)
 
-    # Keep the established v1 schema for the release hook. Candidate-ledger
-    # attestation and reconciliation are additive, backward-compatible fields.
     receipt = {
         "schema": "seo-emerging-pipeline/v1",
         "as_of": as_of_datetime.isoformat(),

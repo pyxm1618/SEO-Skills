@@ -79,8 +79,6 @@ def carry_forward(database: dict[str, Any], include_graduated: bool = False,
     for record in records if isinstance(records, list) else []:
         if not isinstance(record, dict):
             continue
-        if record.get("monitoring_state") == "paused_review":
-            continue
         state = record.get("observation_state") or observation_state(record.get("status"))
         if state == "graduated" and not include_graduated:
             continue
@@ -96,6 +94,12 @@ def carry_forward(database: dict[str, Any], include_graduated: bool = False,
                 "observation_count": record.get("observation_count"),
                 "acquisition_failure_count": record.get("acquisition_failure_count", 0),
                 "next_review_at": record.get("next_review_at"),
+                "monitoring_state": record.get("monitoring_state"),
+                "parent_anchor": record.get("parent_anchor"),
+                "domain_relation": record.get("domain_relation"),
+                "domain_relation_reason": record.get("domain_relation_reason"),
+                "root_relation": record.get("root_relation"),
+                "root_candidate_hypothesis": record.get("root_candidate_hypothesis"),
             }
         )
     out.sort(key=lambda row: (canonical_keyword(row["domain"]), canonical_keyword(row["keyword"])))
