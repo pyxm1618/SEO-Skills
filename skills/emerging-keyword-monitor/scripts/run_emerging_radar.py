@@ -2,7 +2,7 @@
 """Domain-level Emerging Keyword Radar orchestration.
 
 The runner keeps one candidate ledger from discovery through acquisition,
-classification, routing, persistence, and delivery.  Candidates without valid
+classification, routing, persistence, and delivery. Candidates without valid
 observations remain explicit ledger records; they are never manufactured into
 classifier output merely because the browser failed.
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.util
 import json
 import re
 import subprocess
@@ -26,8 +27,6 @@ REPO_ROOT = SCRIPT_DIR.parents[2]
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from aggregate_signals import aggregate
-from classify_emergence import classify_candidate, load_thresholds
 from radar_discovery import (
     HumanInterventionRequired,
     build_anchor_pool,
@@ -35,7 +34,6 @@ from radar_discovery import (
     default_domain_relation,
     discover_rising_bfs,
 )
-from route_candidates import route_candidate
 from update_emerging_database import carry_forward, load_database, merge_database, write_database
 
 
@@ -70,6 +68,17 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _load_canonical_pipeline():
+    path = REPO_ROOT / "runtime" / "emerging_pipeline.py"
+    spec = importlib.util.spec_from_file_location("seo_emerging_runtime_pipeline", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load canonical Emerging pipeline: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _relation(relation_gate: Callable[[str, str, str], Any] | None, domain: str, keyword: str, parent: str) -> tuple[str, str]:
@@ -187,7 +196,6 @@ def _merge_candidate_pool(
     relation_gate: Callable[[str, str, str], Any] | None,
     max_total_candidates: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return bounded candidate scope plus traceable rows excluded by the cap."""
     pooled: list[dict[str, Any]] = []
     overflow: list[dict[str, Any]] = []
     by_keyword: dict[str, int] = {}
@@ -198,8 +206,7 @@ def _merge_candidate_pool(
             return
         if identity in by_keyword:
             current = pooled[by_keyword[identity]]
-            sources = list(dict.fromkeys(_candidate_sources(current) + _candidate_sources(candidate)))
-            current["discovery_sources"] = sources
+            current["discovery_sources"] = list(dict.fromkeys(_candidate_sources(current) + _candidate_sources(candidate)))
             for field, value in candidate.items():
                 if current.get(field) is None:
                     current[field] = value
@@ -280,17 +287,11 @@ def _failure_type(exc: Exception | str) -> str:
 def _new_ledger_row(candidate: dict[str, Any]) -> dict[str, Any]:
     relation = str(candidate.get("domain_relation") or "unknown")
     if relation == "out_of_scope":
-        acquisition_status = "not_applicable"
-        reason = "domain_out_of_scope"
-        disposition = "excluded_out_of_scope"
+        acquisition_status, reason, disposition = "not_applicable", "domain_out_of_scope", "excluded_out_of_scope"
     elif relation != "in_scope":
-        acquisition_status = "not_applicable"
-        reason = "domain_review_required"
-        disposition = "pending_domain_review"
+        acquisition_status, reason, disposition = "not_applicable", "domain_review_required", "pending_domain_review"
     else:
-        acquisition_status = "not_started"
-        reason = None
-        disposition = "pending_evidence"
+        acquisition_status, reason, disposition = "not_started", None, "pending_evidence"
     return {
         **candidate,
         "candidate_id": candidate.get("candidate_id") or _stable_candidate_id(candidate.get("domain"), candidate.get("keyword")),
@@ -320,6 +321,10 @@ def _observation_rows(candidate: dict[str, Any], time_window: str, requested_tim
                 "keyword": candidate["keyword"],
                 "domain": candidate.get("domain"),
                 "candidate_id": candidate.get("candidate_id"),
+                "domain_relation": candidate.get("domain_relation"),
+                "domain_relation_reason": candidate.get("domain_relation_reason"),
+                "root_id": candidate.get("root_id"),
+                "root_relation": candidate.get("root_relation"),
                 "observed_at": _point_time(point["time"]),
                 "source": "google_trends",
                 "source_type": "interest_over_time",
@@ -335,6 +340,8 @@ def _observation_rows(candidate: dict[str, Any], time_window: str, requested_tim
                 "evidence_ref": evidence_ref,
                 "screenshot_ref": screenshot_ref,
                 "raw_evidence_ref": evidence_ref,
+                "acquisition_status": "data_acquired",
+                "verification_status": "verified",
             }
         )
     return rows
@@ -364,9 +371,7 @@ def _collect_timelines(
         valid_no_data = False
         for time_window, requested_timeframe in timeframe_specs:
             if circuit_open:
-                row["window_attempts"].append(
-                    {"time_window": time_window, "status": "not_attempted", "reason": "collection_circuit_open", "attempts": 0}
-                )
+                row["window_attempts"].append({"time_window": time_window, "status": "not_attempted", "reason": "collection_circuit_open", "attempts": 0})
                 row["failed_windows"].append(time_window)
                 all_windows_verified = False
                 continue
@@ -381,9 +386,7 @@ def _collect_timelines(
                     acquisition = str(context.get("acquisition_status") or "data_acquired")
                     verification = str(context.get("verification_status") or "verified")
                     if acquisition == "valid_no_data":
-                        row["window_attempts"].append(
-                            {"time_window": time_window, "status": "valid_no_data", "attempts": attempt + 1, "raw_evidence_ref": context.get("raw_evidence_ref")}
-                        )
+                        row["window_attempts"].append({"time_window": time_window, "status": "valid_no_data", "attempts": attempt + 1, "raw_evidence_ref": context.get("raw_evidence_ref")})
                         row["observed_windows"].append(time_window)
                         valid_no_data = True
                         consecutive_failures = 0
@@ -395,9 +398,7 @@ def _collect_timelines(
                         raise RuntimeError(str(reason))
                     rows = _observation_rows(row, time_window, requested_timeframe, payload)
                     observations.extend(rows)
-                    row["window_attempts"].append(
-                        {"time_window": time_window, "status": "verified", "attempts": attempt + 1, "observation_count": len(rows)}
-                    )
+                    row["window_attempts"].append({"time_window": time_window, "status": "verified", "attempts": attempt + 1, "observation_count": len(rows)})
                     row["observed_windows"].append(time_window)
                     saw_data = True
                     consecutive_failures = 0
@@ -415,47 +416,18 @@ def _collect_timelines(
 
             all_windows_verified = False
             row["failed_windows"].append(time_window)
-            row["window_attempts"].append(
-                {
-                    "time_window": time_window,
-                    "status": "failed",
-                    "failure_type": final_failure_type,
-                    "reason": str(final_error),
-                    "attempts": max_collection_retries + 1,
-                }
-            )
+            row["window_attempts"].append({"time_window": time_window, "status": "failed", "failure_type": final_failure_type, "reason": str(final_error), "attempts": max_collection_retries + 1})
             consecutive_failures += 1
-            blockers.append(
-                {
-                    "status": "BLOCKED",
-                    "stage": "trends_timeline",
-                    "candidate_id": row["candidate_id"],
-                    "keyword": row["keyword"],
-                    "time_window": time_window,
-                    "failure_type": final_failure_type,
-                    "reason": str(final_error),
-                }
-            )
+            blockers.append({"status": "BLOCKED", "stage": "trends_timeline", "candidate_id": row["candidate_id"], "keyword": row["keyword"], "time_window": time_window, "failure_type": final_failure_type, "reason": str(final_error)})
             if consecutive_failures >= max_consecutive_collection_failures:
                 circuit_open = True
-                blockers.append(
-                    {
-                        "status": "BLOCKED",
-                        "stage": "trends_timeline",
-                        "failure_type": "collection_circuit_open",
-                        "reason": f"stopped after {consecutive_failures} consecutive collection failures",
-                    }
-                )
+                blockers.append({"status": "BLOCKED", "stage": "trends_timeline", "failure_type": "collection_circuit_open", "reason": f"stopped after {consecutive_failures} consecutive collection failures"})
 
-        if circuit_open and not row["observed_windows"] and not row["failed_windows"]:
-            row["acquisition_status"] = "not_attempted"
-            row["acquisition_reason"] = "collection_circuit_open"
-            row["verification_status"] = "not_run"
-        elif row["failed_windows"]:
+        if row["failed_windows"]:
             not_attempted = all(item.get("status") == "not_attempted" for item in row["window_attempts"])
             row["acquisition_status"] = "not_attempted" if not_attempted else "failed"
             row["acquisition_reason"] = "collection_circuit_open" if not_attempted else "required_window_failed"
-            row["verification_status"] = "pending_evidence"
+            row["verification_status"] = "not_run" if not_attempted else "pending_evidence"
         elif valid_no_data and not saw_data:
             row["acquisition_status"] = "valid_no_data"
             row["acquisition_reason"] = "source_returned_no_timeline_data"
@@ -485,6 +457,36 @@ def _collect_timelines(
     return observations
 
 
+def _timeline_observations(
+    candidates: list[dict[str, Any]],
+    timeline_fetcher: Callable[[str, str], Any],
+    *,
+    timeframe_specs: tuple[tuple[str, str], ...] = TIMEFRAME_DEFAULTS,
+    throttle: Any = None,
+    blockers: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Backward-compatible timeline entry point used by older callers/tests.
+
+    Legacy candidate rows predate domain_relation, so this adapter treats them
+    as already admitted and delegates immediately to the bounded collector. A
+    NEEDS_HUMAN signal is re-raised without attempting the next keyword/window.
+    """
+    ledger = []
+    for candidate in candidates:
+        admitted = dict(candidate)
+        admitted.setdefault("domain_relation", "in_scope")
+        ledger.append(_new_ledger_row(admitted))
+    return _collect_timelines(
+        ledger,
+        timeline_fetcher,
+        timeframe_specs,
+        throttle,
+        blockers if blockers is not None else [],
+        max_consecutive_collection_failures=max(1, len(ledger) * max(1, len(timeframe_specs))),
+        max_collection_retries=0,
+    )
+
+
 def _eligible_candidate_ids(ledger: list[dict[str, Any]]) -> set[str]:
     return {
         row["candidate_id"]
@@ -502,41 +504,16 @@ def _classify_and_route(
     as_of: datetime,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     eligible_ids = _eligible_candidate_ids(ledger)
-    eligible_keywords = {
-        canonical_keyword(row["keyword"]): row
-        for row in ledger
-        if row.get("candidate_id") in eligible_ids
-    }
-    eligible_observations = [
-        item for item in observations
-        if canonical_keyword(item.get("keyword")) in eligible_keywords
-    ]
-    aggregate_result = aggregate(eligible_observations, as_of) if eligible_observations else {"candidates": []}
-    thresholds = load_thresholds()
-    classified: list[dict[str, Any]] = []
-    for aggregated in aggregate_result.get("candidates", []):
-        key = canonical_keyword(aggregated.get("keyword"))
-        source = eligible_keywords.get(key)
-        if source is None:
-            continue
-        current = dict(aggregated)
-        for field, value in source.items():
-            if field not in current or current.get(field) is None:
-                current[field] = value
-        current["domain"] = domain
-        current["candidate_id"] = source["candidate_id"]
-        current["acquisition_status"] = "data_acquired"
-        current["current_classification_status"] = "confirmed"
-        current["delivery_eligible"] = True
-        classified.append(classify_candidate(current, thresholds))
-
-    routes: list[dict[str, Any]] = []
-    for candidate in classified:
-        route = route_candidate(candidate)
-        route["domain"] = domain
-        route["candidate_id"] = candidate.get("candidate_id")
-        routes.append(route)
-    return aggregate_result, classified, routes
+    eligible_observations = [row for row in observations if row.get("candidate_id") in eligible_ids]
+    canonical = _load_canonical_pipeline().classify_and_route_rows(eligible_observations, as_of)
+    classified = canonical["classified"]
+    routes = canonical["routed"]
+    for row in classified:
+        row["domain"] = row.get("domain") or domain
+        row["acquisition_status"] = "data_acquired"
+        row["current_classification_status"] = "confirmed"
+        row["delivery_eligible"] = True
+    return canonical["aggregated"], classified, routes
 
 
 def _finalize_ledger(ledger: list[dict[str, Any]], classified: list[dict[str, Any]], routes: list[dict[str, Any]]) -> None:
@@ -552,6 +529,8 @@ def _finalize_ledger(ledger: list[dict[str, Any]], classified: list[dict[str, An
                 row["final_disposition"] = "pending_domain_review"
             elif row.get("acquisition_status") == "valid_no_data":
                 row["final_disposition"] = "valid_no_data"
+            elif row.get("acquisition_status") == "not_attempted" and row.get("acquisition_reason") == "batch_candidate_limit":
+                row["final_disposition"] = "not_attempted_batch_limit"
             else:
                 row["final_disposition"] = "pending_evidence"
             row["delivery_eligible"] = False
@@ -563,47 +542,12 @@ def _finalize_ledger(ledger: list[dict[str, Any]], classified: list[dict[str, An
         row["delivery_eligible"] = True
         route = route_by_id.get(candidate_id) or {}
         row["route"] = route.get("route")
-        row["final_disposition"] = (
-            "selection_handoff" if route.get("route") == "selection_handoff" else "monitor_record"
-        )
+        row["final_disposition"] = "selection_handoff" if route.get("route") == "selection_handoff" else "monitor_record"
 
 
 def _reconciliation(ledger: list[dict[str, Any]], classified: list[dict[str, Any]], routes: list[dict[str, Any]]) -> dict[str, Any]:
-    candidate_ids = [str(row["candidate_id"]) for row in ledger]
-    classified_ids = [str(row["candidate_id"]) for row in classified]
-    route_ids = [str(row["candidate_id"]) for row in routes]
     delivery_ids = [str(row["candidate_id"]) for row in ledger if row.get("delivery_eligible") is True]
-    if len(candidate_ids) != len(set(candidate_ids)):
-        raise RuntimeError("candidate ledger contains duplicate identities")
-    if set(classified_ids) - set(candidate_ids):
-        raise RuntimeError("classified identity is not present in candidate ledger")
-    if set(route_ids) != set(classified_ids):
-        raise RuntimeError("route identity set does not equal classified identity set")
-    if set(delivery_ids) - set(route_ids):
-        raise RuntimeError("delivery identity set is not a subset of routed identities")
-    dispositions = Counter(str(row.get("final_disposition") or "unknown") for row in ledger)
-    terminal_count = sum(dispositions.values())
-    if terminal_count != len(candidate_ids):
-        raise RuntimeError("candidate terminal-state reconciliation failed")
-    identity_payload = {
-        "candidate_ids": candidate_ids,
-        "classified_ids": classified_ids,
-        "route_ids": route_ids,
-        "delivery_ids": delivery_ids,
-    }
-    digest = hashlib.sha256(
-        json.dumps(identity_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return {
-        **identity_payload,
-        "candidate_count": len(candidate_ids),
-        "classified_count": len(classified_ids),
-        "route_count": len(route_ids),
-        "delivery_count": len(delivery_ids),
-        "terminal_state_counts": dict(sorted(dispositions.items())),
-        "terminal_state_count": terminal_count,
-        "identity_sha256": digest,
-    }
+    return _load_canonical_pipeline().reconcile_identity_sets(ledger, classified, routes, delivery_ids)
 
 
 def run_pipeline(
@@ -631,7 +575,6 @@ def run_pipeline(
     database_path: Path | None = None,
     csv_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Run Radar using one candidate ledger and one classification/route path."""
     if not callable(related_fetcher):
         raise ValueError("related_fetcher is required")
     total_limit = int(max_total_candidates if max_total_candidates is not None else max_candidates)
@@ -682,23 +625,11 @@ def run_pipeline(
 
     database_requested = database_path is not None or csv_path is not None or existing_database is not None
     database_source = _database_snapshot(existing_database, database_path) if database_requested else {"schema_version": 1, "records": []}
-    scoped_candidates, overflow = _merge_candidate_pool(
-        domain,
-        current_candidates,
-        database_source,
-        relation_gate,
-        total_limit,
-    )
+    scoped_candidates, overflow = _merge_candidate_pool(domain, current_candidates, database_source, relation_gate, total_limit)
     ledger = [_new_ledger_row(candidate) for candidate in scoped_candidates]
     for candidate in overflow:
         row = _new_ledger_row(candidate)
-        row.update(
-            acquisition_status="not_attempted",
-            acquisition_reason="batch_candidate_limit",
-            verification_status="not_run",
-            delivery_eligible=False,
-            final_disposition="not_attempted_batch_limit",
-        )
+        row.update(acquisition_status="not_attempted", acquisition_reason="batch_candidate_limit", verification_status="not_run", delivery_eligible=False, final_disposition="not_attempted_batch_limit")
         ledger.append(row)
 
     observations: list[dict[str, Any]] = []
@@ -713,12 +644,7 @@ def run_pipeline(
             max_collection_retries=max_collection_retries,
         )
 
-    aggregate_result, classified, routes = _classify_and_route(
-        domain,
-        ledger,
-        observations,
-        as_of or datetime.now(timezone.utc),
-    )
+    aggregate_result, classified, routes = _classify_and_route(domain, ledger, observations, as_of or datetime.now(timezone.utc))
     _finalize_ledger(ledger, classified, routes)
     reconciliation = _reconciliation(ledger, classified, routes)
 
@@ -730,27 +656,17 @@ def run_pipeline(
             current = classified_by_id.get(ledger_row.get("candidate_id"))
             if current is not None:
                 persisted = dict(current)
-                persisted["domain_relation"] = ledger_row.get("domain_relation")
-                persisted["domain_relation_reason"] = ledger_row.get("domain_relation_reason")
-                persisted["acquisition_status"] = ledger_row.get("acquisition_status")
-                persisted["acquisition_reason"] = ledger_row.get("acquisition_reason")
-                persisted["verification_status"] = ledger_row.get("verification_status")
+                for field in ("domain_relation", "domain_relation_reason", "acquisition_status", "acquisition_reason", "verification_status", "final_disposition"):
+                    persisted[field] = ledger_row.get(field)
                 persisted["delivery_eligible"] = ledger_row.get("delivery_eligible") is True
-                persisted["final_disposition"] = ledger_row.get("final_disposition")
                 persistence_rows.append(persisted)
             else:
                 persistence_rows.append(dict(ledger_row))
         database = merge_database(database_source, persistence_rows, routes, discovered_at or _now())
         database["run_status"] = "BLOCKED" if blockers or discovery.get("status") == "BLOCKED" else "PASS"
         database["market"] = country
-        database["candidate_scope"] = {
-            "candidate_ids": reconciliation["candidate_ids"],
-            "identity_sha256": reconciliation["identity_sha256"],
-        }
-        database["delivery_manifest"] = {
-            "delivery_ids": reconciliation["delivery_ids"],
-            "identity_sha256": reconciliation["identity_sha256"],
-        }
+        database["candidate_scope"] = {"candidate_ids": reconciliation["candidate_ids"], "identity_sha256": reconciliation["identity_sha256"]}
+        database["delivery_manifest"] = {"delivery_ids": reconciliation["delivery_ids"], "identity_sha256": reconciliation["identity_sha256"]}
         if database_path is not None and csv_path is not None:
             write_database(database, Path(database_path), Path(csv_path))
 
@@ -774,13 +690,7 @@ def run_pipeline(
         "reconciliation": reconciliation,
         "delivery_manifest": {"delivery_ids": reconciliation["delivery_ids"], "identity_sha256": reconciliation["identity_sha256"]},
         "output_artifacts": {},
-        "candidate_counts": {
-            "discovered": len(discovered_candidates),
-            "supplemental": len(supplemental_candidates),
-            "ledger": len(ledger),
-            "classified": len(classified),
-            "delivered": reconciliation["delivery_count"],
-        },
+        "candidate_counts": {"discovered": len(discovered_candidates), "supplemental": len(supplemental_candidates), "ledger": len(ledger), "classified": len(classified), "delivered": reconciliation["delivery_count"]},
     }
 
 
@@ -850,8 +760,7 @@ def load_semrush_request_map(paths: list[str | Path]) -> dict[str, Path]:
     return indexed
 
 
-def _validated_semrush_fetcher(*, request_map: dict[str, Path], collector: Path, validator: Path, run_dir: Path,
-                               stage_results: list[dict[str, Any]], counter: list[int]) -> Callable[[str], dict[str, Any] | None]:
+def _validated_semrush_fetcher(*, request_map: dict[str, Path], collector: Path, validator: Path, run_dir: Path, stage_results: list[dict[str, Any]], counter: list[int]) -> Callable[[str], dict[str, Any] | None]:
     def fetch(anchor: str) -> dict[str, Any] | None:
         request = request_map.get(canonical_keyword(anchor))
         if request is None:
@@ -861,15 +770,8 @@ def _validated_semrush_fetcher(*, request_map: dict[str, Path], collector: Path,
         output = run_dir / f"{prefix}.json"
         raw_output = run_dir / f"{prefix}.raw.json"
         report = run_dir / f"{prefix}.validation.json"
-        payload = _collector_payload(
-            [sys.executable, str(collector), "--request", str(request), "--output", str(output), "--raw-output", str(raw_output)],
-            output,
-        )
-        validation = subprocess.run(
-            [sys.executable, str(validator), "--stage", "discovery_semrush_ideas", "--input", str(output), "--report", str(report), "--production"],
-            text=True,
-            capture_output=True,
-        )
+        payload = _collector_payload([sys.executable, str(collector), "--request", str(request), "--output", str(output), "--raw-output", str(raw_output)], output)
+        validation = subprocess.run([sys.executable, str(validator), "--stage", "discovery_semrush_ideas", "--input", str(output), "--report", str(report), "--production"], text=True, capture_output=True)
         validation_payload = json.loads(report.read_text(encoding="utf-8"))
         stage_results.append(validation_payload)
         if validation.returncode != 0 or validation_payload.get("status") != "PASS":
@@ -924,9 +826,7 @@ def write_validated_run_summary(result: dict[str, Any], summary_path: Path, *, v
     return report_payload
 
 
-def _validated_collector_fetcher(*, collector: Path, validator: Path, stage: str, mode: str, run_dir: Path,
-                                 evidence_dir: Path, country: str, language: str, timeframe: str | None,
-                                 stage_results: list[dict[str, Any]], counter: list[int]) -> Callable[..., dict[str, Any]]:
+def _validated_collector_fetcher(*, collector: Path, validator: Path, stage: str, mode: str, run_dir: Path, evidence_dir: Path, country: str, language: str, timeframe: str | None, stage_results: list[dict[str, Any]], counter: list[int]) -> Callable[..., dict[str, Any]]:
     def fetch(identity: str) -> dict[str, Any]:
         counter[0] += 1
         prefix = f"{counter[0]:03d}-{_slug(identity)}-{stage}"
@@ -944,26 +844,14 @@ def _validated_collector_fetcher(*, collector: Path, validator: Path, stage: str
         verification_status = payload.get("verification_status")
         delivery_eligible = payload.get("delivery_eligible")
         if verification_status not in (None, "verified") or delivery_eligible is False:
-            stage_results.append(
-                {
-                    "stage": stage,
-                    "status": "BLOCKED" if verification_status == "pending_evidence" else "OBSERVED_NO_DATA",
-                    "keyword": identity,
-                    "acquisition_status": payload.get("acquisition_status"),
-                    "failure_type": payload.get("failure_type"),
-                }
-            )
+            stage_results.append({"stage": stage, "status": "BLOCKED" if verification_status == "pending_evidence" else "OBSERVED_NO_DATA", "keyword": identity, "acquisition_status": payload.get("acquisition_status"), "failure_type": payload.get("failure_type")})
             if stage == "trends_timeline":
                 return payload
             if payload.get("acquisition_status") == "valid_no_data" and verification_status == "verified":
                 return payload
             reason = payload.get("failure_type") or payload.get("failure_reason") or "evidence_incomplete"
             raise RuntimeError(f"stage {stage} evidence incomplete: {reason}")
-        validation = subprocess.run(
-            [sys.executable, str(validator), "--stage", stage, "--input", str(output), "--report", str(report), "--production"],
-            text=True,
-            capture_output=True,
-        )
+        validation = subprocess.run([sys.executable, str(validator), "--stage", stage, "--input", str(output), "--report", str(report), "--production"], text=True, capture_output=True)
         validation_payload = json.loads(report.read_text(encoding="utf-8"))
         stage_results.append(validation_payload)
         if validation.returncode != 0 or validation_payload.get("status") != "PASS":
@@ -994,32 +882,16 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
     trends_collector = REPO_ROOT / "runtime" / "collectors" / "google_trends_collector.py"
     validator = REPO_ROOT / "runtime" / "stage_validator.py"
 
-    related_fetcher = _validated_collector_fetcher(
-        collector=trends_collector, validator=validator, stage="trends_related", mode="trends_related",
-        run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
-        timeframe=args.related_timeframe, stage_results=stage_results, counter=counter,
-    )
+    related_fetcher = _validated_collector_fetcher(collector=trends_collector, validator=validator, stage="trends_related", mode="trends_related", run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language, timeframe=args.related_timeframe, stage_results=stage_results, counter=counter)
     autocomplete_fetcher = None
     if args.with_autocomplete:
-        autocomplete_fetcher = _validated_collector_fetcher(
-            collector=google_collector, validator=validator, stage="discovery_autocomplete", mode="autocomplete",
-            run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
-            timeframe=None, stage_results=stage_results, counter=counter,
-        )
+        autocomplete_fetcher = _validated_collector_fetcher(collector=google_collector, validator=validator, stage="discovery_autocomplete", mode="autocomplete", run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language, timeframe=None, stage_results=stage_results, counter=counter)
     semrush_fetcher = None
     if args.semrush_request:
-        semrush_fetcher = _validated_semrush_fetcher(
-            request_map=load_semrush_request_map(args.semrush_request),
-            collector=REPO_ROOT / "runtime" / "collectors" / "semrush_relay_collector.py",
-            validator=validator, run_dir=run_dir, stage_results=stage_results, counter=counter,
-        )
+        semrush_fetcher = _validated_semrush_fetcher(request_map=load_semrush_request_map(args.semrush_request), collector=REPO_ROOT / "runtime" / "collectors" / "semrush_relay_collector.py", validator=validator, run_dir=run_dir, stage_results=stage_results, counter=counter)
 
     def timeline_fetcher(keyword: str, requested_timeframe: str) -> dict[str, Any]:
-        return _validated_collector_fetcher(
-            collector=trends_collector, validator=validator, stage="trends_timeline", mode="trends_timeline",
-            run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
-            timeframe=requested_timeframe, stage_results=stage_results, counter=counter,
-        )(keyword)
+        return _validated_collector_fetcher(collector=trends_collector, validator=validator, stage="trends_timeline", mode="trends_timeline", run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language, timeframe=requested_timeframe, stage_results=stage_results, counter=counter)(keyword)
 
     root_rows = load_root_rows(Path(args.root_library)) if args.root_library else []
     as_of = _parse_as_of(args.as_of)
@@ -1046,12 +918,7 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
     )
     result["as_of"] = as_of.isoformat()
     result["stage_validations"] = stage_results
-    result["output_artifacts"] = {
-        "run_summary": str(Path(args.output)),
-        "database": str(run_dir / "emerging-keywords.json"),
-        "csv": str(run_dir / "emerging-keywords.csv"),
-        "evidence_dir": str(evidence_dir),
-    }
+    result["output_artifacts"] = {"run_summary": str(Path(args.output)), "database": str(run_dir / "emerging-keywords.json"), "csv": str(run_dir / "emerging-keywords.csv"), "evidence_dir": str(evidence_dir)}
     write_validated_run_summary(result, Path(args.output), validator_path=validator)
     return result
 
