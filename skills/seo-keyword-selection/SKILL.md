@@ -9,9 +9,11 @@ Run the existing evidence-based selection method from concrete candidates onward
 
 ## Boundaries
 
+This skill starts at the former Step 5 / Ideas-stage wide recall. Seed generation, Google Autocomplete discovery, Semrush Ideas/Related discovery, and low-risk discovery cleaning belong to `seo-keyword-discovery`.
+
 Inputs are either a verified `seo-keyword-discovery` handoff or a confirmed Emerging `selection_handoff`. Confirmed `emerging`/`breakout` keywords do not return through Seed/Autocomplete/Ideas discovery.
 
-This skill does not own Root generation, Discovery cleaning, Emerging classification/state transitions, or page mapping. The existing evaluator and `references/thresholds.json` remain the calculation/threshold source of truth.
+This skill does not own Root generation, Emerging classification/state transitions, or page mapping. The existing evaluator and `references/thresholds.json` remain the calculation/threshold source of truth.
 
 Read:
 
