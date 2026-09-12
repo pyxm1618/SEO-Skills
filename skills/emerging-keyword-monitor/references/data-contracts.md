@@ -146,3 +146,21 @@ If Volume is unknown, provenance is absent, or the two metric records are market
 Invalid inputs include negative signal values, negative Volume/CPC, KD outside `0..100`, NaN, Infinity, invalid dates, future `first_observed_at`, blank keyword, and malformed integer SERP counts. Invalid rows retain `validation_errors`.
 
 Exact duplicate observations remain visible for audit but do not inflate aggregation, persistence, or source counts.
+
+## Unified keyword library mirror contract
+
+The existing `SEO关键词库 / 关键词库` Sheet is an optional human-facing mirror for Emerging. It is not an input to temporal classification, does not change run validity, and does not alter the canonical state machine or thresholds.
+
+Stable row identity is `normalized_keyword + market + language`. Identity context resolution is explicit record → explicit run/batch → explicit delivery context → `BLOCKED`; no default market/language may be guessed.
+
+Emerging owns only its temporal/provenance delivery fields. It may update fields such as `estimated_birth_window`, `first_observed_at`, `birth_confidence`, `birth_reason`, `growth_rate`, `persistence`, `demand_history_type`, canonical `signal_type`, canonical Emerging `status`, and Emerging evidence references. It must preserve Discovery provenance, Selection metrics, and the human workflow `状态`.
+
+The visible `趋势类型` is only a presentation mapping of existing canonical temporal output. Delivery does not classify raw evidence. The current deterministic projection is:
+
+- `signal_type=net_new` or `demand_history_type=newly_observed` → `新词`;
+- canonical `signal_type=breakout` or canonical `status=breakout` → `上升`;
+- otherwise → `unknown` unless an already-existing canonical temporal category explicitly supports another display value.
+
+In particular, the sign of raw/calculated `growth_rate` never creates `上升`, `下降`, or `平稳` in the delivery layer.
+
+The human status vocabulary remains `新发现 / 已选 / 已建站 / 放弃`; Emerging canonical states (`new_signal`, `watch`, `emerging`, `breakout`, `mature`, `noise`, `insufficient_evidence`) are kept in technical fields and never translated into that human workflow column.
