@@ -12,7 +12,7 @@ RUNNER = SKILL_ROOT / "scripts" / "run_emerging_radar.py"
 RADAR = SKILL_ROOT / "scripts" / "radar_discovery.py"
 DATABASE = SKILL_ROOT / "scripts" / "update_emerging_database.py"
 EXPORTER = SKILL_ROOT / "scripts" / "export_to_sheet.py"
-GOOGLE = ROOT / "runtime" / "collectors" / "google_live_collector.py"
+TRENDS = ROOT / "runtime" / "collectors" / "google_trends_collector.py"
 
 
 def load_module(name, path):
@@ -151,10 +151,10 @@ class NoWriteWorksheet:
 
 # 1. Raw timeline evidence must survive screenshot failure without being promoted.
 def test_timeline_data_is_preserved_when_required_screenshot_times_out(tmp_path):
-    google = load_module("google_radar_repair_screenshot", GOOGLE)
+    trends = load_module("trends_radar_repair_screenshot", TRENDS)
     context = ScreenshotTimeoutContext()
 
-    result = google.trends_timeline(context, "perfume", "US", "today 12-m", tmp_path)
+    result = trends.trends_timeline(context, "perfume", "US", "today 12-m", tmp_path)
 
     assert result["acquisition_status"] == "data_acquired"
     assert result["screenshot_status"] == "failed"
@@ -169,16 +169,16 @@ def test_timeline_data_is_preserved_when_required_screenshot_times_out(tmp_path)
 
 # Response capture must be bound to the current request, not just any widgetdata payload.
 def test_trends_response_binding_rejects_other_keyword_market_or_timeframe():
-    google = load_module("google_radar_repair_binding", GOOGLE)
+    trends = load_module("trends_radar_repair_binding", TRENDS)
     good = TimelineResponse("perfume", "US", "today 12-m").url
     wrong_keyword = TimelineResponse("people finder", "US", "today 12-m").url
     wrong_market = TimelineResponse("perfume", "GB", "today 12-m").url
     wrong_timeframe = TimelineResponse("perfume", "US", "today 3-m").url
 
-    assert google.trends_response_matches_request(good, "perfume", "US", "today 12-m") is True
-    assert google.trends_response_matches_request(wrong_keyword, "perfume", "US", "today 12-m") is False
-    assert google.trends_response_matches_request(wrong_market, "perfume", "US", "today 12-m") is False
-    assert google.trends_response_matches_request(wrong_timeframe, "perfume", "US", "today 12-m") is False
+    assert trends.trends_response_matches_request(good, "perfume", "US", "today 12-m") is True
+    assert trends.trends_response_matches_request(wrong_keyword, "perfume", "US", "today 12-m") is False
+    assert trends.trends_response_matches_request(wrong_market, "perfume", "US", "today 12-m") is False
+    assert trends.trends_response_matches_request(wrong_timeframe, "perfume", "US", "today 12-m") is False
 
 
 # 2. A systemic failure must trip a bounded circuit breaker and ledger the skipped work.
