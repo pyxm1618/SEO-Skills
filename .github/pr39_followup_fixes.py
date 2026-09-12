@@ -69,4 +69,63 @@ replace_once(
     '''    assert calls == []\n    row = next(item for item in result["candidate_ledger"] if item["keyword"] == "legacy topic")\n    assert row["domain_relation"] == "unknown"\n    assert row["acquisition_status"] == "not_applicable"\n    assert row["final_disposition"] == "pending_domain_review"\n    assert row["previous_status"] == "watch"\n''',
 )
 
+# Keep the canonical Skill and data contracts synchronized with the executable
+# boundary conditions fixed in this change.
+replace_once(
+    "skills/emerging-keyword-monitor/SKILL.md",
+    "`max_total_candidates` is the hard run-scope cap. It covers current discovery, recursive expansion, supplemental candidates, carry-forward records, and overflow bookkeeping. Retry budgets are separate and explicitly bounded.\n",
+    "`max_total_candidates` is the hard **collection-admission** cap across current discovery, recursive expansion, supplemental candidates, and carry-forward records. Candidates beyond the cap remain in the ledger as `not_attempted / batch_candidate_limit`, but they must not execute collector requests or become delivery-eligible. Overflow bookkeeping never expands the collection budget. Retry budgets are separate and explicitly bounded.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/SKILL.md",
+    "The same domain gate applies to Rising discovery, supplemental sources, and carry-forward records. Carry-forward is never a bypass around current domain qualification.\n",
+    "The same domain gate applies to Rising discovery, supplemental sources, and carry-forward records. Carry-forward is never a bypass around current domain qualification. Preserve the historical `parent_anchor`/domain evidence used for qualification; a carried keyword may never use itself as substitute parent evidence. If that evidence is absent, keep the relation `unknown` for review rather than self-proving `in_scope`.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/SKILL.md",
+    "- a verified response with no timeline data is `valid_no_data`, distinct from `payload_not_observed` and browser/transport failure.\n",
+    "- only a response whose required evidence is fully verified may become `valid_no_data / verified_no_data`; a screenshot or other required-evidence failure remains `pending_evidence` and blocks production classification/delivery instead of being promoted to verified no-data;\n- a verified response with no timeline data is `valid_no_data`, distinct from `payload_not_observed` and browser/transport failure.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/SKILL.md",
+    "The established receipt schema remains `seo-emerging-pipeline/v1`; candidate-ledger and reconciliation fields are backward-compatible additions. When a candidate ledger is supplied, the receipt attests the complete identity sets for all candidates in scope, candidates actually classified, candidates routed, and candidates eligible for delivery.\n",
+    "The established receipt schema remains `seo-emerging-pipeline/v1`; candidate-ledger and reconciliation fields are backward-compatible additions. The receipt binds the candidate-ledger path/hash and the complete identity sets for candidates in scope, candidates actually classified, candidates routed, and candidates eligible for delivery. Canonical replay and the Hook must consume that same ledger-qualified set and recompute reconciliation; an explicit empty `delivery_ids=[]` remains empty and must never fall back to all classified candidates.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/SKILL.md",
+    "A current acquisition failure cannot erase or downgrade a prior confirmed status/evidence. Failed acquisition retries are bounded; after the retry budget they move to paused review, not automatically to `noise`, `out_of_scope`, or deletion. Domain `not_applicable`/review states are not counted as browser acquisition failures.\n",
+    "A current acquisition failure cannot erase or downgrade a prior confirmed status/evidence. Failed acquisition retries are bounded; after the retry budget they move to paused review, not automatically to `noise`, `out_of_scope`, or deletion. `next_review_at` and `paused_review` are enforced at the single request-admission boundary for carry-forward and rediscovered candidates alike; rediscovery does not silently reset the retry clock or reactivate a paused record. Domain `not_applicable`/review states are not counted as browser acquisition failures.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/SKILL.md",
+    "- `BLOCKED` run => **zero production Sheet reads/writes**.\n- Delivery list is not the monitoring database. Only explicit `delivery_eligible=true` records from the current run may be delivered when eligibility metadata is present.\n",
+    "- Production Sheet mutation is fail-closed: only an explicit `run_status=PASS` may proceed. `BLOCKED`, missing, or unknown run status => **zero production Sheet reads/writes**. Historical/legacy databases may be inspected in dry-run mode only.\n- Delivery list is not the monitoring database. Production delivery requires an explicit `delivery_eligible` decision on every record, and only records with `delivery_eligible=true` may be delivered; missing eligibility never falls back to full-database delivery.\n",
+)
+
+replace_once(
+    "skills/emerging-keyword-monitor/references/data-contracts.md",
+    "The receipt records all four identity sets plus an identity digest. A mismatch is a run error.\n",
+    "The receipt records all four identity sets plus an identity digest and binds the candidate-ledger path/hash. Canonical replay and the Hook consume that same ledger-qualified set and recompute reconciliation. An explicit empty delivery set remains empty. Any mismatch is a run error.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/references/data-contracts.md",
+    "The same gate applies to Rising discovery, supplemental discovery, and carry-forward.\n",
+    "The same gate applies to Rising discovery, supplemental discovery, and carry-forward. Carry-forward preserves its original `parent_anchor`/domain evidence; missing evidence remains `unknown` and the keyword itself is never substituted as parent proof.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/references/data-contracts.md",
+    "A current acquisition failure must not overwrite a prior confirmed `status` or confirmed evidence. Repeated acquisition failure leads to bounded retry/review behavior, not automatic `noise`, `out_of_scope`, or deletion.\n",
+    "A current acquisition failure must not overwrite a prior confirmed `status` or confirmed evidence. Repeated acquisition failure leads to bounded retry/review behavior, not automatic `noise`, `out_of_scope`, or deletion. Future `next_review_at` and `paused_review` are request-admission gates for both carry-forward and current rediscovery; neither state is bypassed merely because a source rediscovers the keyword.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/references/data-contracts.md",
+    "A `BLOCKED` run performs zero production Sheet reads/writes.\n\nMonitoring database membership is not delivery eligibility. When run-level eligibility metadata is present, only records with explicit `delivery_eligible=true` may be delivered.\n",
+    "Production Sheet delivery is fail-closed: only explicit `run_status=PASS` is eligible. `BLOCKED`, missing, or unknown run status performs zero production Sheet reads/writes; legacy databases are dry-run inspection only.\n\nMonitoring database membership is not delivery eligibility. Production delivery requires explicit `delivery_eligible` on every record and delivers only records with `delivery_eligible=true`; missing eligibility never falls back to all records.\n",
+)
+replace_once(
+    "skills/emerging-keyword-monitor/references/state-machine.md",
+    "- cannot bypass current batch/retry limits;\n- retains prior confirmed state when current evidence acquisition fails.\n",
+    "- cannot bypass current batch/retry limits, `next_review_at`, or `paused_review`;\n- preserves the historical parent/domain evidence used for re-qualification and never substitutes the keyword itself as parent proof;\n- remains `unknown` for review when that domain evidence is missing;\n- retains prior confirmed state when current evidence acquisition fails.\n",
+)
+
 print("PR39 follow-up transforms applied")
