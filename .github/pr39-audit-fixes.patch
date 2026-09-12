@@ -1,0 +1,474 @@
+diff --git a/runtime/collectors/google_trends_collector.py b/runtime/collectors/google_trends_collector.py
+index dc3cc08..0000000 100755
+--- a/runtime/collectors/google_trends_collector.py
++++ b/runtime/collectors/google_trends_collector.py
+@@ -16,10 +16,13 @@ implemented here.
+ from __future__ import annotations
+ 
+ import argparse
++import calendar
+ import json
+ import os
++import re
+ import sys
++from datetime import datetime
+ from pathlib import Path
+ from typing import Any
+ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+@@ -72,25 +75,79 @@ def _request_object(url: str) -> tuple[dict[str, Any] | None, str | None]:
+     return payload if isinstance(payload, dict) else None, None
+ 
+ 
++def _geo_country(value: Any) -> str:
++    if isinstance(value, dict):
++        value = value.get("country") or value.get("countryCode")
++    return str(value or "").strip().upper()
++
++
++def _keyword_values(container: Any) -> set[str]:
++    if not isinstance(container, dict):
++        return set()
++    restriction = container.get("complexKeywordsRestriction")
++    rows = restriction.get("keyword") if isinstance(restriction, dict) else None
++    values: set[str] = set()
++    for row in rows if isinstance(rows, list) else []:
++        value = row.get("value") or row.get("keyword") if isinstance(row, dict) else row
++        if value not in (None, ""):
++            values.add(_canonical(value))
++    legacy = container.get("keyword")
++    if legacy not in (None, ""):
++        values.add(_canonical(legacy))
++    return values
++
++
++def _subtract_months(value: datetime, months: int) -> datetime:
++    total = value.year * 12 + value.month - 1 - months
++    year, month0 = divmod(total, 12)
++    month = month0 + 1
++    day = min(value.day, calendar.monthrange(year, month)[1])
++    return value.replace(year=year, month=month, day=day)
++
++
++def _timeframe_matches(actual: Any, requested: str) -> bool:
++    if _canonical(actual) == _canonical(requested):
++        return True
++    match = re.fullmatch(r"(?:today|now)\s+(\d+)-(d|m|y)", _canonical(requested))
++    range_match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})", str(actual or "").strip())
++    if not match or not range_match:
++        return False
++    start = datetime.fromisoformat(range_match.group(1))
++    end = datetime.fromisoformat(range_match.group(2))
++    count = int(match.group(1))
++    unit = match.group(2)
++    if unit == "d":
++        expected = (end - start).days
++        return abs(expected - count) <= 1
++    if unit == "m":
++        expected_start = _subtract_months(end, count)
++    else:
++        try:
++            expected_start = end.replace(year=end.year - count)
++        except ValueError:
++            expected_start = end.replace(year=end.year - count, day=28)
++    return abs((start - expected_start).days) <= 1
++
++
+ def _timeline_request_matches(payload: dict[str, Any], keyword: str, market: str, timeframe: str) -> bool:
+     items = payload.get("comparisonItem")
+     if not isinstance(items, list):
+         return False
++    payload_time = payload.get("time")
++    if payload_time not in (None, "") and not _timeframe_matches(payload_time, timeframe):
++        return False
+     for item in items:
+         if not isinstance(item, dict):
+             continue
+-        if (
+-            _canonical(item.get("keyword")) == _canonical(keyword)
+-            and str(item.get("geo") or "").strip().upper() == str(market or "").strip().upper()
+-            and _canonical(item.get("time")) == _canonical(timeframe)
+-        ):
++        item_time = item.get("time") if item.get("time") not in (None, "") else payload_time
++        if _canonical(keyword) not in _keyword_values(item):
++            continue
++        if _geo_country(item.get("geo")) != _geo_country(market):
++            continue
++        if item_time not in (None, "") and not _timeframe_matches(item_time, timeframe):
++            continue
++        if item_time not in (None, ""):
+             return True
+     return False
+ 
+@@ -101,20 +158,13 @@ def _related_request_matches(payload: dict[str, Any], keyword: str, market: str,
+         return False
+     geo = restriction.get("geo")
+-    country = geo.get("country") if isinstance(geo, dict) else None
+-    time_value = restriction.get("time") or restriction.get("originalTimeRangeForExploreUrl")
+-    complex_keywords = restriction.get("complexKeywordsRestriction")
+-    keyword_rows = complex_keywords.get("keyword") if isinstance(complex_keywords, dict) else None
+-    values = []
+-    for row in keyword_rows if isinstance(keyword_rows, list) else []:
+-        if isinstance(row, dict):
+-            values.append(row.get("value") or row.get("keyword"))
+-        else:
+-            values.append(row)
++    time_values = [restriction.get("originalTimeRangeForExploreUrl"), restriction.get("time")]
+     return (
+-        str(country or "").strip().upper() == str(market or "").strip().upper()
+-        and _canonical(time_value) == _canonical(timeframe)
+-        and _canonical(keyword) in {_canonical(value) for value in values if value not in (None, "")}
++        _geo_country(geo) == _geo_country(market)
++        and any(_timeframe_matches(value, timeframe) for value in time_values if value not in (None, ""))
++        and _canonical(keyword) in _keyword_values(restriction)
+     )
+ 
+ 
+diff --git a/runtime/evidence_binding.py b/runtime/evidence_binding.py
+index 2161726..0000000 100755
+--- a/runtime/evidence_binding.py
++++ b/runtime/evidence_binding.py
+@@ -23,8 +23,8 @@ COLLECTOR_FILES = {
+     "google_serp_expansions": ROOT / "collectors" / "google_live_collector.py",
+     "google_intitle": ROOT / "collectors" / "google_live_collector.py",
+     "google_serp": ROOT / "collectors" / "google_live_collector.py",
+-    "google_trends": ROOT / "collectors" / "google_live_collector.py",
+-    "google_trends_related": ROOT / "collectors" / "google_live_collector.py",
++    "google_trends": ROOT / "collectors" / "google_trends_collector.py",
++    "google_trends_related": ROOT / "collectors" / "google_trends_collector.py",
+ }
+ EXPECTED_COLLECTORS = {
+@@ -36,8 +36,8 @@ EXPECTED_COLLECTORS = {
+     "google_serp_expansions": "google_live_collector",
+     "google_intitle": "google_live_collector",
+     "google_serp": "google_live_collector",
+-    "google_trends": "google_live_collector",
+-    "google_trends_related": "google_live_collector",
++    "google_trends": "google_trends_collector",
++    "google_trends_related": "google_trends_collector",
+ }
+ REQUIRED_ARTIFACT_ROLES = {
+diff --git a/skills/emerging-keyword-monitor/scripts/update_emerging_database.py b/skills/emerging-keyword-monitor/scripts/update_emerging_database.py
+index e740dea..0000000 100755
+--- a/skills/emerging-keyword-monitor/scripts/update_emerging_database.py
++++ b/skills/emerging-keyword-monitor/scripts/update_emerging_database.py
+@@ -84,8 +84,6 @@ def carry_forward(database: dict[str, Any], include_graduated: bool = False,
+     for record in records if isinstance(records, list) else []:
+         if not isinstance(record, dict):
+             continue
+-        if record.get("monitoring_state") == "paused_review":
+-            continue
+         state = record.get("observation_state") or observation_state(record.get("status"))
+         if state == "graduated" and not include_graduated:
+             continue
+@@ -99,6 +97,12 @@ def carry_forward(database: dict[str, Any], include_graduated: bool = False,
+                 "observation_count": record.get("observation_count"),
+                 "acquisition_failure_count": record.get("acquisition_failure_count", 0),
+                 "next_review_at": record.get("next_review_at"),
++                "monitoring_state": record.get("monitoring_state"),
++                "parent_anchor": record.get("parent_anchor"),
++                "domain_relation": record.get("domain_relation"),
++                "domain_relation_reason": record.get("domain_relation_reason"),
++                "root_relation": record.get("root_relation"),
++                "root_candidate_hypothesis": record.get("root_candidate_hypothesis"),
+             }
+         )
+     out.sort(key=lambda row: (canonical_keyword(row["domain"]), canonical_keyword(row["keyword"])))
+diff --git a/skills/emerging-keyword-monitor/scripts/run_emerging_radar.py b/skills/emerging-keyword-monitor/scripts/run_emerging_radar.py
+index b87e5ab..0000000 100755
+--- a/skills/emerging-keyword-monitor/scripts/run_emerging_radar.py
++++ b/skills/emerging-keyword-monitor/scripts/run_emerging_radar.py
+@@ -175,8 +175,17 @@ def _requalify_carry_forward(
+     relation_gate: Callable[[str, str, str], Any] | None,
+ ) -> dict[str, Any]:
+     keyword = " ".join(str(carried.get("keyword") or "").split())
+-    parent = str(carried.get("parent_anchor") or keyword)
+-    relation, reason = _relation(relation_gate, domain, keyword, parent)
++    parent = " ".join(str(carried.get("parent_anchor") or "").split())
++    if parent:
++        relation, reason = _relation(relation_gate, domain, keyword, parent)
++    else:
++        prior_relation = str(carried.get("domain_relation") or "").strip()
++        prior_reason = str(carried.get("domain_relation_reason") or "").strip()
++        if prior_relation in {"in_scope", "out_of_scope", "unknown"} and prior_reason:
++            relation, reason = prior_relation, prior_reason
++        else:
++            relation = "unknown"
++            reason = "carry-forward record lacks parent_anchor/domain evidence; manual review required"
+     return {
+         "domain": domain,
+         **carried,
+@@ -239,6 +248,58 @@ def _merge_candidate_pool(
+     return pooled, overflow
+ 
+ 
++def _parse_workflow_time(value: Any) -> datetime | None:
++    text = str(value or "").strip()
++    if not text:
++        return None
++    if text.endswith("Z"):
++        text = text[:-1] + "+00:00"
++    try:
++        parsed = datetime.fromisoformat(text)
++    except ValueError:
++        return None
++    if parsed.tzinfo is None:
++        parsed = parsed.replace(tzinfo=timezone.utc)
++    return parsed.astimezone(timezone.utc)
++
++
++def _apply_collection_admission(
++    ledger: list[dict[str, Any]], database: dict[str, Any], as_of: datetime
++) -> None:
++    records = database.get("records") if isinstance(database, dict) else []
++    history: dict[tuple[str, str], dict[str, Any]] = {}
++    for record in records if isinstance(records, list) else []:
++        if not isinstance(record, dict):
++            continue
++        key = (canonical_keyword(record.get("domain")), canonical_keyword(record.get("keyword")))
++        if key[1]:
++            history[key] = record
++    now_value = as_of if as_of.tzinfo is not None else as_of.replace(tzinfo=timezone.utc)
++    now_value = now_value.astimezone(timezone.utc)
++    for row in ledger:
++        if row.get("domain_relation") != "in_scope" or row.get("acquisition_status") != "not_started":
++            continue
++        prior = history.get((canonical_keyword(row.get("domain")), canonical_keyword(row.get("keyword"))))
++        if not prior:
++            continue
++        monitoring_state = str(prior.get("monitoring_state") or "").strip()
++        next_review = _parse_workflow_time(prior.get("next_review_at"))
++        row["monitoring_state"] = monitoring_state or row.get("monitoring_state")
++        row["next_review_at"] = prior.get("next_review_at")
++        if monitoring_state == "paused_review":
++            row.update(
++                acquisition_status="not_attempted",
++                acquisition_reason="paused_review",
++                verification_status="not_run",
++                delivery_eligible=False,
++                final_disposition="paused_review",
++            )
++        elif next_review is not None and next_review > now_value:
++            row.update(
++                acquisition_status="not_attempted",
++                acquisition_reason="review_not_due",
++                verification_status="not_run",
++                delivery_eligible=False,
++                final_disposition="retry_scheduled",
++            )
++
++
+ def _timeline_points(payload: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+@@ -370,7 +431,7 @@ def _collect_timelines(
+     circuit_open = False
+ 
+     for row in ledger:
+-        if row.get("domain_relation") != "in_scope":
++        if row.get("domain_relation") != "in_scope" or row.get("acquisition_status") != "not_started":
+             continue
+         all_windows_verified = True
+         saw_data = False
+@@ -392,6 +453,10 @@ def _collect_timelines(
+                     context = payload if isinstance(payload, dict) else {}
+                     acquisition = str(context.get("acquisition_status") or "data_acquired")
+                     verification = str(context.get("verification_status") or "verified")
++                    if verification != "verified":
++                        reason = context.get("failure_type") or context.get("failure_reason") or "pending_evidence"
++                        raise RuntimeError(str(reason))
+                     if acquisition == "valid_no_data":
+                         row["window_attempts"].append({"time_window": time_window, "status": "valid_no_data", "attempts": attempt + 1, "raw_evidence_ref": context.get("raw_evidence_ref")})
+                         row["observed_windows"].append(time_window)
+@@ -401,9 +466,9 @@ def _collect_timelines(
+                         handled = True
+                         all_windows_verified = False
+                         break
+-                    if verification != "verified" or context.get("delivery_eligible") is False:
++                    if context.get("delivery_eligible") is False:
+                         reason = context.get("failure_type") or context.get("failure_reason") or "pending_evidence"
+                         raise RuntimeError(str(reason))
+                     rows = _observation_rows(row, time_window, requested_timeframe, payload)
+@@ -636,6 +701,8 @@ def run_pipeline(
+         row.update(acquisition_status="not_attempted", acquisition_reason="batch_candidate_limit", verification_status="not_run", delivery_eligible=False, final_disposition="not_attempted_batch_limit")
+         ledger.append(row)
+ 
++    run_as_of = as_of or datetime.now(timezone.utc)
++    _apply_collection_admission(ledger, database_source, run_as_of)
+     observations: list[dict[str, Any]] = []
+     if timeline_fetcher is not None:
+         observations = _collect_timelines(
+@@ -649,7 +716,7 @@ def run_pipeline(
+             max_collection_retries=max_collection_retries,
+         )
+ 
+-    aggregate_result, classified, routes = _classify_and_route(domain, ledger, observations, as_of or datetime.now(timezone.utc))
++    aggregate_result, classified, routes = _classify_and_route(domain, ledger, observations, run_as_of)
+     _finalize_ledger(ledger, classified, routes)
+     reconciliation = _reconciliation(ledger, classified, routes)
+diff --git a/skills/emerging-keyword-monitor/scripts/export_to_sheet.py b/skills/emerging-keyword-monitor/scripts/export_to_sheet.py
+index 1ed2cfb..0000000 100755
+--- a/skills/emerging-keyword-monitor/scripts/export_to_sheet.py
++++ b/skills/emerging-keyword-monitor/scripts/export_to_sheet.py
+@@ -64,7 +64,8 @@ def _records(database: dict[str, Any]) -> list[dict[str, Any]]:
+ 
+ def _run_status(database: dict[str, Any], run_context: dict[str, Any] | None) -> str:
+     context = run_context or {}
+-    return str(context.get("status") or database.get("run_status") or "PASS").strip().upper()
++    value = context.get("status") or database.get("run_status")
++    return str(value).strip().upper() if value not in (None, "") else "UNKNOWN"
+@@ -83,24 +84,31 @@ def select_delivery_records(
+     """Resolve the Sheet delivery set and review set without touching a client.
+ 
+     New Radar databases explicitly carry ``delivery_eligible`` on every record.
+-    For backward-compatible historical files that predate the field, all records
+-    retain the previous mirror behavior; new production runs must not rely on
+-    this legacy fallback.
++    Historical files may still be inspected in dry-run mode, but production
++    delivery is fail-closed unless run status and every eligibility decision are
++    explicit and verifiable.
+     """
+     records = _records(database)
+     status = _run_status(database, run_context)
+-    if status == "BLOCKED" and not allow_blocked_dry_run:
+-        raise RuntimeError("BLOCKED run is not eligible for production Sheet mutation")
++    if status != "PASS" and not allow_blocked_dry_run:
++        raise RuntimeError(f"run status {status} is not eligible for production Sheet mutation")
+ 
+-    has_explicit_eligibility = any("delivery_eligible" in record for record in records)
++    has_explicit_eligibility = all("delivery_eligible" in record for record in records)
++    missing_eligibility = [record for record in records if "delivery_eligible" not in record]
++    if missing_eligibility and not allow_blocked_dry_run:
++        raise RuntimeError("production Sheet mutation requires explicit delivery_eligible on every record")
+     if has_explicit_eligibility:
+         delivery_records = [record for record in records if record.get("delivery_eligible") is True]
+         review_records = [record for record in records if record.get("delivery_eligible") is not True]
+     else:
+         delivery_records = list(records)
+         review_records = []
+@@ -120,7 +128,7 @@ def select_delivery_records(
+ 
+     return {
+         "run_status": status,
+-        "blocked": status == "BLOCKED",
++        "blocked": status != "PASS",
+         "delivery_records": delivery_records,
+         "review_records": review_records,
+         "delivery_count": len(delivery_records),
+diff --git a/runtime/emerging_pipeline.py b/runtime/emerging_pipeline.py
+index 32c4552..0000000 100755
+--- a/runtime/emerging_pipeline.py
++++ b/runtime/emerging_pipeline.py
+@@ -143,12 +143,27 @@ def classify_and_route_rows(raw_rows: list[dict[str, Any]], as_of: str | datetim
+     return {"aggregated": aggregated, "classified": classified_rows, "routed": routed_rows}
+ 
+ 
+-def replay_pipeline(input_path: Path, as_of: str | datetime) -> dict[str, dict[str, Any]]:
++def _classification_eligible_ids(candidate_ledger: list[dict[str, Any]]) -> set[str]:
++    return {
++        candidate_id
++        for row in candidate_ledger
++        if row.get("domain_relation") == "in_scope"
++        and row.get("acquisition_status") == "data_acquired"
++        and row.get("verification_status") == "verified"
++        and (candidate_id := _candidate_id(row)) is not None
++    }
++
++
++def replay_pipeline(
++    input_path: Path,
++    as_of: str | datetime,
++    candidate_ledger: list[dict[str, Any]] | None = None,
++) -> dict[str, dict[str, Any]]:
+     modules = _modules()
+     input_path = Path(input_path)
+     as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
+     raw_rows = modules["validate"].load_rows(input_path)
++    if candidate_ledger is not None:
++        eligible_ids = _classification_eligible_ids(candidate_ledger)
++        raw_rows = [row for row in raw_rows if _candidate_id(row) in eligible_ids]
+     validated_rows = modules["validate"].validate_rows(raw_rows, as_of_datetime)
+     canonical = classify_and_route_rows(raw_rows, as_of_datetime)
+@@ -197,7 +212,8 @@ def reconcile_identity_sets(
+     candidate_set = set(candidate_ids)
+     classified_set = set(classified_ids)
+     route_set = set(route_ids)
+-    delivery_set = set(str(value) for value in (delivery_ids or classified_ids))
++    delivery_source = classified_ids if delivery_ids is None else delivery_ids
++    delivery_set = set(str(value) for value in delivery_source)
+@@ -249,9 +265,19 @@ def run_pipeline(
+ 
+     modules = _modules()
+     as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
+-    outputs = replay_pipeline(input_path, as_of_datetime)
++    ledger_ref = None
++    candidate_ledger = None
++    if candidate_ledger_path is not None:
++        ledger_path = Path(candidate_ledger_path).expanduser().resolve()
++        if not ledger_path.is_file():
++            raise FileNotFoundError(f"Emerging candidate ledger is missing: {ledger_path}")
++        candidate_ledger = _load_candidate_ledger(ledger_path)
++        ledger_ref = {"path": str(ledger_path), "sha256": _sha256(ledger_path)}
++
++    outputs = replay_pipeline(input_path, as_of_datetime, candidate_ledger)
+     for name, payload in outputs.items():
+         _write_json(output_paths[name], payload)
+ 
+     classified_rows = outputs["classified"]["candidates"]
+     routed_rows = outputs["routed"]["routes"]
+-    ledger_ref = None
+-    if candidate_ledger_path is not None:
+-        ledger_path = Path(candidate_ledger_path).expanduser().resolve()
+-        if not ledger_path.is_file():
+-            raise FileNotFoundError(f"Emerging candidate ledger is missing: {ledger_path}")
+-        candidate_ledger = _load_candidate_ledger(ledger_path)
+-        ledger_ref = {"path": str(ledger_path), "sha256": _sha256(ledger_path)}
+-    else:
++    if candidate_ledger is None:
+         candidate_ledger = [
+             {"candidate_id": _candidate_id(row), "keyword": row.get("keyword"), "final_disposition": "classified"}
+             for row in classified_rows
+         ]
+-    reconciliation = reconcile_identity_sets(candidate_ledger, classified_rows, routed_rows)
++        delivery_ids = None
++    else:
++        delivery_ids = [
++            candidate_id
++            for row in candidate_ledger
++            if row.get("delivery_eligible") is True and (candidate_id := _candidate_id(row)) is not None
++        ]
++    reconciliation = reconcile_identity_sets(candidate_ledger, classified_rows, routed_rows, delivery_ids)
+diff --git a/runtime/stage_hook.py b/runtime/stage_hook.py
+index d21ed94..0000000 100755
+--- a/runtime/stage_hook.py
++++ b/runtime/stage_hook.py
+@@ -428,6 +428,13 @@ def _verify_route_attestation(manifest):
+         if thresholds_path is None:
+             return False, reason
+ 
++        ledger_path, reason = _verify_hashed_file(receipt.get("candidate_ledger"), "emerging candidate ledger")
++        if ledger_path is None:
++            return False, reason
++        candidate_ledger = pipeline._load_candidate_ledger(ledger_path)
++        delivery_ids = [pipeline._candidate_id(row) for row in candidate_ledger if row.get("delivery_eligible") is True]
++        delivery_ids = [value for value in delivery_ids if value is not None]
++
+         output_entries = receipt.get("outputs")
+         if not isinstance(output_entries, dict):
+             return False, "emerging pipeline output hashes are missing"
+@@ -453,11 +460,18 @@ def _verify_route_attestation(manifest):
+         ):
+             if not isinstance(saved_outputs[name], expected_type):
+                 return False, f"emerging {name} output must be an object"
+-        replayed = pipeline.replay_pipeline(input_path, as_of)
++        replayed = pipeline.replay_pipeline(input_path, as_of, candidate_ledger)
+         for name in replayed:
+             if saved_outputs[name] != replayed[name]:
+                 return False, f"emerging {name} output differs from deterministic replay"
++        reconciliation = pipeline.reconcile_identity_sets(
++            candidate_ledger,
++            saved_outputs["classified"].get("candidates") or [],
++            saved_outputs["routed"].get("routes") or [],
++            delivery_ids,
++        )
++        if receipt.get("reconciliation") != reconciliation:
++            return False, "emerging reconciliation differs from candidate ledger and routed outputs"
+     except Exception as exc:
+         return False, f"emerging pipeline attestation invalid: {exc}"
