@@ -46,6 +46,67 @@ jobs:
           done
           cat /tmp/pr39-chrome.log || true
           exit 1
+      - name: Probe actual Google Trends widget requests
+        env:
+          SEO_BROWSER_CDP_URL: http://127.0.0.1:9222
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from urllib.parse import parse_qs, quote_plus, urlparse
+          from playwright.sync_api import sync_playwright
+
+          target = (
+              "https://trends.google.com/trends/explore?"
+              f"geo=US&date={quote_plus('today 12-m')}&q={quote_plus('perfume')}"
+          )
+          seen = []
+
+          def decode_request(url):
+              parsed = urlparse(url)
+              if parsed.hostname != "trends.google.com" or "/trends/api/" not in parsed.path:
+                  return None
+              query = parse_qs(parsed.query)
+              req = query.get("req", [None])[0]
+              decoded = None
+              if req:
+                  try:
+                      decoded = json.loads(req)
+                  except Exception:
+                      decoded = req
+              return {
+                  "path": parsed.path,
+                  "req": decoded,
+                  "token_present": bool(query.get("token")),
+              }
+
+          with sync_playwright() as p:
+              browser = p.chromium.connect_over_cdp(os.environ["SEO_BROWSER_CDP_URL"])
+              context = browser.new_context()
+              page = context.new_page()
+
+              def on_request(request):
+                  item = decode_request(request.url)
+                  if item is not None:
+                      seen.append(item)
+
+              page.on("request", on_request)
+              page.goto(target, wait_until="domcontentloaded", timeout=30_000)
+              page.wait_for_timeout(12_000)
+              for label in ("Related queries", "Related topics"):
+                  try:
+                      locator = page.get_by_text(label, exact=False)
+                      if locator.count():
+                          locator.first.scroll_into_view_if_needed(timeout=3_000)
+                          break
+                  except Exception:
+                      pass
+              page.wait_for_timeout(5_000)
+              print("TRENDS_PROBE_PAGE", page.url)
+              print("TRENDS_PROBE_WIDGET_REQUESTS")
+              print(json.dumps(seen, ensure_ascii=False, indent=2))
+              context.close()
+          PY
       - name: Run hard-capped real Radar smoke
         env:
           SEO_BROWSER_CDP_URL: http://127.0.0.1:9222
