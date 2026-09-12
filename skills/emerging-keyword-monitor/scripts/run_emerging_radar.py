@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Thin domain-level Emerging Keyword Radar orchestration.
+"""Domain-level Emerging Keyword Radar orchestration.
 
-The pure ``run_pipeline`` entry point is dependency-injected for deterministic
-tests.  The CLI adapters invoke the existing collector CLIs as subprocesses so
-collector-bound evidence receipts remain direct-CLI-bound.
+The runner keeps one candidate ledger from discovery through acquisition,
+classification, routing, persistence, and delivery.  Candidates without valid
+observations remain explicit ledger records; they are never manufactured into
+classifier output merely because the browser failed.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import json
 import re
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -41,6 +43,16 @@ TIMEFRAME_DEFAULTS = (
     ("5y", "today 5-y"),
     ("12m", "today 12-m"),
     ("90d", "today 3-m"),
+)
+SYSTEMIC_FAILURE_TYPES = frozenset(
+    {
+        "screenshot_timeout",
+        "screenshot_failed",
+        "payload_not_observed",
+        "browser_closed",
+        "collector_failed",
+        "stage_validation_failed",
+    }
 )
 
 
@@ -71,6 +83,24 @@ def _relation(relation_gate: Callable[[str, str, str], Any] | None, domain: str,
     return str(decision or "unknown"), "domain relation analysis returned no reason"
 
 
+def _supplemental_values(source: str, payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError(f"{source} supplemental payload must contain a list")
+    if source == "google_autocomplete":
+        values = payload.get("suggestions")
+        if values is None:
+            values = payload.get("rows")
+    else:
+        values = payload.get("rows")
+        if values is None:
+            values = payload.get("keywords")
+    if not isinstance(values, list):
+        raise ValueError(f"{source} supplemental payload must contain a list")
+    return values
+
+
 def _supplemental_candidates(
     domain: str,
     anchor: dict[str, Any],
@@ -78,15 +108,8 @@ def _supplemental_candidates(
     payload: Any,
     relation_gate: Callable[[str, str, str], Any] | None,
 ) -> list[dict[str, Any]]:
-    if source == "google_autocomplete":
-        values = payload.get("suggestions") if isinstance(payload, dict) else None
-        field = "query"
-    else:
-        values = payload.get("rows") if isinstance(payload, dict) else None
-        field = "keyword"
-    if not isinstance(values, list):
-        raise ValueError(f"{source} supplemental payload must contain a list")
-
+    values = _supplemental_values(source, payload)
+    field = "query" if source == "google_autocomplete" else "keyword"
     candidates: list[dict[str, Any]] = []
     for item in values:
         value = item if isinstance(item, str) else item.get(field) if isinstance(item, dict) else None
@@ -114,10 +137,7 @@ def _supplemental_candidates(
     return candidates
 
 
-def _database_snapshot(
-    existing_database: dict[str, Any] | None,
-    database_path: Path | None,
-) -> dict[str, Any]:
+def _database_snapshot(existing_database: dict[str, Any] | None, database_path: Path | None) -> dict[str, Any]:
     if existing_database is not None:
         return existing_database
     if database_path is not None:
@@ -125,39 +145,90 @@ def _database_snapshot(
     return {"schema_version": 1, "records": []}
 
 
-def _merge_carry_forward_candidates(
+def _stable_candidate_id(domain: str, keyword: str) -> str:
+    identity = f"{canonical_keyword(domain)}\x1f{canonical_keyword(keyword)}"
+    return "cand_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+
+
+def _candidate_sources(candidate: dict[str, Any]) -> list[str]:
+    values = []
+    for field in ("discovery_source", "supplemental_source", "anchor_source"):
+        value = str(candidate.get(field) or "").strip()
+        if value and value not in values:
+            values.append(value)
+    if candidate.get("carry_forward") and "carry_forward" not in values:
+        values.append("carry_forward")
+    return values
+
+
+def _requalify_carry_forward(
+    domain: str,
+    carried: dict[str, Any],
+    relation_gate: Callable[[str, str, str], Any] | None,
+) -> dict[str, Any]:
+    keyword = " ".join(str(carried.get("keyword") or "").split())
+    parent = str(carried.get("parent_anchor") or keyword)
+    relation, reason = _relation(relation_gate, domain, keyword, parent)
+    return {
+        "domain": domain,
+        **carried,
+        "keyword": keyword,
+        "domain_relation": relation,
+        "domain_relation_reason": reason,
+        "discovery_source": "carry_forward",
+        "carry_forward": True,
+    }
+
+
+def _merge_candidate_pool(
     domain: str,
     current_candidates: list[dict[str, Any]],
     database: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Add still-watching records to the timeline pool without overwriting fresh discovery."""
-    candidates: list[dict[str, Any]] = []
+    relation_gate: Callable[[str, str, str], Any] | None,
+    max_total_candidates: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return bounded candidate scope plus traceable rows excluded by the cap."""
+    pooled: list[dict[str, Any]] = []
+    overflow: list[dict[str, Any]] = []
     by_keyword: dict[str, int] = {}
 
-    for candidate in current_candidates:
+    def add(candidate: dict[str, Any]) -> None:
         identity = canonical_keyword(candidate.get("keyword"))
         if not identity:
-            continue
-        by_keyword[identity] = len(candidates)
-        candidates.append({"domain": domain, **candidate})
-
-    normalized_domain = canonical_keyword(domain)
-    for carried in carry_forward(database):
-        if canonical_keyword(carried.get("domain")) != normalized_domain:
-            continue
-        identity = canonical_keyword(carried.get("keyword"))
-        if not identity:
-            continue
+            return
         if identity in by_keyword:
-            current = candidates[by_keyword[identity]]
-            for field, value in carried.items():
-                if field not in current or current.get(field) is None:
+            current = pooled[by_keyword[identity]]
+            sources = list(dict.fromkeys(_candidate_sources(current) + _candidate_sources(candidate)))
+            current["discovery_sources"] = sources
+            # Current discovery is authoritative; fill only absent values.
+            for field, value in candidate.items():
+                if current.get(field) is None:
                     current[field] = value
-            continue
-        by_keyword[identity] = len(candidates)
-        candidates.append({"domain": domain, **carried})
+            return
+        enriched = {"domain": domain, **candidate}
+        enriched["candidate_id"] = _stable_candidate_id(domain, enriched.get("keyword"))
+        enriched["discovery_sources"] = _candidate_sources(enriched)
+        if len(pooled) >= max_total_candidates:
+            overflow.append(
+                {
+                    **enriched,
+                    "acquisition_status": "not_attempted",
+                    "acquisition_reason": "batch_candidate_limit",
+                    "delivery_eligible": False,
+                    "final_disposition": "not_attempted_batch_limit",
+                }
+            )
+            return
+        by_keyword[identity] = len(pooled)
+        pooled.append(enriched)
 
-    return candidates
+    for candidate in current_candidates:
+        add(candidate)
+    for carried in carry_forward(database):
+        if canonical_keyword(carried.get("domain")) != canonical_keyword(domain):
+            continue
+        add(_requalify_carry_forward(domain, carried, relation_gate))
+    return pooled, overflow
 
 
 def _timeline_points(payload: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -192,60 +263,353 @@ def _point_time(value: Any) -> str:
     return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
 
-def _timeline_observations(
-    candidates: list[dict[str, Any]],
+def _failure_type(exc: Exception | str) -> str:
+    text = str(exc).casefold()
+    if "screenshot" in text and "timeout" in text:
+        return "screenshot_timeout"
+    if "screenshot" in text:
+        return "screenshot_failed"
+    if "payload" in text and ("not observed" in text or "not_observed" in text):
+        return "payload_not_observed"
+    if "target page" in text or "browser has been closed" in text or "context or browser" in text:
+        return "browser_closed"
+    if "stage" in text and "validation" in text:
+        return "stage_validation_failed"
+    return "collector_failed"
+
+
+def _new_ledger_row(candidate: dict[str, Any]) -> dict[str, Any]:
+    relation = str(candidate.get("domain_relation") or "unknown")
+    if relation == "out_of_scope":
+        acquisition_status = "not_applicable"
+        reason = "domain_out_of_scope"
+        disposition = "excluded_out_of_scope"
+    elif relation != "in_scope":
+        acquisition_status = "not_applicable"
+        reason = "domain_review_required"
+        disposition = "pending_domain_review"
+    else:
+        acquisition_status = "not_started"
+        reason = None
+        disposition = "pending_evidence"
+    return {
+        **candidate,
+        "candidate_id": candidate.get("candidate_id") or _stable_candidate_id(candidate.get("domain"), candidate.get("keyword")),
+        "acquisition_status": acquisition_status,
+        "acquisition_reason": reason,
+        "verification_status": "not_run",
+        "observed_windows": [],
+        "failed_windows": [],
+        "window_attempts": [],
+        "current_classification_status": "not_run",
+        "classification_status": None,
+        "route": None,
+        "delivery_eligible": False,
+        "final_disposition": disposition,
+    }
+
+
+def _observation_rows(candidate: dict[str, Any], time_window: str, requested_timeframe: str, payload: Any) -> list[dict[str, Any]]:
+    series, context = _timeline_points(payload)
+    evidence_ref = context.get("google_trends_evidence_ref") or context.get("raw_evidence_ref")
+    screenshot_ref = context.get("google_trends_screenshot_ref") or context.get("screenshot_ref")
+    actual_resolution = context.get("actual_resolution") or "unknown"
+    rows = []
+    for point in series:
+        rows.append(
+            {
+                "keyword": candidate["keyword"],
+                "domain": candidate.get("domain"),
+                "candidate_id": candidate.get("candidate_id"),
+                "observed_at": _point_time(point["time"]),
+                "source": "google_trends",
+                "source_type": "interest_over_time",
+                "source_url": context.get("source_url"),
+                "signal_value": point["value"],
+                "signal_unit": "normalized_interest_index",
+                "country": context.get("google_trends_market") or context.get("market") or "US",
+                "time_window": time_window,
+                "metric_source": "google_trends",
+                "metric_database": context.get("google_trends_market") or context.get("market") or "US",
+                "requested_timeframe": context.get("requested_timeframe") or requested_timeframe,
+                "actual_resolution": actual_resolution,
+                "evidence_ref": evidence_ref,
+                "screenshot_ref": screenshot_ref,
+                "raw_evidence_ref": evidence_ref,
+            }
+        )
+    return rows
+
+
+def _collect_timelines(
+    ledger: list[dict[str, Any]],
     timeline_fetcher: Callable[[str, str], Any],
     timeframe_specs: tuple[tuple[str, str], ...],
     throttle: Any,
     blockers: list[dict[str, Any]],
+    *,
+    max_consecutive_collection_failures: int,
+    max_collection_retries: int,
 ) -> list[dict[str, Any]]:
+    if max_consecutive_collection_failures < 1 or max_collection_retries < 0:
+        raise ValueError("collection failure limit must be positive and retries non-negative")
     observations: list[dict[str, Any]] = []
-    for candidate in candidates:
-        keyword = candidate["keyword"]
+    consecutive_failures = 0
+    circuit_open = False
+
+    for row in ledger:
+        if row.get("domain_relation") != "in_scope":
+            continue
+        all_windows_verified = True
+        saw_data = False
+        valid_no_data = False
         for time_window, requested_timeframe in timeframe_specs:
-            try:
-                payload = _call(timeline_fetcher, (keyword, requested_timeframe), throttle)
-                series, context = _timeline_points(payload)
-                observed_at = context.get("google_trends_observed_at") or context.get("observed_at") or _now()
-                source_url = context.get("source_url")
-                evidence_ref = context.get("google_trends_evidence_ref") or context.get("raw_evidence_ref")
-                screenshot_ref = context.get("google_trends_screenshot_ref") or context.get("screenshot_ref")
-                actual_resolution = context.get("actual_resolution") or "unknown"
-                for point in series:
-                    observations.append(
-                        {
-                            "keyword": keyword,
-                            "domain": candidate.get("domain"),
-                            "observed_at": _point_time(point["time"]),
-                            "source": "google_trends",
-                            "source_type": "interest_over_time",
-                            "source_url": source_url,
-                            "signal_value": point["value"],
-                            "signal_unit": "normalized_interest_index",
-                            "country": context.get("google_trends_market") or context.get("market") or "US",
-                            "time_window": time_window,
-                            "metric_source": "google_trends",
-                            "metric_database": context.get("google_trends_market") or context.get("market") or "US",
-                            "requested_timeframe": context.get("requested_timeframe") or requested_timeframe,
-                            "actual_resolution": actual_resolution,
-                            "evidence_ref": evidence_ref,
-                            "screenshot_ref": screenshot_ref,
-                            "raw_evidence_ref": evidence_ref,
-                        }
+            if circuit_open:
+                row["window_attempts"].append(
+                    {"time_window": time_window, "status": "not_attempted", "reason": "collection_circuit_open", "attempts": 0}
+                )
+                row["failed_windows"].append(time_window)
+                all_windows_verified = False
+                continue
+
+            final_error: Exception | None = None
+            final_failure_type = None
+            handled = False
+            for attempt in range(max_collection_retries + 1):
+                try:
+                    payload = _call(timeline_fetcher, (row["keyword"], requested_timeframe), throttle)
+                    context = payload if isinstance(payload, dict) else {}
+                    acquisition = str(context.get("acquisition_status") or "data_acquired")
+                    verification = str(context.get("verification_status") or "verified")
+                    if acquisition == "valid_no_data":
+                        row["window_attempts"].append(
+                            {"time_window": time_window, "status": "valid_no_data", "attempts": attempt + 1, "raw_evidence_ref": context.get("raw_evidence_ref")}
+                        )
+                        row["observed_windows"].append(time_window)
+                        valid_no_data = True
+                        consecutive_failures = 0
+                        handled = True
+                        all_windows_verified = False
+                        break
+                    if verification != "verified" or context.get("delivery_eligible") is False:
+                        reason = context.get("failure_type") or context.get("failure_reason") or "pending_evidence"
+                        raise RuntimeError(str(reason))
+                    rows = _observation_rows(row, time_window, requested_timeframe, payload)
+                    observations.extend(rows)
+                    row["window_attempts"].append(
+                        {"time_window": time_window, "status": "verified", "attempts": attempt + 1, "observation_count": len(rows)}
                     )
-            except HumanInterventionRequired:
-                raise
-            except Exception as exc:
+                    row["observed_windows"].append(time_window)
+                    saw_data = True
+                    consecutive_failures = 0
+                    handled = True
+                    break
+                except HumanInterventionRequired:
+                    raise
+                except Exception as exc:
+                    final_error = exc
+                    final_failure_type = _failure_type(exc)
+                    if attempt < max_collection_retries:
+                        continue
+            if handled:
+                continue
+
+            all_windows_verified = False
+            row["failed_windows"].append(time_window)
+            row["window_attempts"].append(
+                {
+                    "time_window": time_window,
+                    "status": "failed",
+                    "failure_type": final_failure_type,
+                    "reason": str(final_error),
+                    "attempts": max_collection_retries + 1,
+                }
+            )
+            consecutive_failures += 1
+            blockers.append(
+                {
+                    "status": "BLOCKED",
+                    "stage": "trends_timeline",
+                    "candidate_id": row["candidate_id"],
+                    "keyword": row["keyword"],
+                    "time_window": time_window,
+                    "failure_type": final_failure_type,
+                    "reason": str(final_error),
+                }
+            )
+            if consecutive_failures >= max_consecutive_collection_failures:
+                circuit_open = True
                 blockers.append(
                     {
                         "status": "BLOCKED",
                         "stage": "trends_timeline",
-                        "keyword": keyword,
-                        "time_window": time_window,
-                        "reason": str(exc),
+                        "failure_type": "collection_circuit_open",
+                        "reason": f"stopped after {consecutive_failures} consecutive collection failures",
                     }
                 )
+
+        if circuit_open and not row["observed_windows"] and not row["failed_windows"]:
+            row["acquisition_status"] = "not_attempted"
+            row["acquisition_reason"] = "collection_circuit_open"
+            row["verification_status"] = "not_run"
+        elif row["failed_windows"]:
+            # A candidate with any required failed window is not currently
+            # classifiable/deliverable, even if other windows returned data.
+            not_attempted = all(item.get("status") == "not_attempted" for item in row["window_attempts"])
+            row["acquisition_status"] = "not_attempted" if not_attempted else "failed"
+            row["acquisition_reason"] = "collection_circuit_open" if not_attempted else "required_window_failed"
+            row["verification_status"] = "pending_evidence"
+        elif valid_no_data and not saw_data:
+            row["acquisition_status"] = "valid_no_data"
+            row["acquisition_reason"] = "source_returned_no_timeline_data"
+            row["verification_status"] = "verified_no_data"
+            row["final_disposition"] = "valid_no_data"
+        elif all_windows_verified and saw_data and len(row["observed_windows"]) == len(timeframe_specs):
+            row["acquisition_status"] = "data_acquired"
+            row["acquisition_reason"] = None
+            row["verification_status"] = "verified"
+        else:
+            row["acquisition_status"] = "failed"
+            row["acquisition_reason"] = "incomplete_required_windows"
+            row["verification_status"] = "pending_evidence"
+
+    # Once the circuit opens, later candidates never enter the fetcher at all.
+    if circuit_open:
+        for row in ledger:
+            if row.get("domain_relation") != "in_scope" or row.get("acquisition_status") != "not_started":
+                continue
+            row["acquisition_status"] = "not_attempted"
+            row["acquisition_reason"] = "collection_circuit_open"
+            row["verification_status"] = "not_run"
+            row["failed_windows"] = [window for window, _ in timeframe_specs]
+            row["window_attempts"] = [
+                {"time_window": window, "status": "not_attempted", "reason": "collection_circuit_open", "attempts": 0}
+                for window, _ in timeframe_specs
+            ]
     return observations
+
+
+def _eligible_candidate_ids(ledger: list[dict[str, Any]]) -> set[str]:
+    return {
+        row["candidate_id"]
+        for row in ledger
+        if row.get("domain_relation") == "in_scope"
+        and row.get("acquisition_status") == "data_acquired"
+        and row.get("verification_status") == "verified"
+    }
+
+
+def _classify_and_route(
+    domain: str,
+    ledger: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    as_of: datetime,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    eligible_ids = _eligible_candidate_ids(ledger)
+    eligible_keywords = {
+        canonical_keyword(row["keyword"]): row
+        for row in ledger
+        if row.get("candidate_id") in eligible_ids
+    }
+    eligible_observations = [
+        item for item in observations
+        if canonical_keyword(item.get("keyword")) in eligible_keywords
+    ]
+    aggregate_result = aggregate(eligible_observations, as_of) if eligible_observations else {"candidates": []}
+    thresholds = load_thresholds()
+    classified: list[dict[str, Any]] = []
+    for aggregated in aggregate_result.get("candidates", []):
+        key = canonical_keyword(aggregated.get("keyword"))
+        source = eligible_keywords.get(key)
+        if source is None:
+            continue
+        current = dict(aggregated)
+        for field, value in source.items():
+            if field not in current or current.get(field) is None:
+                current[field] = value
+        current["domain"] = domain
+        current["candidate_id"] = source["candidate_id"]
+        current["acquisition_status"] = "data_acquired"
+        current["current_classification_status"] = "confirmed"
+        current["delivery_eligible"] = True
+        classified.append(classify_candidate(current, thresholds))
+
+    routes: list[dict[str, Any]] = []
+    for candidate in classified:
+        route = route_candidate(candidate)
+        route["domain"] = domain
+        route["candidate_id"] = candidate.get("candidate_id")
+        routes.append(route)
+    return aggregate_result, classified, routes
+
+
+def _finalize_ledger(ledger: list[dict[str, Any]], classified: list[dict[str, Any]], routes: list[dict[str, Any]]) -> None:
+    classified_by_id = {row.get("candidate_id"): row for row in classified}
+    route_by_id = {row.get("candidate_id"): row for row in routes}
+    for row in ledger:
+        candidate_id = row["candidate_id"]
+        current = classified_by_id.get(candidate_id)
+        if current is None:
+            if row.get("domain_relation") == "out_of_scope":
+                row["final_disposition"] = "excluded_out_of_scope"
+            elif row.get("domain_relation") != "in_scope":
+                row["final_disposition"] = "pending_domain_review"
+            elif row.get("acquisition_status") == "valid_no_data":
+                row["final_disposition"] = "valid_no_data"
+            elif row.get("acquisition_status") == "not_attempted":
+                row["final_disposition"] = "pending_evidence"
+            else:
+                row["final_disposition"] = "pending_evidence"
+            row["delivery_eligible"] = False
+            row["current_classification_status"] = "unknown"
+            continue
+        row["classification_status"] = current.get("status")
+        row["signal_type"] = current.get("signal_type")
+        row["current_classification_status"] = "confirmed"
+        row["delivery_eligible"] = True
+        route = route_by_id.get(candidate_id) or {}
+        row["route"] = route.get("route")
+        row["final_disposition"] = (
+            "selection_handoff" if route.get("route") == "selection_handoff" else "monitor_record"
+        )
+
+
+def _reconciliation(ledger: list[dict[str, Any]], classified: list[dict[str, Any]], routes: list[dict[str, Any]]) -> dict[str, Any]:
+    candidate_ids = [str(row["candidate_id"]) for row in ledger]
+    classified_ids = [str(row["candidate_id"]) for row in classified]
+    route_ids = [str(row["candidate_id"]) for row in routes]
+    delivery_ids = [str(row["candidate_id"]) for row in ledger if row.get("delivery_eligible") is True]
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise RuntimeError("candidate ledger contains duplicate identities")
+    if set(classified_ids) - set(candidate_ids):
+        raise RuntimeError("classified identity is not present in candidate ledger")
+    if set(route_ids) != set(classified_ids):
+        raise RuntimeError("route identity set does not equal classified identity set")
+    if set(delivery_ids) - set(route_ids):
+        raise RuntimeError("delivery identity set is not a subset of routed identities")
+    dispositions = Counter(str(row.get("final_disposition") or "unknown") for row in ledger)
+    terminal_count = sum(dispositions.values())
+    if terminal_count != len(candidate_ids):
+        raise RuntimeError("candidate terminal-state reconciliation failed")
+    identity_payload = {
+        "candidate_ids": candidate_ids,
+        "classified_ids": classified_ids,
+        "route_ids": route_ids,
+        "delivery_ids": delivery_ids,
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        **identity_payload,
+        "candidate_count": len(candidate_ids),
+        "classified_count": len(classified_ids),
+        "route_count": len(route_ids),
+        "delivery_count": len(delivery_ids),
+        "terminal_state_counts": dict(sorted(dispositions.items())),
+        "terminal_state_count": terminal_count,
+        "identity_sha256": digest,
+    }
 
 
 def run_pipeline(
@@ -261,8 +625,11 @@ def run_pipeline(
     max_depth: int = 2,
     per_anchor_limit: int = 10,
     max_candidates: int = 200,
+    max_total_candidates: int | None = None,
     timeline_fetcher: Callable[[str, str], Any] | None = None,
     timeframe_specs: tuple[tuple[str, str], ...] = TIMEFRAME_DEFAULTS,
+    max_consecutive_collection_failures: int = 3,
+    max_collection_retries: int = 1,
     throttle: Any = None,
     as_of: datetime | None = None,
     discovered_at: str | None = None,
@@ -270,9 +637,13 @@ def run_pipeline(
     database_path: Path | None = None,
     csv_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Run discovery and optional timeline/classification/persistence stages."""
+    """Run Radar using one candidate ledger and one classification/route path."""
     if not callable(related_fetcher):
         raise ValueError("related_fetcher is required")
+    total_limit = int(max_total_candidates if max_total_candidates is not None else max_candidates)
+    if total_limit < 1:
+        raise ValueError("max_total_candidates must be positive")
+
     anchors = build_anchor_pool(domain, explicit_anchors, root_rows)
     discovery = discover_rising_bfs(
         domain,
@@ -286,10 +657,7 @@ def run_pipeline(
     blockers = list(discovery.get("blockers") or [])
     supplemental_evidence: list[dict[str, Any]] = []
     supplemental_candidates: list[dict[str, Any]] = []
-    for fetcher, source in (
-        (autocomplete_fetcher, "google_autocomplete"),
-        (semrush_fetcher, "semrush_ideas"),
-    ):
+    for fetcher, source in ((autocomplete_fetcher, "google_autocomplete"), (semrush_fetcher, "semrush_ideas")):
         if fetcher is None:
             continue
         for anchor in anchors:
@@ -297,99 +665,103 @@ def run_pipeline(
                 payload = _call(fetcher, (anchor["keyword"],), throttle)
                 if payload is None:
                     continue
-                supplemental_evidence.append(
-                    {
-                        "source": source,
-                        "anchor": anchor["keyword"],
-                        "payload": payload,
-                        "recursive": False,
-                    }
-                )
-                supplemental_candidates.extend(
-                    _supplemental_candidates(domain, anchor, source, payload, relation_gate)
-                )
+                supplemental_evidence.append({"source": source, "anchor": anchor["keyword"], "payload": payload, "recursive": False})
+                supplemental_candidates.extend(_supplemental_candidates(domain, anchor, source, payload, relation_gate))
             except HumanInterventionRequired:
                 raise
             except Exception as exc:
-                blockers.append(
-                    {
-                        "status": "BLOCKED",
-                        "stage": source,
-                        "anchor": anchor["keyword"],
-                        "reason": str(exc),
-                    }
-                )
+                blockers.append({"status": "BLOCKED", "stage": source, "anchor": anchor["keyword"], "reason": str(exc)})
 
     discovered_candidates = list(discovery.get("candidates") or [])
     current_candidates: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    current_by_keyword: dict[str, int] = {}
     for candidate in discovered_candidates + supplemental_candidates:
         identity = canonical_keyword(candidate.get("keyword"))
-        if not identity or identity in seen:
+        if not identity:
             continue
-        if len(current_candidates) >= max_candidates:
-            break
-        seen.add(identity)
+        if identity in current_by_keyword:
+            current = current_candidates[current_by_keyword[identity]]
+            current["discovery_sources"] = list(dict.fromkeys(_candidate_sources(current) + _candidate_sources(candidate)))
+            continue
+        current_by_keyword[identity] = len(current_candidates)
         current_candidates.append({"domain": domain, **candidate})
 
     database_requested = database_path is not None or csv_path is not None or existing_database is not None
     database_source = _database_snapshot(existing_database, database_path) if database_requested else {"schema_version": 1, "records": []}
-    candidates = (
-        _merge_carry_forward_candidates(domain, current_candidates, database_source)
-        if database_requested
-        else current_candidates
+    scoped_candidates, overflow = _merge_candidate_pool(
+        domain,
+        current_candidates,
+        database_source,
+        relation_gate,
+        total_limit,
     )
+    ledger = [_new_ledger_row(candidate) for candidate in scoped_candidates]
+    for candidate in overflow:
+        row = _new_ledger_row(candidate)
+        row.update(
+            acquisition_status="not_attempted",
+            acquisition_reason="batch_candidate_limit",
+            verification_status="not_run",
+            delivery_eligible=False,
+            final_disposition="not_attempted_batch_limit",
+        )
+        ledger.append(row)
 
     observations: list[dict[str, Any]] = []
     if timeline_fetcher is not None:
-        observations = _timeline_observations(
-            candidates,
+        observations = _collect_timelines(
+            ledger,
             timeline_fetcher,
             timeframe_specs,
             throttle,
             blockers,
+            max_consecutive_collection_failures=max_consecutive_collection_failures,
+            max_collection_retries=max_collection_retries,
         )
 
-    aggregate_result = aggregate(observations, as_of or datetime.now(timezone.utc)) if observations else {"candidates": []}
-    aggregate_by_keyword = {
-        canonical_keyword(candidate.get("keyword")): candidate
-        for candidate in aggregate_result.get("candidates", [])
-    }
-    classified: list[dict[str, Any]] = []
-    thresholds = load_thresholds()
-    for discovery_candidate in candidates:
-        keyword = canonical_keyword(discovery_candidate.get("keyword"))
-        current = dict(aggregate_by_keyword.get(keyword) or {
-            "keyword": discovery_candidate.get("keyword"),
-            "source_count": 0,
-            "source_evidence": [],
-            "primary_series": None,
-        })
-        for field, value in discovery_candidate.items():
-            if field not in current or current.get(field) is None:
-                current[field] = value
-        current["domain"] = domain
-        classified.append(classify_candidate(current, thresholds))
-
-    routes: list[dict[str, Any]] = []
-    for candidate in classified:
-        route = route_candidate(candidate)
-        route["domain"] = domain
-        routes.append(route)
+    aggregate_result, classified, routes = _classify_and_route(
+        domain,
+        ledger,
+        observations,
+        as_of or datetime.now(timezone.utc),
+    )
+    _finalize_ledger(ledger, classified, routes)
+    reconciliation = _reconciliation(ledger, classified, routes)
 
     database = None
     if database_requested:
-        database = merge_database(
-            database_source,
-            classified,
-            routes,
-            discovered_at or _now(),
-        )
+        classified_by_id = {row.get("candidate_id"): row for row in classified}
+        persistence_rows: list[dict[str, Any]] = []
+        for ledger_row in ledger:
+            current = classified_by_id.get(ledger_row.get("candidate_id"))
+            if current is not None:
+                persisted = dict(current)
+                persisted["domain_relation"] = ledger_row.get("domain_relation")
+                persisted["domain_relation_reason"] = ledger_row.get("domain_relation_reason")
+                persisted["acquisition_status"] = ledger_row.get("acquisition_status")
+                persisted["acquisition_reason"] = ledger_row.get("acquisition_reason")
+                persisted["verification_status"] = ledger_row.get("verification_status")
+                persisted["delivery_eligible"] = ledger_row.get("delivery_eligible") is True
+                persisted["final_disposition"] = ledger_row.get("final_disposition")
+                persistence_rows.append(persisted)
+            else:
+                persistence_rows.append(dict(ledger_row))
+        database = merge_database(database_source, persistence_rows, routes, discovered_at or _now())
+        database["run_status"] = "BLOCKED" if blockers or discovery.get("status") == "BLOCKED" else "PASS"
+        database["market"] = country
+        database["candidate_scope"] = {
+            "candidate_ids": reconciliation["candidate_ids"],
+            "identity_sha256": reconciliation["identity_sha256"],
+        }
+        database["delivery_manifest"] = {
+            "delivery_ids": reconciliation["delivery_ids"],
+            "identity_sha256": reconciliation["identity_sha256"],
+        }
         if database_path is not None and csv_path is not None:
             write_database(database, Path(database_path), Path(csv_path))
 
     status = "BLOCKED" if blockers or discovery.get("status") == "BLOCKED" else "PASS"
-    result = {
+    return {
         "domain": domain,
         "country": country,
         "status": status,
@@ -398,21 +770,24 @@ def run_pipeline(
         "anchor_pool": anchors,
         "discovery": discovery,
         "supplemental_evidence": supplemental_evidence,
+        "candidate_ledger": ledger,
         "candidates": classified,
         "routes": routes,
         "observations": observations,
         "aggregate": aggregate_result,
         "database": database,
         "blockers": blockers,
+        "reconciliation": reconciliation,
+        "delivery_manifest": {"delivery_ids": reconciliation["delivery_ids"], "identity_sha256": reconciliation["identity_sha256"]},
         "output_artifacts": {},
         "candidate_counts": {
             "discovered": len(discovered_candidates),
             "supplemental": len(supplemental_candidates),
-            "unique_pool": len(candidates),
+            "ledger": len(ledger),
             "classified": len(classified),
+            "delivered": reconciliation["delivery_count"],
         },
     }
-    return result
 
 
 def load_root_rows(path: Path) -> list[dict[str, Any]]:
@@ -427,6 +802,15 @@ def _slug(value: str) -> str:
     return f"{readable}-{digest}" if readable else f"item-{digest}"
 
 
+def _read_structured_partial(output_path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict) and payload.get("acquisition_status"):
+        return payload
+    return None
+
 
 def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
     process = subprocess.run(command, text=True, capture_output=True)
@@ -434,6 +818,11 @@ def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
         detail = (process.stderr or "Google verification required (NEEDS_HUMAN)").strip()
         raise HumanInterventionRequired(detail)
     if process.returncode != 0:
+        partial = _read_structured_partial(output_path)
+        if partial is not None:
+            partial["collector_exit_code"] = process.returncode
+            partial["collector_stderr"] = (process.stderr or "").strip()[-2000:]
+            return partial
         detail = (process.stderr or process.stdout or "collector failed").strip()
         raise RuntimeError(detail[-2000:])
     try:
@@ -446,7 +835,6 @@ def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
 
 
 def load_semrush_request_map(paths: list[str | Path]) -> dict[str, Path]:
-    """Index current Ideas descriptors by their captured seed without rewriting them."""
     indexed: dict[str, Path] = {}
     for raw_path in paths:
         path = Path(raw_path)
@@ -468,63 +856,32 @@ def load_semrush_request_map(paths: list[str | Path]) -> dict[str, Path]:
     return indexed
 
 
-def _validated_semrush_fetcher(
-    *,
-    request_map: dict[str, Path],
-    collector: Path,
-    validator: Path,
-    run_dir: Path,
-    stage_results: list[dict[str, Any]],
-    counter: list[int],
-) -> Callable[[str], dict[str, Any] | None]:
+def _validated_semrush_fetcher(*, request_map: dict[str, Path], collector: Path, validator: Path, run_dir: Path,
+                               stage_results: list[dict[str, Any]], counter: list[int]) -> Callable[[str], dict[str, Any] | None]:
     def fetch(anchor: str) -> dict[str, Any] | None:
         request = request_map.get(canonical_keyword(anchor))
         if request is None:
             return None
-
         counter[0] += 1
         prefix = f"{counter[0]:03d}-{_slug(anchor)}-discovery_semrush_ideas"
         output = run_dir / f"{prefix}.json"
         raw_output = run_dir / f"{prefix}.raw.json"
         report = run_dir / f"{prefix}.validation.json"
         payload = _collector_payload(
-            [
-                sys.executable,
-                str(collector),
-                "--request",
-                str(request),
-                "--output",
-                str(output),
-                "--raw-output",
-                str(raw_output),
-            ],
+            [sys.executable, str(collector), "--request", str(request), "--output", str(output), "--raw-output", str(raw_output)],
             output,
         )
         validation = subprocess.run(
-            [
-                sys.executable,
-                str(validator),
-                "--stage",
-                "discovery_semrush_ideas",
-                "--input",
-                str(output),
-                "--report",
-                str(report),
-                "--production",
-            ],
+            [sys.executable, str(validator), "--stage", "discovery_semrush_ideas", "--input", str(output), "--report", str(report), "--production"],
             text=True,
             capture_output=True,
         )
-        try:
-            validation_payload = json.loads(report.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"stage validation report is unavailable: {report}") from exc
+        validation_payload = json.loads(report.read_text(encoding="utf-8"))
         stage_results.append(validation_payload)
         if validation.returncode != 0 or validation_payload.get("status") != "PASS":
             detail = (validation.stderr or validation.stdout or "stage contract blocked").strip()
-            raise RuntimeError(f"stage discovery_semrush_ideas BLOCKED: {detail[-2000:]}")
+            raise RuntimeError(f"stage discovery_semrush_ideas validation BLOCKED: {detail[-2000:]}")
         return payload
-
     return fetch
 
 
@@ -535,13 +892,7 @@ def _run_blocker_reason(result: dict[str, Any]) -> str:
     return "emerging radar run is blocked"
 
 
-def write_validated_run_summary(
-    result: dict[str, Any],
-    summary_path: Path,
-    *,
-    validator_path: Path | None = None,
-) -> dict[str, Any]:
-    """Write the final radar summary and register its canonical stage receipt."""
+def write_validated_run_summary(result: dict[str, Any], summary_path: Path, *, validator_path: Path | None = None) -> dict[str, Any]:
     summary_path = Path(summary_path)
     report_path = summary_path.with_name(f"{summary_path.stem}.validation.json")
     receipt_path = report_path.with_suffix(".receipt.json")
@@ -549,7 +900,6 @@ def write_validated_run_summary(
     artifacts["run_summary"] = str(summary_path)
     artifacts["emerging_radar_run_validation"] = str(report_path)
     result["output_artifacts"] = artifacts
-
     stage_record: dict[str, Any] = {"status": result.get("status")}
     if result.get("status") == "PASS":
         stage_record["validation_receipt_ref"] = str(receipt_path)
@@ -561,31 +911,17 @@ def write_validated_run_summary(
     _write_json(summary_path, result)
 
     validator = Path(validator_path) if validator_path else REPO_ROOT / "runtime" / "stage_validator.py"
-    command = [
-        sys.executable,
-        str(validator),
-        "--stage",
-        "emerging_radar_run",
-        "--input",
-        str(summary_path),
-        "--report",
-        str(report_path),
-    ]
+    command = [sys.executable, str(validator), "--stage", "emerging_radar_run", "--input", str(summary_path), "--report", str(report_path)]
     if result.get("status") == "PASS":
         command.append("--production")
     validation = subprocess.run(command, text=True, capture_output=True)
-    try:
-        report_payload = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"emerging_radar_run validation report is unavailable: {report_path}") from exc
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
     if validation.returncode != 0 or report_payload.get("status") != "PASS":
         detail = (validation.stderr or validation.stdout or "emerging_radar_run contract blocked").strip()
         if result.get("status") == "PASS":
             reason = f"emerging_radar_run validation failed: {detail[-2000:]}"
             result["status"] = "BLOCKED"
-            result.setdefault("blockers", []).append(
-                {"status": "BLOCKED", "stage": "emerging_radar_run", "reason": reason}
-            )
+            result.setdefault("blockers", []).append({"status": "BLOCKED", "stage": "emerging_radar_run", "reason": reason})
             result["stages"]["emerging_radar_run"] = {"status": "BLOCKED", "blocked_reason": reason}
             _write_json(summary_path, result)
         raise RuntimeError(detail[-2000:])
@@ -594,20 +930,9 @@ def write_validated_run_summary(
     return report_payload
 
 
-def _validated_collector_fetcher(
-    *,
-    collector: Path,
-    validator: Path,
-    stage: str,
-    mode: str,
-    run_dir: Path,
-    evidence_dir: Path,
-    country: str,
-    language: str,
-    timeframe: str | None,
-    stage_results: list[dict[str, Any]],
-    counter: list[int],
-) -> Callable[..., dict[str, Any]]:
+def _validated_collector_fetcher(*, collector: Path, validator: Path, stage: str, mode: str, run_dir: Path,
+                                 evidence_dir: Path, country: str, language: str, timeframe: str | None,
+                                 stage_results: list[dict[str, Any]], counter: list[int]) -> Callable[..., dict[str, Any]]:
     def fetch(identity: str) -> dict[str, Any]:
         counter[0] += 1
         prefix = f"{counter[0]:03d}-{_slug(identity)}-{stage}"
@@ -622,33 +947,39 @@ def _validated_collector_fetcher(
                 command.extend(["--timeframe", timeframe])
         command.extend(["--evidence-dir", str(evidence_dir), "--output", str(output)])
         payload = _collector_payload(command, output)
-
+        if payload.get("verification_status") not in (None, "verified") or payload.get("delivery_eligible") is False:
+            stage_results.append(
+                {
+                    "stage": stage,
+                    "status": "BLOCKED" if payload.get("verification_status") == "pending_evidence" else "OBSERVED_NO_DATA",
+                    "keyword": identity,
+                    "acquisition_status": payload.get("acquisition_status"),
+                    "failure_type": payload.get("failure_type"),
+                }
+            )
+            return payload
         validation = subprocess.run(
-            [
-                sys.executable,
-                str(validator),
-                "--stage",
-                stage,
-                "--input",
-                str(output),
-                "--report",
-                str(report),
-                "--production",
-            ],
+            [sys.executable, str(validator), "--stage", stage, "--input", str(output), "--report", str(report), "--production"],
             text=True,
             capture_output=True,
         )
-        try:
-            validation_payload = json.loads(report.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"stage validation report is unavailable: {report}") from exc
+        validation_payload = json.loads(report.read_text(encoding="utf-8"))
         stage_results.append(validation_payload)
         if validation.returncode != 0 or validation_payload.get("status") != "PASS":
             detail = (validation.stderr or validation.stdout or "stage contract blocked").strip()
-            raise RuntimeError(f"stage {stage} BLOCKED: {detail[-2000:]}")
+            raise RuntimeError(f"stage {stage} validation BLOCKED: {detail[-2000:]}")
         return payload
-
     return fetch
+
+
+def _parse_as_of(value: str | None) -> datetime:
+    if not value:
+        return datetime.now(timezone.utc)
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
@@ -662,61 +993,34 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
     validator = REPO_ROOT / "runtime" / "stage_validator.py"
 
     related_fetcher = _validated_collector_fetcher(
-        collector=collector,
-        validator=validator,
-        stage="trends_related",
-        mode="trends_related",
-        run_dir=run_dir,
-        evidence_dir=evidence_dir,
-        country=args.country,
-        language=args.language,
-        timeframe=args.related_timeframe,
-        stage_results=stage_results,
-        counter=counter,
+        collector=collector, validator=validator, stage="trends_related", mode="trends_related",
+        run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
+        timeframe=args.related_timeframe, stage_results=stage_results, counter=counter,
     )
     autocomplete_fetcher = None
     if args.with_autocomplete:
         autocomplete_fetcher = _validated_collector_fetcher(
-            collector=collector,
-            validator=validator,
-            stage="discovery_autocomplete",
-            mode="autocomplete",
-            run_dir=run_dir,
-            evidence_dir=evidence_dir,
-            country=args.country,
-            language=args.language,
-            timeframe=None,
-            stage_results=stage_results,
-            counter=counter,
+            collector=collector, validator=validator, stage="discovery_autocomplete", mode="autocomplete",
+            run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
+            timeframe=None, stage_results=stage_results, counter=counter,
         )
-
     semrush_fetcher = None
     if args.semrush_request:
         semrush_fetcher = _validated_semrush_fetcher(
             request_map=load_semrush_request_map(args.semrush_request),
             collector=REPO_ROOT / "runtime" / "collectors" / "semrush_relay_collector.py",
-            validator=validator,
-            run_dir=run_dir,
-            stage_results=stage_results,
-            counter=counter,
+            validator=validator, run_dir=run_dir, stage_results=stage_results, counter=counter,
         )
 
     def timeline_fetcher(keyword: str, requested_timeframe: str) -> dict[str, Any]:
         return _validated_collector_fetcher(
-            collector=collector,
-            validator=validator,
-            stage="trends_timeline",
-            mode="trends_timeline",
-            run_dir=run_dir,
-            evidence_dir=evidence_dir,
-            country=args.country,
-            language=args.language,
-            timeframe=requested_timeframe,
-            stage_results=stage_results,
-            counter=counter,
+            collector=collector, validator=validator, stage="trends_timeline", mode="trends_timeline",
+            run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
+            timeframe=requested_timeframe, stage_results=stage_results, counter=counter,
         )(keyword)
 
     root_rows = load_root_rows(Path(args.root_library)) if args.root_library else []
+    as_of = _parse_as_of(args.as_of)
     result = run_pipeline(
         related_fetcher,
         autocomplete_fetcher,
@@ -728,17 +1032,17 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
         max_depth=args.max_depth,
         per_anchor_limit=args.per_anchor_limit,
         max_candidates=args.max_candidates,
+        max_total_candidates=args.max_total_candidates,
         timeline_fetcher=timeline_fetcher,
-        timeframe_specs=(
-            ("5y", args.long_timeframe),
-            ("12m", args.medium_timeframe),
-            ("90d", args.recent_timeframe),
-        ),
-        as_of=datetime.now(timezone.utc),
-        discovered_at=_now(),
+        timeframe_specs=(("5y", args.long_timeframe), ("12m", args.medium_timeframe), ("90d", args.recent_timeframe)),
+        max_consecutive_collection_failures=args.max_consecutive_collection_failures,
+        max_collection_retries=args.max_collection_retries,
+        as_of=as_of,
+        discovered_at=as_of.isoformat(),
         database_path=run_dir / "emerging-keywords.json",
         csv_path=run_dir / "emerging-keywords.csv",
     )
+    result["as_of"] = as_of.isoformat()
     result["stage_validations"] = stage_results
     result["output_artifacts"] = {
         "run_summary": str(Path(args.output)),
@@ -756,6 +1060,7 @@ def main() -> int:
     parser.add_argument("--anchor", action="append", default=[])
     parser.add_argument("--country", default="US")
     parser.add_argument("--language", default="en")
+    parser.add_argument("--as-of", help="fixed ISO-8601 evidence cutoff for reproducible runs")
     parser.add_argument("--related-timeframe", default="today 12-m")
     parser.add_argument("--long-timeframe", default="today 5-y")
     parser.add_argument("--medium-timeframe", default="today 12-m")
@@ -763,14 +1068,12 @@ def main() -> int:
     parser.add_argument("--max-depth", type=int, default=2)
     parser.add_argument("--per-anchor-limit", type=int, default=10)
     parser.add_argument("--max-candidates", type=int, default=200)
+    parser.add_argument("--max-total-candidates", type=int, default=200)
+    parser.add_argument("--max-collection-retries", type=int, default=1)
+    parser.add_argument("--max-consecutive-collection-failures", type=int, default=3)
     parser.add_argument("--root-library")
     parser.add_argument("--with-autocomplete", action="store_true")
-    parser.add_argument(
-        "--semrush-request",
-        action="append",
-        default=[],
-        help="current authenticated Semrush Ideas descriptor; repeat once per captured seed",
-    )
+    parser.add_argument("--semrush-request", action="append", default=[], help="current authenticated Semrush Ideas descriptor; repeat once per captured seed")
     parser.add_argument("--run-dir", default=".seo-run/emerging-radar-live")
     parser.add_argument("--output", default=".seo-run/emerging-radar-live/run-summary.json")
     args = parser.parse_args()
@@ -784,7 +1087,7 @@ def main() -> int:
     except Exception as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps({"status": result["status"], "output": result["output_artifacts"]}, ensure_ascii=False))
+    print(json.dumps({"status": result["status"], "output": result["output_artifacts"], "reconciliation": result["reconciliation"]}, ensure_ascii=False))
     return 0 if result["status"] == "PASS" else 2
 
 
