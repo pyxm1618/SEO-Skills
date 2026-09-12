@@ -91,7 +91,7 @@ The same domain gate applies to Rising discovery, supplemental sources, and carr
 
 ## Live Google Trends evidence
 
-The Radar production Trends path uses `runtime/collectors/google_trends_collector.py`; the generic Google collector remains available for Autocomplete and unrelated callers.
+The Radar production Trends path uses `runtime/collectors/google_trends_collector.py`; the generic Google collector remains available for Autocomplete and unrelated callers. The live Google runtime must use the repository's dedicated isolated **logged-out** Chrome/CDP context; if that context cannot be established, fail closed rather than copying/deleting cookies or using a temporary account.
 
 For Trends Related and Timeline:
 
