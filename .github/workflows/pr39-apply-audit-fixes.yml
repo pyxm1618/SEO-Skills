@@ -38,7 +38,7 @@ jobs:
         run: python3 -m compileall -q skills runtime
       - name: Build final source commit locally
         run: |
-          git rm .github/pr39-audit-fixes.patch .github/pr39_apply_fixes.py .github/pr39_followup_fixes.py .github/workflows/pr39-apply-audit-fixes.yml
+          git rm -f .github/pr39-audit-fixes.patch .github/pr39_apply_fixes.py .github/pr39_followup_fixes.py .github/workflows/pr39-apply-audit-fixes.yml
           git add runtime skills tests
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
