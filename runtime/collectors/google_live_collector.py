@@ -135,8 +135,13 @@ def get_worker_page(context):
     pages = getattr(context, "pages", None)
     if pages:
         for p in pages:
-            if not _is_blocker_page(p):
-                return p, False
+            if _is_blocker_page(p):
+                raise HumanInterventionRequired(
+                    "Existing blocker page in browser context requires human intervention",
+                    blocker_type="existing_unresolved_blocker",
+                    url=getattr(p, "url", ""),
+                )
+        return pages[0], False
     if callable(getattr(context, "new_page", None)):
         return context.new_page(), True
     raise RuntimeError("Browser context cannot provide or create a page")
@@ -171,12 +176,19 @@ def assert_google(page):
     host = (parsed.hostname or "").lower()
     if not _google_url(page.url):
         raise RuntimeError(f"wrong Google origin: {host}")
+    if "sorry/index" in (page.url or "").lower():
+        raise HumanInterventionRequired(
+            "Google CAPTCHA/unusual-traffic page detected",
+            blocker_type="unusual_traffic_captcha",
+            url=page.url,
+        )
     try:
         body_elem = page.locator("body")
-        text = body_elem.inner_text(timeout=5000).lower() if hasattr(body_elem, "inner_text") else ""
-    except Exception:
-        text = ""
-    if "unusual traffic" in text or "captcha" in text or "sorry/index" in (page.url or "").lower():
+        text = body_elem.inner_text(timeout=5000).lower()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to inspect Google page content: {exc}") from exc
+
+    if "unusual traffic" in text or "captcha" in text:
         raise HumanInterventionRequired(
             "Google CAPTCHA/unusual-traffic page detected",
             blocker_type="unusual_traffic_captcha",
@@ -613,100 +625,106 @@ def trends_related(context, anchor, country, timeframe, evidence_dir):
                 return
 
         page.on("response", capture_related_response)
-        page.goto(
-            "https://trends.google.com/trends/explore?"
-            f"geo={quote_plus(country)}&date={quote_plus(timeframe)}&q={quote_plus(anchor)}",
-            wait_until="domcontentloaded",
-        )
-        _wait_for_related_payload(page, observed_payloads)
-        host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
-        if host != "trends.google.com":
-            if "sorry" in (page.url or "").lower():
+        try:
+            page.goto(
+                "https://trends.google.com/trends/explore?"
+                f"geo={quote_plus(country)}&date={quote_plus(timeframe)}&q={quote_plus(anchor)}",
+                wait_until="domcontentloaded",
+            )
+            _wait_for_related_payload(page, observed_payloads)
+            host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
+            if host != "trends.google.com":
+                if "sorry" in (page.url or "").lower():
+                    raise HumanInterventionRequired(
+                        "Google Trends CAPTCHA/unusual-traffic page detected",
+                        blocker_type="unusual_traffic_captcha",
+                        url=page.url,
+                    )
+                raise RuntimeError(f"wrong Google Trends origin: {host}")
+            body = page.locator("body").inner_text(timeout=5000).lower()
+            if "unusual traffic" in body or "captcha" in body or "sorry/index" in (page.url or "").lower():
                 raise HumanInterventionRequired(
                     "Google Trends CAPTCHA/unusual-traffic page detected",
                     blocker_type="unusual_traffic_captcha",
                     url=page.url,
                 )
-            raise RuntimeError(f"wrong Google Trends origin: {host}")
-        body = page.locator("body").inner_text(timeout=5000).lower()
-        if "unusual traffic" in body or "captcha" in body or "sorry/index" in (page.url or "").lower():
-            raise HumanInterventionRequired(
-                "Google Trends CAPTCHA/unusual-traffic page detected",
-                blocker_type="unusual_traffic_captcha",
-                url=page.url,
-            )
-        evidence_key = _evidence_slug(anchor, country, timeframe)
-        if "related" not in body and "关联" not in body and not observed_payloads:
-            blocker_observed_at = now()
-            blocker_evidence = evidence_json(
-                evidence_dir,
-                f"trends-related-{evidence_key}-blocked.json",
-                {
-                    "anchor": anchor,
-                    "country": country,
-                    "timeframe": timeframe,
-                    "observed_at": blocker_observed_at,
-                    "page_url": page.url,
-                    "body_excerpt": body[:2000],
-                    "observed_related_payload_count": 0,
-                    "blocker": "related_result_not_confirmed",
-                },
-            )
-            blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-blocked.png")
-            raise RuntimeError(
-                "Google Trends related result could not be confirmed; "
-                f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
-            )
-        if not observed_payloads:
-            blocker_observed_at = now()
-            blocker_evidence = evidence_json(
-                evidence_dir,
-                f"trends-related-{evidence_key}-payload-blocked.json",
-                {
-                    "anchor": anchor,
-                    "country": country,
-                    "timeframe": timeframe,
-                    "observed_at": blocker_observed_at,
-                    "page_url": page.url,
-                    "body_excerpt": body[:2000],
-                    "observed_related_payload_count": 0,
-                    "blocker": "related_payload_not_observed",
-                },
-            )
-            blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-payload-blocked.png")
-            raise RuntimeError(
-                "Google Trends related payload was not observed; screenshot-only evidence is insufficient; "
-                f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
-            )
+            evidence_key = _evidence_slug(anchor, country, timeframe)
+            if "related" not in body and "关联" not in body and not observed_payloads:
+                blocker_observed_at = now()
+                blocker_evidence = evidence_json(
+                    evidence_dir,
+                    f"trends-related-{evidence_key}-blocked.json",
+                    {
+                        "anchor": anchor,
+                        "country": country,
+                        "timeframe": timeframe,
+                        "observed_at": blocker_observed_at,
+                        "page_url": page.url,
+                        "body_excerpt": body[:2000],
+                        "observed_related_payload_count": 0,
+                        "blocker": "related_result_not_confirmed",
+                    },
+                )
+                blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-blocked.png")
+                raise RuntimeError(
+                    "Google Trends related result could not be confirmed; "
+                    f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
+                )
+            if not observed_payloads:
+                blocker_observed_at = now()
+                blocker_evidence = evidence_json(
+                    evidence_dir,
+                    f"trends-related-{evidence_key}-payload-blocked.json",
+                    {
+                        "anchor": anchor,
+                        "country": country,
+                        "timeframe": timeframe,
+                        "observed_at": blocker_observed_at,
+                        "page_url": page.url,
+                        "body_excerpt": body[:2000],
+                        "observed_related_payload_count": 0,
+                        "blocker": "related_payload_not_observed",
+                    },
+                )
+                blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-payload-blocked.png")
+                raise RuntimeError(
+                    "Google Trends related payload was not observed; screenshot-only evidence is insufficient; "
+                    f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
+                )
 
-        captured = observed_payloads[-1]
-        observed_at = now()
-        raw_evidence = evidence_json(
-            evidence_dir,
-            f"trends-related-{evidence_key}.json",
-            {
+            captured = observed_payloads[-1]
+            observed_at = now()
+            raw_evidence = evidence_json(
+                evidence_dir,
+                f"trends-related-{evidence_key}.json",
+                {
+                    "anchor": anchor,
+                    "country": country,
+                    "timeframe": timeframe,
+                    "observed_at": observed_at,
+                    "source_url": captured["url"],
+                    "payload": captured["payload"],
+                    "related_queries": captured["related_queries"],
+                },
+            )
+            screenshot_ref = screenshot(page, evidence_dir, f"trends-related-{evidence_key}.png")
+            return {
                 "anchor": anchor,
+                "related_queries": captured["related_queries"],
                 "country": country,
                 "timeframe": timeframe,
                 "observed_at": observed_at,
+                "source": "Google Trends",
+                "source_type": "google_trends_related",
                 "source_url": captured["url"],
-                "payload": captured["payload"],
-                "related_queries": captured["related_queries"],
-            },
-        )
-        screenshot_ref = screenshot(page, evidence_dir, f"trends-related-{evidence_key}.png")
-        return {
-            "anchor": anchor,
-            "related_queries": captured["related_queries"],
-            "country": country,
-            "timeframe": timeframe,
-            "observed_at": observed_at,
-            "source": "Google Trends",
-            "source_type": "google_trends_related",
-            "source_url": captured["url"],
-            "raw_evidence_ref": raw_evidence,
-            "screenshot_ref": screenshot_ref,
-        }
+                "raw_evidence_ref": raw_evidence,
+                "screenshot_ref": screenshot_ref,
+            }
+        finally:
+            try:
+                page.remove_listener("response", capture_related_response)
+            except Exception:
+                pass
 
 
 def trends_timeline(context, keyword, market, timeframe, evidence_dir):
@@ -727,71 +745,77 @@ def trends_timeline(context, keyword, market, timeframe, evidence_dir):
                 return
 
         page.on("response", capture_temporal_response)
-        page.goto(
-            "https://trends.google.com/trends/explore?"
-            f"geo={quote_plus(market)}&date={quote_plus(timeframe)}&q={quote_plus(keyword)}",
-            wait_until="domcontentloaded",
-        )
-        page.wait_for_timeout(5000)
-        host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
-        if host != "trends.google.com":
-            if "sorry" in (page.url or "").lower():
+        try:
+            page.goto(
+                "https://trends.google.com/trends/explore?"
+                f"geo={quote_plus(market)}&date={quote_plus(timeframe)}&q={quote_plus(keyword)}",
+                wait_until="domcontentloaded",
+            )
+            page.wait_for_timeout(5000)
+            host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
+            if host != "trends.google.com":
+                if "sorry" in (page.url or "").lower():
+                    raise HumanInterventionRequired(
+                        "Google Trends CAPTCHA/unusual-traffic page detected",
+                        blocker_type="unusual_traffic_captcha",
+                        url=page.url,
+                    )
+                raise RuntimeError(f"wrong Google Trends origin: {host}")
+            body = page.locator("body").inner_text(timeout=5000)
+            if "unusual traffic" in body.lower() or "captcha" in body.lower() or "sorry/index" in (page.url or "").lower():
                 raise HumanInterventionRequired(
                     "Google Trends CAPTCHA/unusual-traffic page detected",
                     blocker_type="unusual_traffic_captcha",
                     url=page.url,
                 )
-            raise RuntimeError(f"wrong Google Trends origin: {host}")
-        body = page.locator("body").inner_text(timeout=5000)
-        if "unusual traffic" in body.lower() or "captcha" in body.lower() or "sorry/index" in (page.url or "").lower():
-            raise HumanInterventionRequired(
-                "Google Trends CAPTCHA/unusual-traffic page detected",
-                blocker_type="unusual_traffic_captcha",
-                url=page.url,
-            )
-        if "Interest over time" not in body and "热度随时间变化" not in body:
-            raise RuntimeError("Google Trends current result could not be confirmed")
-        if not observed_payloads:
-            raise RuntimeError("Google Trends real temporal payload was not observed; screenshot-only evidence is insufficient")
+            if "Interest over time" not in body and "热度随时间变化" not in body:
+                raise RuntimeError("Google Trends current result could not be confirmed")
+            if not observed_payloads:
+                raise RuntimeError("Google Trends real temporal payload was not observed; screenshot-only evidence is insufficient")
 
-        captured = observed_payloads[-1]
-        evidence_key = _evidence_slug(keyword, market, timeframe)
-        observed_at = now()
-        raw_evidence = evidence_json(
-            evidence_dir,
-            f"trends-{evidence_key}.json",
-            {
+            captured = observed_payloads[-1]
+            evidence_key = _evidence_slug(keyword, market, timeframe)
+            observed_at = now()
+            raw_evidence = evidence_json(
+                evidence_dir,
+                f"trends-{evidence_key}.json",
+                {
+                    "keyword": keyword,
+                    "market": market,
+                    "requested_timeframe": timeframe,
+                    "observed_at": observed_at,
+                    "source_url": captured["url"],
+                    "payload": captured["payload"],
+                    "series": captured["series"],
+                    "actual_resolution": infer_timeline_resolution(captured["series"]),
+                },
+            )
+            screenshot_ref = screenshot(page, evidence_dir, f"trends-{evidence_key}.png")
+            return {
                 "keyword": keyword,
+                "is_finalist": True,
+                "source": "Google Trends",
+                "source_type": "google_trends_timeline",
+                "source_url": captured["url"],
                 "market": market,
                 "requested_timeframe": timeframe,
-                "observed_at": observed_at,
-                "source_url": captured["url"],
-                "payload": captured["payload"],
-                "series": captured["series"],
                 "actual_resolution": infer_timeline_resolution(captured["series"]),
-            },
-        )
-        screenshot_ref = screenshot(page, evidence_dir, f"trends-{evidence_key}.png")
-        return {
-            "keyword": keyword,
-            "is_finalist": True,
-            "source": "Google Trends",
-            "source_type": "google_trends_timeline",
-            "source_url": captured["url"],
-            "market": market,
-            "requested_timeframe": timeframe,
-            "actual_resolution": infer_timeline_resolution(captured["series"]),
-            "series": captured["series"],
-            "observed_at": observed_at,
-            "raw_evidence_ref": raw_evidence,
-            "screenshot_ref": screenshot_ref,
-            "google_trends_source": "Google Trends",
-            "google_trends_market": market,
-            "google_trends_observed_at": observed_at,
-            "google_trends_evidence_ref": raw_evidence,
-            "google_trends_screenshot_ref": screenshot_ref,
-            "google_trends_series": captured["series"],
-        }
+                "series": captured["series"],
+                "observed_at": observed_at,
+                "raw_evidence_ref": raw_evidence,
+                "screenshot_ref": screenshot_ref,
+                "google_trends_source": "Google Trends",
+                "google_trends_market": market,
+                "google_trends_observed_at": observed_at,
+                "google_trends_evidence_ref": raw_evidence,
+                "google_trends_screenshot_ref": screenshot_ref,
+                "google_trends_series": captured["series"],
+            }
+        finally:
+            try:
+                page.remove_listener("response", capture_temporal_response)
+            except Exception:
+                pass
 
 
 def trends(context, keyword, market, evidence_dir):

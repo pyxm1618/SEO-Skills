@@ -26,7 +26,13 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from aggregate_signals import aggregate
 from classify_emergence import classify_candidate, load_thresholds
-from radar_discovery import build_anchor_pool, canonical_keyword, default_domain_relation, discover_rising_bfs
+from radar_discovery import (
+    HumanInterventionRequired,
+    build_anchor_pool,
+    canonical_keyword,
+    default_domain_relation,
+    discover_rising_bfs,
+)
 from route_candidates import route_candidate
 from update_emerging_database import carry_forward, load_database, merge_database, write_database
 
@@ -227,6 +233,8 @@ def _timeline_observations(
                             "raw_evidence_ref": evidence_ref,
                         }
                     )
+            except HumanInterventionRequired:
+                raise
             except Exception as exc:
                 blockers.append(
                     {
@@ -300,6 +308,8 @@ def run_pipeline(
                 supplemental_candidates.extend(
                     _supplemental_candidates(domain, anchor, source, payload, relation_gate)
                 )
+            except HumanInterventionRequired:
+                raise
             except Exception as exc:
                 blockers.append(
                     {
@@ -416,9 +426,6 @@ def _slug(value: str) -> str:
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
     return f"{readable}-{digest}" if readable else f"item-{digest}"
 
-
-class HumanInterventionRequired(RuntimeError):
-    pass
 
 
 def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
