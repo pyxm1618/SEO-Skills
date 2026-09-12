@@ -2,6 +2,8 @@
 
 Production evidence for this workflow comes from project collectors. Hosted WebSearch may support ordinary research but cannot become formal Google/Semrush evidence.
 
+Live Google collection must follow the shared `runtime/BROWSER_RUNTIME_CONTRACT.md`. This file defines which Selection evidence is required; the shared runtime contract defines the dedicated headful-background Chrome/CDP lifecycle, worker-page reuse, `NEEDS_HUMAN`, blocker preservation, listener cleanup, page-leak guard, and fail-closed browser behavior.
+
 ## Reuse before reacquisition
 
 Reuse fresh compatible evidence that already satisfies the relevant selection contract. This is especially important for confirmed emerging/breakout handoffs: acquire only the earliest missing contract and never rerun discovery merely to normalize the route.
@@ -23,13 +25,13 @@ Stage 6 Exact requires current US Volume, KD, CPC, intent, competition level, an
 
 ## Google project collectors
 
-Use `runtime/collectors/google_live_collector.py` for formal Google evidence:
+Use `runtime/collectors/google_live_collector.py` through the dedicated Google CDP endpoint for formal Google evidence:
 
 - `intitle` mode for real visible `intitle:"keyword"` counts;
 - optional `serp` mode for current real top-10 rank/url evidence;
 - `trends` mode for finalist Google Trends cross-check.
 
-If a collector fails, keep the evidence missing and mark the affected execution scope blocked. Do not substitute Bing, generic result counts, APIs, WebSearch output, or AI estimates.
+If a collector fails, keep the evidence missing and mark the affected execution scope blocked. If it returns `NEEDS_HUMAN`, stop the affected production flow and preserve the blocker page/browser for manual takeover under `runtime/BROWSER_RUNTIME_CONTRACT.md`. Do not substitute Bing, generic result counts, APIs, WebSearch output, direct HTTP scraping, or AI estimates.
 
 ## Resume rule
 
