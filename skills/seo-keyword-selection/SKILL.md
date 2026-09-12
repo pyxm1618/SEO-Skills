@@ -22,10 +22,13 @@ Read:
 - `references/decision-rules.md`
 - `references/thresholds.json`
 - `references/source-acquisition.md`
+- `runtime/BROWSER_RUNTIME_CONTRACT.md` — shared headful-background Chrome/CDP lifecycle and `NEEDS_HUMAN` contract for all formal Google collection.
 
 ## Production execution
 
 Use one active manifest and one literal `SEO_CANDIDATE_ID` for each candidate. Stage 6 Exact must pass before later production evaluation. KGR requires project-collected Google `intitle:"keyword"` evidence. SERP review remains optional; missing SERP does not block a candidate, and KD 40–50 remains `observe_serp` unless verified weak-position evidence supports upgrade. Serious finalists require the existing Google Trends cross-check.
+
+Whenever this skill invokes the shared Google live collector, follow `runtime/BROWSER_RUNTIME_CONTRACT.md`: use the dedicated Google profile/CDP endpoint, keep Chrome headful but background, reuse the worker page, preserve unresolved blocker tabs, and treat `NEEDS_HUMAN` as a stop signal rather than skipping ahead. Do not substitute headless or direct HTTP acquisition to avoid the browser contract.
 
 Current Semrush acquisition remains the authenticated same-origin `sem.3ue.com` path only. Do not add provider fallbacks.
 
