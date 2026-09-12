@@ -73,12 +73,7 @@ def observation_state(status: Any) -> str:
 
 def carry_forward(database: dict[str, Any], include_graduated: bool = False,
                   include_retired: bool = False) -> list[dict[str, Any]]:
-    """Records the next run should observe again, with their prior confirmed state.
-
-    A paused acquisition retry is deliberately not converted into ``noise`` or
-    deletion.  It stays in the database for human review; default automatic
-    carry-forward resumes only when it is not paused.
-    """
+    """Records the next run should observe again, with their prior confirmed state."""
     records = database.get("records") if isinstance(database, dict) else []
     out = []
     for record in records if isinstance(records, list) else []:
@@ -142,8 +137,6 @@ def _has_confirmed_classification(candidate: dict[str, Any]) -> bool:
     acquisition = str(candidate.get("acquisition_status") or "").strip().casefold()
     if acquisition in ACQUISITION_FAILURE_STATES:
         return False
-    # Backward compatibility: historical callers pass canonical ``status``
-    # without the newer acquisition fields.  Those remain real classifications.
     return str(candidate.get("status") or "").strip() in CONFIRMED_CLASSIFIER_STATUSES
 
 
@@ -159,22 +152,17 @@ def _merge_acquisition_failure(
     candidate: dict[str, Any],
     discovered_at: str,
 ) -> dict[str, Any]:
-    """Persist current collection state without replacing a prior verdict."""
-    record = dict(previous or {})
-    previous_confirmed_status = (
-        (previous or {}).get("last_confirmed_status")
-        or (previous or {}).get("status")
-    )
-    previous_confirmed_evidence = (
-        (previous or {}).get("last_confirmed_source_evidence")
-        or (previous or {}).get("source_evidence")
-    )
-    previous_confirmed_at = (
-        (previous or {}).get("last_confirmed_at")
-        or (previous or {}).get("last_seen_at")
-    )
+    """Persist an unconfirmed current run without replacing a prior verdict.
 
-    # Only current-run operational/domain fields may overwrite the stored row.
+    Only actual acquisition failures consume the bounded retry budget. Domain
+    review/exclusion and other ``not_applicable`` states remain review facts,
+    not synthetic browser/collection failures.
+    """
+    record = dict(previous or {})
+    previous_confirmed_status = (previous or {}).get("last_confirmed_status") or (previous or {}).get("status")
+    previous_confirmed_evidence = (previous or {}).get("last_confirmed_source_evidence") or (previous or {}).get("source_evidence")
+    previous_confirmed_at = (previous or {}).get("last_confirmed_at") or (previous or {}).get("last_seen_at")
+
     for field in (
         "domain",
         "keyword",
@@ -197,8 +185,11 @@ def _merge_acquisition_failure(
         if field in candidate:
             record[field] = candidate.get(field)
 
+    acquisition_status = str(candidate.get("acquisition_status") or "").strip().casefold()
+    is_acquisition_failure = acquisition_status in ACQUISITION_FAILURE_STATES
+
     record["last_seen_at"] = discovered_at
-    record["last_run_acquisition_status"] = candidate.get("acquisition_status") or "failed"
+    record["last_run_acquisition_status"] = candidate.get("acquisition_status") or "unknown"
     record["last_run_acquisition_reason"] = candidate.get("acquisition_reason") or candidate.get("failure_type")
     record["current_classification_status"] = "unknown"
     record["last_confirmed_status"] = previous_confirmed_status
@@ -213,14 +204,21 @@ def _merge_acquisition_failure(
         record.setdefault("source_evidence", [])
         record["observation_state"] = "watching"
 
-    failure_count = int((previous or {}).get("acquisition_failure_count") or 0) + 1
-    record["acquisition_failure_count"] = failure_count
-    if failure_count >= MAX_ACQUISITION_FAILURES:
-        record["monitoring_state"] = "paused_review"
-        record["next_review_at"] = None
+    previous_failure_count = int((previous or {}).get("acquisition_failure_count") or 0)
+    if is_acquisition_failure:
+        failure_count = previous_failure_count + 1
+        record["acquisition_failure_count"] = failure_count
+        if failure_count >= MAX_ACQUISITION_FAILURES:
+            record["monitoring_state"] = "paused_review"
+            record["next_review_at"] = None
+        else:
+            record["monitoring_state"] = "retry_scheduled"
+            record["next_review_at"] = _next_review(discovered_at, failure_count)
     else:
-        record["monitoring_state"] = "retry_scheduled"
-        record["next_review_at"] = _next_review(discovered_at, failure_count)
+        record["acquisition_failure_count"] = previous_failure_count
+        record["monitoring_state"] = "domain_review" if acquisition_status == "not_applicable" else "review"
+        record["next_review_at"] = None
+
     record["delivery_eligible"] = False
     record["observation_count"] = int((previous or {}).get("observation_count") or 0)
     record.setdefault("status_history", list((previous or {}).get("status_history") or []))
@@ -233,12 +231,7 @@ def merge_database(
     routes: list[dict[str, Any]],
     discovered_at: str,
 ) -> dict[str, Any]:
-    """Merge current snapshots while retaining prior confirmed state/evidence.
-
-    Acquisition state and classifier state are independent.  A current browser,
-    screenshot, or response-capture failure can never replace the last confirmed
-    ``mature``/``watch``/``emerging`` verdict with ``insufficient_evidence``.
-    """
+    """Merge current snapshots while retaining prior confirmed state/evidence."""
     existing_payload = existing if isinstance(existing, dict) else {}
     current_records = existing_payload.get("records")
     if not isinstance(current_records, list):
@@ -275,9 +268,7 @@ def merge_database(
             record["previous_source_evidence"] = None
             record["status_history"] = list(candidate.get("status_history") or [])
         else:
-            record["first_observed_at"] = _earliest(
-                previous.get("first_observed_at"), candidate.get("first_observed_at")
-            )
+            record["first_observed_at"] = _earliest(previous.get("first_observed_at"), candidate.get("first_observed_at"))
             record["previous_status"] = previous.get("last_confirmed_status") or previous.get("status")
             record["previous_source_evidence"] = previous.get("last_confirmed_source_evidence") or previous.get("source_evidence")
             history = list(previous.get("status_history") or [])
@@ -304,11 +295,7 @@ def merge_database(
         records[key] = record
 
     ordered = [records[key] for key in sorted(records)]
-    payload = {
-        key: value
-        for key, value in existing_payload.items()
-        if key not in {"records", "updated_at"}
-    }
+    payload = {key: value for key, value in existing_payload.items() if key not in {"records", "updated_at"}}
     payload.setdefault("schema_version", 1)
     payload["updated_at"] = discovered_at
     payload["records"] = ordered
@@ -324,15 +311,11 @@ def _serial_value(value: Any) -> Any:
 
 
 def write_database(database: dict[str, Any], database_path: Path, csv_path: Path) -> None:
-    """Write JSON and a flat CSV while leaving unknown values blank in CSV."""
     database_path = Path(database_path)
     csv_path = Path(csv_path)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-    database_path.write_text(
-        json.dumps(database, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
+    database_path.write_text(json.dumps(database, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
     records = database.get("records") if isinstance(database, dict) else []
     records = records if isinstance(records, list) else []
@@ -386,13 +369,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.carry_forward:
-        rows = carry_forward(
-            load_database(Path(args.database)), args.include_graduated, args.include_retired
-        )
+        rows = carry_forward(load_database(Path(args.database)), args.include_graduated, args.include_retired)
         Path(args.carry_forward).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.carry_forward).write_text(
-            json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        Path(args.carry_forward).write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"{len(rows)} records carried forward -> {args.carry_forward}")
         return
 
