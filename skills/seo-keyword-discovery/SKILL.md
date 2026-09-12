@@ -20,6 +20,7 @@ Read before execution:
 - `references/discovery-sop.md`
 - `references/data-contracts.md`
 - `references/source-acquisition.md`
+- `runtime/BROWSER_RUNTIME_CONTRACT.md` — shared headful-background Chrome/CDP lifecycle and `NEEDS_HUMAN` contract for all formal Google acquisition.
 
 ## Production start
 
@@ -38,9 +39,9 @@ session that has not started a production run does not require this manifest.
 
 ## Mandatory Google Autocomplete
 
-For every required Seed and every required Branch Seed, use the project Google live collector against a real Google Search page and capture the current visible autocomplete dropdown. A required acquisition is blocked on network failure, CAPTCHA, unavailable/unconfirmed DOM, zero visible suggestions, or missing evidence.
+For every required Seed and every required Branch Seed, use the project Google live collector against a real Google Search page and capture the current visible autocomplete dropdown. All browser execution follows `runtime/BROWSER_RUNTIME_CONTRACT.md`: use the dedicated Google CDP/profile, keep the headful browser in the background without forcing focus, reuse the worker page, and stop the production flow on `NEEDS_HUMAN` rather than skipping the Seed or opening a fresh page around an unresolved blocker. A required acquisition is blocked on network failure, CAPTCHA, unavailable/unconfirmed DOM, zero visible suggestions, or missing evidence.
 
-Never substitute AI expansion, Bing, generic WebSearch results, or a third-party suggestion page for mandatory Google Autocomplete evidence.
+Never substitute AI expansion, Bing, generic WebSearch results, direct HTTP scraping, headless-only collection, or a third-party suggestion page for mandatory Google Autocomplete evidence.
 
 ## Seed generation from universal roots
 
@@ -70,7 +71,7 @@ The requirement is **must check, not must find**:
 - if either or both blocks contain terms, record `result_status=observed`, preserve all observed rows, and reconcile them through the normal row ledger into the Candidate inventory;
 - if the real Google result page loads successfully and neither block is present, record `result_status=not_present`, `expansion_count=0`, and treat that acquisition as a valid PASS;
 - if the check was never run, keep it `NOT_RUN` and Full Discovery cannot pass;
-- if Google cannot be reliably checked because of CAPTCHA, network failure, unavailable/unconfirmed DOM, or missing evidence, keep it `BLOCKED` and Full Discovery cannot pass.
+- if Google cannot be reliably checked because of CAPTCHA, network failure, unavailable/unconfirmed DOM, or missing evidence, keep it `BLOCKED`/`NEEDS_HUMAN` as appropriate and Full Discovery cannot pass until the browser condition is resolved and the acquisition is rerun.
 
 Do not turn a genuine zero-result page into a blocker, and do not turn an unexecuted check into a fake zero-result PASS.
 
