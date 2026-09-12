@@ -6,6 +6,7 @@ on:
       - codex/emerging-radar-fix-20260912
     paths:
       - .github/pr39_apply_fixes.py
+      - .github/pr39_followup_fixes.py
       - .github/workflows/pr39-apply-audit-fixes.yml
 
 permissions:
@@ -28,6 +29,7 @@ jobs:
         run: |
           sed -i 's/"def _sheet_rows("/"def build_identity_summary("/' .github/pr39_apply_fixes.py
           python3 .github/pr39_apply_fixes.py
+          python3 .github/pr39_followup_fixes.py
       - name: Run audit regressions
         run: python3 -m pytest tests/test_pr39_audit_regressions.py -q
       - name: Run full suite
@@ -38,7 +40,7 @@ jobs:
         run: git diff --check 645539a4c91aef66a5a715c54e12207f667f6c45...HEAD && git diff --check
       - name: Commit verified fix
         run: |
-          git rm .github/pr39-audit-fixes.patch .github/pr39_apply_fixes.py .github/workflows/pr39-apply-audit-fixes.yml
+          git rm .github/pr39-audit-fixes.patch .github/pr39_apply_fixes.py .github/pr39_followup_fixes.py .github/workflows/pr39-apply-audit-fixes.yml
           git add runtime skills tests
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
