@@ -12,6 +12,16 @@ def replace_once(rel, old, new):
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+# google_trends_collector is also imported by evidence_binding via a direct file
+# location, where Python does not automatically add runtime/collectors to sys.path.
+# Make the sibling reuse explicit so the registered issuer is loadable from both
+# CLI and validator call paths.
+replace_once(
+    "runtime/collectors/google_trends_collector.py",
+    "from urllib.parse import parse_qs, quote_plus, unquote, urlparse\n\nimport google_live_collector as base\n",
+    "from urllib.parse import parse_qs, quote_plus, unquote, urlparse\n\nCOLLECTOR_DIR = Path(__file__).resolve().parent\nif str(COLLECTOR_DIR) not in sys.path:\n    sys.path.insert(0, str(COLLECTOR_DIR))\n\nimport google_live_collector as base\n",
+)
+
 # Canonical standalone execution still needs a signed ledger. When the caller did
 # not supply one, materialize the canonical classified identity set as an internal
 # ledger and bind its hash into the receipt. External runner ledgers remain authoritative.
