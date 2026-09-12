@@ -36,13 +36,14 @@ jobs:
         run: python3 -m pytest -q
       - name: Compile sources
         run: python3 -m compileall -q skills runtime
-      - name: Check diff
-        run: git diff --check 645539a4c91aef66a5a715c54e12207f667f6c45...HEAD && git diff --check
-      - name: Commit verified fix
+      - name: Build final source commit locally
         run: |
           git rm .github/pr39-audit-fixes.patch .github/pr39_apply_fixes.py .github/pr39_followup_fixes.py .github/workflows/pr39-apply-audit-fixes.yml
           git add runtime skills tests
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(emerging): close PR39 audit findings'
-          git push origin HEAD:codex/emerging-radar-fix-20260912
+      - name: Check final diff
+        run: git diff --check 645539a4c91aef66a5a715c54e12207f667f6c45...HEAD
+      - name: Push verified fix
+        run: git push origin HEAD:codex/emerging-radar-fix-20260912
