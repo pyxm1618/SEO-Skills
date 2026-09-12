@@ -236,24 +236,15 @@ def resolve_identity(record: dict[str, Any], run_context: dict[str, Any] | None 
 
 
 def derive_trend_type(record: dict[str, Any]) -> str:
-    signal_type = str(record.get("signal_type") or "").strip()
-    demand_history = str(record.get("demand_history_type") or "").strip()
+    """Map existing canonical temporal classification to the display label only."""
+    signal_type = str(record.get("signal_type") or "").strip().casefold()
+    demand_history = str(record.get("demand_history_type") or "").strip().casefold()
+    status = str(record.get("status") or record.get("emerging_status") or "").strip().casefold()
     if signal_type == "net_new" or demand_history == "newly_observed":
         return "新词"
-    value = record.get("growth_rate")
-    if is_missing(value) or isinstance(value, bool):
-        return UNKNOWN
-    try:
-        growth = float(value)
-    except (TypeError, ValueError):
-        return UNKNOWN
-    if not math.isfinite(growth):
-        return UNKNOWN
-    if growth > 0:
+    if signal_type == "breakout" or status == "breakout":
         return "上升"
-    if growth < 0:
-        return "下降"
-    return "平稳"
+    return UNKNOWN
 
 
 def _column_letters(index: int) -> str:
@@ -287,7 +278,32 @@ def _hide_technical_columns(client: SheetClient) -> None:
         hide(VISIBLE_COLUMN_COUNT, len(HEADER))
 
 
+def ensure_capacity(client: SheetClient, minimum_columns: int = len(HEADER)) -> bool:
+    """Resize real gspread worksheets before writes that exceed grid capacity."""
+    raw_count = getattr(client, "col_count", None)
+    if isinstance(raw_count, bool) or not isinstance(raw_count, (int, float)):
+        # Lightweight adapters/fakes without grid metadata are not assumed to be
+        # capacity-constrained. Real gspread Worksheet exposes col_count.
+        return False
+    current_columns = int(raw_count)
+    if current_columns >= minimum_columns:
+        return False
+    resize = getattr(client, "resize", None)
+    if not callable(resize):
+        raise RuntimeError(
+            f"keyword library worksheet has {current_columns} columns but needs {minimum_columns}; resize unavailable"
+        )
+    resize(cols=minimum_columns)
+    verified_count = getattr(client, "col_count", minimum_columns)
+    if isinstance(verified_count, (int, float)) and int(verified_count) < minimum_columns:
+        raise RuntimeError(
+            f"keyword library worksheet resize failed; has {int(verified_count)} columns, needs {minimum_columns}"
+        )
+    return True
+
+
 def ensure_schema(client: SheetClient) -> tuple[list[list[str]], list[str], dict[str, int], bool]:
+    ensure_capacity(client, len(HEADER))
     values = client.get_all_values() or []
     header = [str(cell).strip() for cell in values[0]] if values else []
     header_written = False
@@ -402,7 +418,7 @@ def _emerging_patch(record: dict[str, Any]) -> dict[str, Any]:
         "root_id": "emerging_root_id",
     }
     patch = {target: record.get(source) for source, target in aliases.items() if source in record}
-    if any(name in record for name in ("signal_type", "demand_history_type", "growth_rate")):
+    if any(name in record for name in ("signal_type", "demand_history_type", "status", "emerging_status")):
         patch["trend_type"] = derive_trend_type(record)
     refs = []
     for source in ("evidence_ref", "evidence_receipt_ref"):
