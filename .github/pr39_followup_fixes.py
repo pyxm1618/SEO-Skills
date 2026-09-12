@@ -42,8 +42,8 @@ replace_once(
 # Evidence fixtures must name the dedicated Trends collector that now owns issuance.
 replace_once(
     "tests/test_observed_evidence_binding.py",
-    '            "collector": "google_live_collector",\n            "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_live_collector.py").read_bytes()).hexdigest(),\n            "evidence_type": "google_trends",\n',
-    '            "collector": "google_trends_collector",\n            "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_trends_collector.py").read_bytes()).hexdigest(),\n            "evidence_type": "google_trends",\n',
+    '        "collector": "google_live_collector",\n        "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_live_collector.py").read_bytes()).hexdigest(),\n        "evidence_type": "google_trends",\n',
+    '        "collector": "google_trends_collector",\n        "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_trends_collector.py").read_bytes()).hexdigest(),\n        "evidence_type": "google_trends",\n',
 )
 
 # A legacy carry-forward row with no parent/domain evidence may no longer prove
