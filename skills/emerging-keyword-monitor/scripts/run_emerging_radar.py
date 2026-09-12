@@ -417,8 +417,15 @@ def _slug(value: str) -> str:
     return f"{readable}-{digest}" if readable else f"item-{digest}"
 
 
+class HumanInterventionRequired(RuntimeError):
+    pass
+
+
 def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
     process = subprocess.run(command, text=True, capture_output=True)
+    if process.returncode == 3 or "NEEDS_HUMAN" in (process.stderr or ""):
+        detail = (process.stderr or "Google verification required (NEEDS_HUMAN)").strip()
+        raise HumanInterventionRequired(detail)
     if process.returncode != 0:
         detail = (process.stderr or process.stdout or "collector failed").strip()
         raise RuntimeError(detail[-2000:])
@@ -762,6 +769,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         result = _live_runner(args)
+    except HumanInterventionRequired as exc:
+        print(f"\n{'=' * 70}", file=sys.stderr)
+        print(f"NEEDS_HUMAN: Radar paused. Google requires manual verification.\n{exc}", file=sys.stderr)
+        print(f"{'=' * 70}\n", file=sys.stderr)
+        return 3
     except Exception as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2

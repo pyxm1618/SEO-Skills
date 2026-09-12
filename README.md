@@ -234,6 +234,15 @@ python3 runtime/check_hook_wiring.py    # 退出码 0=ACTIVE；不信任配置�
 python3 -m pytest tests/test_claude_hooks_template.py -q   # 路径漂移即报红
 ```
 
+### 在 WorkBuddy / CodeBuddy 中启用
+
+WorkBuddy（CodeBuddy Code host）读的是 CodeBuddy 格式的 settings，不吃 `.claude/`、`.codex/` 或 `.agents/`（后者是 Antigravity 的 host 适配）。接线点：
+
+- **项目级**：本 checkout 的 `.codebuddy/settings.json`（与 `.claude/settings.json` 同构：`PreToolUse(^Bash$)` + `Stop` + `SubagentStop`，带前置守卫的 `runtime/stage_hook.py pre|stop` 包装命令，缺失即 `exit 0` 放行，拒绝走 exit 2）。
+- **用户级（全局）**：把同样的 `hooks` 键合并进 `~/.codebuddy/settings.json`（勿整体覆盖，该文件常存有 `model` 等个人配置）。命令按 git 根解析 `runtime/stage_hook.py`，因此任意含该 runtime 的 checkout 自动接线，其他 git 项目因守卫缺失而 `exit 0`，无副作用。
+
+hooks 在会话启动时快照；WorkBuddy 对 settings 的外部变更会重新读取，但技能元数据仍需新开会话才注入。普通 pytest 不能代替宿主自动触发的 PreToolUse/Stop 验收。
+
 ## 开发 / 验证
 
 仅在修改 Skill / runtime 实现时需要：
