@@ -132,9 +132,29 @@ def test_display_trend_uses_only_existing_canonical_temporal_classification():
         "new signal": "新词",
         "new history": "新词",
         "breakout signal": "上升",
-        "mature signal": "unknown",
+        "mature signal": "成熟需求",
         "watch signal": "unknown",
     }
+
+
+def test_before_available_history_is_human_readable_without_losing_canonical_reason():
+    writer = load_writer("review_before_available_history")
+    sheet = CapacityWorksheet(col_count=len(writer.HEADER))
+    writer.upsert_records(
+        sheet,
+        "emerging",
+        [{
+            "keyword": "preexisting signal",
+            "status": "mature",
+            "demand_history_type": "preexisting",
+            "birth_reason": "before_available_history",
+        }],
+        run_context={"market": "US", "language": "en"},
+    )
+    row = row_dict(sheet)
+    assert row["趋势类型"] == "成熟需求"
+    assert row["出生窗口"] == "早于可观测窗口"
+    assert row["birth_reason"] == "before_available_history"
 
 
 def test_empty_legacy_27_column_sheet_is_resized_before_46_column_header_write():
