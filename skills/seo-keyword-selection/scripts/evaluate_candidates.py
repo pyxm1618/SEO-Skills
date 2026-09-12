@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -14,6 +15,8 @@ RULES_PATH = Path(__file__).resolve().parents[1] / 'references' / 'thresholds.js
 RULES = json.loads(RULES_PATH.read_text(encoding='utf-8'))
 BINDING_PATH = Path(__file__).resolve().parents[3] / 'runtime' / 'evidence_binding.py'
 HOOK_PATH = Path(__file__).resolve().parents[3] / 'runtime' / 'stage_hook.py'
+LIBRARY_PATH = Path(__file__).resolve().parents[3] / 'runtime' / 'keyword_library_sheet.py'
+DEFAULT_WORKSHEET = '关键词库'
 
 
 def _binding():
@@ -28,6 +31,16 @@ def _stage_hook():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _keyword_library():
+    spec = importlib.util.spec_from_file_location('seo_keyword_library_sheet_for_selection', LIBRARY_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+library = _keyword_library()
 
 
 def is_missing(value):
@@ -428,11 +441,28 @@ def write_csv(rows):
     return buf.getvalue()
 
 
-def main():
+def deliver_to_sheet(client, rows, run_context=None, delivery_context=None):
+    """Patch Selection-owned fields after canonical evaluation has completed."""
+    return library.upsert_records(
+        client,
+        'selection',
+        rows,
+        run_context=run_context or {},
+        delivery_context=delivery_context or {},
+    )
+
+
+def main(worksheet_factory=None):
     ap = argparse.ArgumentParser(description='Mechanically evaluate SEO keyword candidate rows without inventing metrics.')
     ap.add_argument('--input', required=True)
     ap.add_argument('--stage', choices=['ideas','exact','final'], default='final')
     ap.add_argument('--format', choices=['json','csv'], default='json')
+    ap.add_argument('--sheet-output', action='store_true', help='deliver canonical final rows to the unified keyword library')
+    ap.add_argument('--sheet-id')
+    ap.add_argument('--worksheet', default=os.environ.get('SEO_KEYWORD_LIBRARY_WORKSHEET', DEFAULT_WORKSHEET))
+    ap.add_argument('--credentials')
+    ap.add_argument('--market', help='explicit delivery market when record/run metadata does not carry one')
+    ap.add_argument('--language', help='explicit delivery language when record/run metadata does not carry one')
     args = ap.parse_args()
 
     raw_rows, batch_meta = load_input(args.input)
@@ -440,11 +470,49 @@ def main():
         normalize(row, args.stage, batch_meta)
         for row in raw_rows
     ])
+
+    sheet_delivery = None
+    if args.sheet_output:
+        if args.stage != 'final':
+            print('BLOCKED: --sheet-output is only valid after canonical final Selection evaluation', file=sys.stderr)
+            return 2
+        sheet_id = args.sheet_id or os.environ.get('SEO_KEYWORD_SHEET_ID')
+        credentials = args.credentials or os.environ.get('SEO_SHEETS_CREDENTIALS')
+        missing = [
+            name
+            for name, value in (
+                ('--sheet-id/SEO_KEYWORD_SHEET_ID', sheet_id),
+                ('--credentials/SEO_SHEETS_CREDENTIALS', credentials),
+            )
+            if not value
+        ]
+        if missing:
+            print(f"BLOCKED: {' and '.join(missing)} are required with --sheet-output", file=sys.stderr)
+            return 2
+        context = library.delivery_context_from_env(args.market, args.language)
+        try:
+            factory = worksheet_factory or library.open_worksheet
+            worksheet = factory(sheet_id, args.worksheet, credentials)
+            sheet_delivery = deliver_to_sheet(
+                worksheet,
+                rows,
+                run_context=batch_meta,
+                delivery_context=context,
+            )
+            sheet_delivery['worksheet'] = args.worksheet
+        except Exception as exc:
+            print(f'BLOCKED: sheet delivery failed: {exc}', file=sys.stderr)
+            return 2
+
     if args.format == 'csv':
         print(write_csv(rows), end='')
     else:
-        print(json.dumps({'stage': args.stage, 'summary': summary(rows), 'rows': rows}, ensure_ascii=False, indent=2))
+        payload = {'stage': args.stage, 'summary': summary(rows), 'rows': rows}
+        if sheet_delivery is not None:
+            payload['sheet_delivery'] = sheet_delivery
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

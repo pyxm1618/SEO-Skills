@@ -28,8 +28,14 @@ jobs:
       - name: Test keyword root library
         run: python3 -m pytest skills/keyword-root-library/tests/test_root_library.py -q
 
+      - name: Test unified keyword library Sheet delivery
+        run: python3 -m pytest tests/test_keyword_library_sheet.py tests/test_keyword_library_sheet_review_fixes.py -q
+
+      - name: Test keyword discovery
+        run: python3 -m pytest skills/seo-keyword-discovery/tests -q
+
       - name: Test keyword selection
-        run: python3 -m pytest skills/seo-keyword-selection/tests/test_selection.py -q
+        run: python3 -m pytest skills/seo-keyword-selection/tests -q
 
       - name: Test emerging keyword monitor
         run: python3 -m pytest skills/emerging-keyword-monitor/tests -q

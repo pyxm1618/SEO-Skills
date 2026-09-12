@@ -149,3 +149,19 @@ Normalize whitespace and case for duplicate detection. Preserve all rows because
 - `duplicate_warning`.
 
 Do not silently deduplicate inside the evaluator. Downstream clustering/counting must account for duplicate warnings so duplicate rows do not inflate opportunity density.
+
+## Unified keyword library delivery contract
+
+The existing spreadsheet `SEO关键词库`, worksheet `关键词库`, is the shared human-facing delivery surface. Machine evidence and evaluator output remain authoritative; the Sheet is a field-level projection, not a second calculator.
+
+Stable row identity is:
+
+`normalized_keyword + market + language`
+
+Identity context is resolved in this order only: explicit record value → explicit run/batch value → explicitly configured delivery context → `BLOCKED`. The delivery layer must never silently assume `US` or `en`.
+
+Selection owns only its own fields in the stable row: `volume | kd | cpc | kdroi | intent | kgr | intitle_results | serp_weak_evidence | serp_weak_points | mechanical_status | metric_source | metric_database | metric_stage | provenance_status | observed_at` plus delivery audit timestamps/receipts. Unknown Selection metrics render literally as `unknown`; they are not blanks or zeroes.
+
+`mechanical_status` is stored in the hidden technical column `selection_mechanical_status`. It is never translated into the human workflow column. `状态` has only `新发现 / 已选 / 已建站 / 放弃`; only creation of a new stable row may initialize `新发现`, and later Selection delivery must preserve any existing human value.
+
+For formal production final Selection, successful field-level upsert and readback verification of every final stable row is part of completion. The standalone evaluator's `--sheet-output` remains opt-in for diagnostics/tests, but production Skill execution must perform this delivery without relying on the user to remember that CLI flag. If Sheet delivery is skipped, blocked, or fails readback, the final Selection evidence/calculations remain preserved but the formal final workflow is not completely delivered.

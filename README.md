@@ -51,6 +51,21 @@ Confirmed `emerging` / `breakout` 已经是 concrete keyword，进入 selection 
 
 Emerging Radar 不是一次性扫描。持久化数据库中仍处于 `watching` 的 `new_signal` / `watch` / `insufficient_evidence` 会在下一轮 Radar 中自动进入 timeline candidate pool，即使本轮 Rising 没有再次发现它们；如果同一词本轮又被重新发现，当前 discovery context 优先，历史 DB 只补缺失字段。carry-forward 本身不是新的 Rising discovery。
 
+## 统一关键词库 Sheet
+
+三个关键词 Skill 共用现有 Google Spreadsheet `SEO关键词库` 的 `关键词库` worksheet，写入统一 stable row，而不是分别维护多个 Sheet 表。
+
+- stable identity 固定为 `normalized_keyword + market + language`；`market/language` 的取值顺序是 record 明确值 → run/batch 明确值 → 显式 delivery context → 否则 `BLOCKED`，禁止静默默认 `US/en`。
+- 主视图只保留 `关键词 / 月搜索量 / 趋势类型 / 出生窗口 / KD / CPC / KDRoi / 意图 / 状态`；其余来源、candidate/provenance、Emerging 状态、Selection mechanical status 等作为技术审计列。
+- `状态`只有 `新发现 / 已选 / 已建站 / 放弃`。只有第一次创建 stable row 时可初始化为 `新发现`；任何 Skill 都不得把 mechanical/classifier status 自动翻译成 `已选` 或 `放弃`，也不得覆盖已有人工状态。
+- Discovery 的正式 handoff 必须成功写入并 readback 验证统一词库；Discovery candidate identity 与 stable row identity 分开，多个 candidate/source 可以解析到同一 stable row，但 candidate/source/evidence provenance 必须完整保留。
+- Emerging 的 Sheet 是 optional mirror；JSON/CSV 和 classifier/state machine 仍是 authoritative。Emerging 只补 temporal-owned 字段，不覆盖 Selection 指标或人工状态。
+- Selection 的 standalone CLI 仍允许 `--sheet-output` opt-in，方便测试/诊断；但正式 final Selection 的 Skill completion 必须自动完成统一词库 field-level upsert + readback，不能要求用户额外记住这个 flag。
+- `趋势类型`不是 delivery 层的新 classifier：`net_new/newly_observed → 新词`、canonical `breakout → 上升`；没有现成 canonical temporal classification 就是 `unknown`。不得根据 `growth_rate` 正负自行生成 `上升/下降/平稳`。
+- shared writer 在写完整 header 前会确保 worksheet 的物理 column capacity 足够；legacy header-only Sheet 不依赖 Google 自动扩列。
+
+JSON/evidence receipts 仍是机器 authoritative source；统一 Sheet 是长期人读主视图与 field-level delivery surface。
+
 ## 数据与来源原则
 
 - `observed`：只能来自真实 source / collector。
@@ -225,8 +240,9 @@ python3 -m pytest tests/test_claude_hooks_template.py -q   # 路径漂移即报�
 
 ```bash
 python3 -m pytest skills/keyword-root-library/tests/test_root_library.py -q
+python3 -m pytest tests/test_keyword_library_sheet.py tests/test_keyword_library_sheet_review_fixes.py -q
 python3 -m pytest skills/seo-keyword-discovery/tests -q
-python3 -m pytest skills/seo-keyword-selection/tests/test_selection.py -q
+python3 -m pytest skills/seo-keyword-selection/tests -q
 python3 -m pytest skills/emerging-keyword-monitor/tests -q
 python3 -m pytest skills/seo-page-keyword-mapping/tests -q
 python3 -m pytest -q

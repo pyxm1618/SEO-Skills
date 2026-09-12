@@ -5,71 +5,42 @@ description: Use when concrete keyword candidates need evidence-based screening,
 
 # SEO Keyword Selection
 
-Run the SEO opportunity-selection method from concrete candidates onward. Resume from the earliest unfinished contract and do not redo compatible fresh evidence.
+Run the existing evidence-based selection method from concrete candidates onward. Resume from the earliest unfinished contract and reuse compatible fresh evidence.
 
 ## Boundaries
 
 This skill starts at the former Step 5 / Ideas-stage wide recall. Seed generation, Google Autocomplete discovery, Semrush Ideas/Related discovery, and low-risk discovery cleaning belong to `seo-keyword-discovery`.
 
-Inputs may come from:
+Inputs are either a verified `seo-keyword-discovery` handoff or a confirmed Emerging `selection_handoff`. Confirmed `emerging`/`breakout` keywords do not return through Seed/Autocomplete/Ideas discovery.
 
-- a valid `seo-keyword-discovery` handoff; or
-- confirmed `emerging`/`breakout` `selection_handoff` directly from `emerging-keyword-monitor`.
+This skill does not own Root generation, Emerging classification/state transitions, or page mapping. The existing evaluator and `references/thresholds.json` remain the calculation/threshold source of truth.
 
-Confirmed emerging keywords never route back through Seed/Autocomplete/Ideas discovery. Reuse compatible fresh evidence and acquire only the earliest missing selection contract.
-
-Read before execution:
+Read:
 
 - `references/selection-sop.md`
 - `references/data-contracts.md`
 - `references/decision-rules.md`
-- `references/thresholds.json` — unchanged source of truth.
+- `references/thresholds.json`
 - `references/source-acquisition.md`
 
-## Production candidate start
+## Production execution
 
-The `traditional` run must already have its active manifest and completed
-global discovery stages. Add a concrete candidate with a canonical keyword,
-then use the same literal candidate ID in the manifest, validator argument,
-and protected command environment:
+Use one active manifest and one literal `SEO_CANDIDATE_ID` for each candidate. Stage 6 Exact must pass before later production evaluation. KGR requires project-collected Google `intitle:"keyword"` evidence. SERP review remains optional; missing SERP does not block a candidate, and KD 40–50 remains `observe_serp` unless verified weak-position evidence supports upgrade. Serious finalists require the existing Google Trends cross-check.
 
-```bash
-export SEO_RUN_MANIFEST=.seo-run/active.json
-export SEO_CANDIDATE_ID=cand_wedding_cost_calculator
-python3 -c 'import json, os; from pathlib import Path; p=Path(os.environ["SEO_RUN_MANIFEST"]); m=json.loads(p.read_text()); m.setdefault("candidates", {})[os.environ["SEO_CANDIDATE_ID"]]={"keyword":"wedding cost calculator"}; p.write_text(json.dumps(m, ensure_ascii=False, indent=2)+"\n")'
-python3 runtime/stage_validator.py \
-  --stage stage6_exact --candidate-id "$SEO_CANDIDATE_ID" --production \
-  --input .seo-run/evidence/exact-wedding-cost-calculator.json \
-  --report .seo-run/validation/cand-wedding-cost-calculator-exact.json
-```
+Current Semrush acquisition remains the authenticated same-origin `sem.3ue.com` path only. Do not add provider fallbacks.
 
-The production validator derives `candidate_keyword` from exactly one
-complete row and writes it to the report and receipt. Record that receipt's
-`validation_receipt_ref` under the same candidate's `stage6_exact` record;
-repeat the identity-bound pattern for `intitle_observation`, `kgr_intitle`,
-optional `serp_review`, and conditional `finalist_trend`. Use the same literal
-`SEO_CANDIDATE_ID=<id>` prefix for protected collector/evaluator commands.
-Missing markers, duplicate or missing complete rows, receipt mounting under a
-different candidate, and keyword mismatches fail closed. Shared discovery
-receipts stay global and cannot contain candidate identity.
+Do not change `pending_metrics`, KGR, SERP, KDRoi, or mechanical-status logic merely to satisfy delivery.
 
-## Execution integrity
+## Unified keyword library
 
-The existing evaluator remains the calculator/classifier. Do not change its treatment of `pending_metrics`, KGR, SERP weak evidence, or KDRoi merely to enforce production completeness.
+Formal final Selection must field-level upsert its canonical final rows to `SEO关键词库 / 关键词库` through `runtime/keyword_library_sheet.py` and pass readback verification. The standalone evaluator keeps `--sheet-output` opt-in for tests/diagnostics, but normal production Skill execution must perform delivery itself; the user is not expected to remember that flag.
 
-Production decisions are separately gated:
+Stable identity is `normalized_keyword + market + language`. Identity context resolves record → run/batch → explicit delivery context → otherwise `BLOCKED`; never default to `US/en`.
 
-- Stage 6 Exact must pass the machine-readable `stage6_exact` contract before Stage 7+ production evaluation for that candidate.
-- KGR requires project-collected real Google `intitle:"keyword"` evidence; KGR itself remains calculated by the evaluator.
-- SERP review is optional. Missing or unavailable SERP does not block the candidate or batch; KD 40–50 remains `observe_serp`. Upgrade requires a candidate-bound receipt, matching Top-10 rank/URL, KGR pass, and at least two weak positions.
-- Serious finalists require real Google Trends cross-check. Keyword Planner remains optional.
-
-New/current Semrush acquisition is only through the authenticated same-origin `sem.3ue.com` collector. No official API or alternative-provider fallback is permitted.
-
-## Evidence discipline
-
-Keep the existing `observed`, `calculated`, `analysis`, `unknown` meanings. Missing, invalid, numeric zero, and `not_applicable` remain distinct. Never manufacture Volume, KD, CPC, `intitle`, rank/url, DR, or trend observations.
+Selection owns its metric/calculation fields and hidden `selection_mechanical_status`. It must preserve Discovery provenance, Emerging temporal fields, and the human `状态`. Human status is only `新发现 / 已选 / 已建站 / 放弃`; a new row may initialize `新发现`, but mechanical results never become human decisions.
 
 ## Completion
 
-Blocked required stages retain their reason; complete candidates may continue. Optional SERP may be omitted or recorded as `serp_review.status=BLOCKED` with a real reason without terminally blocking the candidate. A finished batch exposes complete/blocked counts and preserves the human decision; `do_candidate` is not an automatic final choice.
+Preserve all blocked reasons and optional-SERP absence truthfully. `do_candidate` is not an automatic final choice.
+
+A formal final Selection is complete only when required evidence/evaluation is complete **and** every final stable row has been successfully written to and read back from the unified keyword library. If Sheet delivery is skipped or fails, keep the evidence/calculations but report the workflow as incompletely delivered.

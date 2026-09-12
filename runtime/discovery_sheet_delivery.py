@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verification for Google Sheet delivery bound to a Discovery handoff."""
+"""Verification for unified Google Sheet delivery bound to a Discovery handoff."""
 
 import hashlib
 import importlib.util
@@ -8,8 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 EXPORTER_PATH = ROOT.parent / "skills" / "seo-keyword-discovery" / "scripts" / "export_to_sheet.py"
-EXPECTED_SCHEMA = "seo-discovery-sheet-delivery/v1"
-EXPECTED_WORKSHEET = "keyword_discovery"
+EXPECTED_SCHEMA = "seo-discovery-sheet-delivery/v2"
+EXPECTED_WORKSHEET = "关键词库"
 
 
 def _sha256(path):
@@ -52,19 +52,53 @@ def verify_handoff(payload):
         errors.append("sheet_delivery_receipt:sheet_id_required")
 
     keywords = payload.get("keywords")
-    expected_count = len(keywords) if isinstance(keywords, list) else None
-    if expected_count is None:
+    expected_candidate_count = len(keywords) if isinstance(keywords, list) else None
+    if expected_candidate_count is None:
         errors.append("sheet_delivery_receipt:handoff_keywords_must_be_list")
-    else:
-        if receipt.get("record_count") != expected_count:
-            errors.append("sheet_delivery_receipt:record_count_mismatch")
-        if receipt.get("verified_count") != expected_count:
-            errors.append("sheet_delivery_receipt:verified_count_mismatch")
-        if receipt.get("record_count") != receipt.get("verified_count"):
-            errors.append("sheet_delivery_receipt:record_count_verified_count_mismatch")
 
     try:
         exporter = _exporter()
+        delivery_context = receipt.get("delivery_context")
+        if delivery_context is None:
+            delivery_context = {}
+        if not isinstance(delivery_context, dict):
+            raise ValueError("delivery_context must be an object")
+        expected_bindings = exporter.build_candidate_bindings(
+            payload,
+            delivery_context=delivery_context,
+        )
+        expected_stable_count = len({item["stable_key"] for item in expected_bindings})
+    except Exception as exc:
+        errors.append(f"sheet_delivery_receipt:candidate_binding_verifier_failed:{exc}")
+        expected_bindings = None
+        expected_stable_count = None
+
+    if expected_candidate_count is not None:
+        if receipt.get("candidate_count") != expected_candidate_count:
+            errors.append("sheet_delivery_receipt:candidate_count_mismatch")
+        if receipt.get("verified_candidate_count") != expected_candidate_count:
+            errors.append("sheet_delivery_receipt:verified_candidate_count_mismatch")
+        if receipt.get("candidate_count") != receipt.get("verified_candidate_count"):
+            errors.append("sheet_delivery_receipt:candidate_count_verified_candidate_count_mismatch")
+
+    if expected_stable_count is not None:
+        if receipt.get("stable_row_count") != expected_stable_count:
+            errors.append("sheet_delivery_receipt:stable_row_count_mismatch")
+        if receipt.get("verified_stable_row_count") != expected_stable_count:
+            errors.append("sheet_delivery_receipt:verified_stable_row_count_mismatch")
+        if receipt.get("stable_row_count") != receipt.get("verified_stable_row_count"):
+            errors.append("sheet_delivery_receipt:stable_row_count_verified_stable_row_count_mismatch")
+
+    if expected_bindings is not None:
+        bindings = receipt.get("candidate_bindings")
+        if not isinstance(bindings, list):
+            errors.append("sheet_delivery_receipt:candidate_bindings_must_be_list")
+        elif bindings != expected_bindings:
+            errors.append("sheet_delivery_receipt:candidate_bindings_provenance_mismatch")
+
+    try:
+        if "exporter" not in locals():
+            exporter = _exporter()
         expected_binding = exporter.handoff_binding_sha256(payload)
     except Exception as exc:
         errors.append(f"sheet_delivery_receipt:binding_verifier_failed:{exc}")

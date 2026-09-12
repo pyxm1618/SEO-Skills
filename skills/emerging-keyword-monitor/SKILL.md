@@ -146,17 +146,26 @@ Before a live run is considered complete, the runner writes the final summary, v
 
 When running interactively without normalized files, apply the same contracts conceptually. Do not loosen the state machine or routing rules just because evidence was gathered conversationally or from web research.
 
-Optionally mirror the persisted database into a Google Sheet:
+## Optional unified keyword library mirror
+
+The authoritative Emerging outputs remain the local JSON/CSV database, classifier/router output, and pipeline receipts. Google Sheets remains an optional human-facing mirror and does not participate in the Emerging state machine, threshold logic, evidence receipt, or pipeline source hash.
+
+When a mirror is requested, write to the existing spreadsheet `SEO关键词库`, worksheet `关键词库`, through the shared field-level writer:
 
 ```bash
 python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json --dry-run
 python scripts/export_to_sheet.py --database .seo-run/emerging-keywords.json \
-  --sheet-id SHEET_ID --credentials ~/.config/seo-sheets/service-account.json
+  --sheet-id SHEET_ID --credentials ~/.config/seo-sheets/service-account.json \
+  --market US --language en
 ```
 
-`--dry-run` prints the rows and needs no dependency or credential. A real export needs `gspread` and a Google service-account key whose `client_email` has Editor access on the target sheet; `~` in either path is expanded. Rows are upserted by `(domain, keyword)`, so re-running updates in place instead of appending duplicates.
+Stable row identity is `normalized_keyword + market + language`. `market` and `language` must come from an explicit record/run/delivery context; there is no silent default. The mirror reuses an existing stable row instead of maintaining a separate Emerging table.
 
-The Sheet is an export layer, never a data source. The authoritative outputs remain the local JSON/CSV, the export takes part in no stage contract, evidence receipt, or pipeline source hash, and a failed export leaves run validity untouched. `unknown` is exported as `unknown` and is never rendered as an empty cell or `0`. Google's own `Breakout`/rising label is exported in its own source column and is never merged into the classifier's `signal_type` or `status`.
+Emerging owns only its temporal fields, such as birth/history evidence, canonical `signal_type`, canonical `status`, persistence/growth evidence, and Emerging provenance. It must never overwrite Selection metrics or the human workflow `状态`. Existing `已选 / 已建站 / 放弃` remains untouched.
+
+The visible `趋势类型` is a deterministic display projection of **existing canonical temporal classification**, not another classifier. Current display mapping is deliberately narrow: `signal_type=net_new` or `demand_history_type=newly_observed` → `新词`; canonical `signal_type/status=breakout` → `上升`; otherwise → `unknown` unless a future existing canonical state explicitly supplies another supported display category. Raw `growth_rate > 0 / < 0 / == 0` is never interpreted by the delivery layer as `上升 / 下降 / 平稳`.
+
+A failed optional mirror leaves the Emerging run validity untouched. `unknown` remains literal `unknown`; Google's source `Breakout` label is still separate from the canonical classifier and cannot be promoted merely by Sheet delivery.
 
 ## Canonical Runtime Contract
 
