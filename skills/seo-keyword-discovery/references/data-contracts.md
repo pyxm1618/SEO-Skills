@@ -123,7 +123,7 @@ The validator computes and exposes at least:
 
 Full Coverage requires equality of every mandatory-source total and pass count, including the PAA/Related check total, a PASS `discovery_coverage` validation receipt, and `formal_handoff_allowed=true`. Blocked/NOT_RUN/UNKNOWN items remain visible; they may not be silently removed to make counts equal.
 
-## Formal handoff and Google Sheet delivery
+## Formal handoff and unified Google Sheet delivery
 
 A formal `discovery_handoff` carries `coverage_status=PASS`, the exact `coverage_receipt_ref`, and a `keywords` list whose items each declare:
 
@@ -131,12 +131,45 @@ A formal `discovery_handoff` carries `coverage_status=PASS`, the exact `coverage
 
 Production reconciles that list against the verified Coverage record: it must cover the first-round Candidate inventory **and** the reconciled Branch candidates exactly, so the handoff can neither drop a Candidate nor introduce a keyword Coverage never verified.
 
-Before production handoff validation, the exact handoff is exported to the existing SEO Google Spreadsheet, separate worksheet `keyword_discovery`. The exporter reads the current batch back and requires exact equality. A successful delivery writes a receipt with:
+Before production handoff validation, the exact handoff is delivered to the existing spreadsheet `SEO关键词库`, worksheet `关键词库`, through the shared keyword-library writer. JSON remains the authoritative handoff/evidence artifact; the Sheet is a mandatory human-facing projection.
 
-`schema | status | batch_id | worksheet | sheet_id | record_count | verified_count | handoff_binding_sha256 | exporter_source_sha256 | verified_at`
+### Stable row identity
 
-where `schema=seo-discovery-sheet-delivery/v1`, `status=PASS`, `worksheet=keyword_discovery`, and `record_count=verified_count=len(handoff.keywords)`. The exporter then adds `sheet_delivery_receipt_ref` to the handoff JSON.
+The unified library deduplicates by:
 
-The binding hash covers the complete handoff content except the `sheet_delivery_receipt_ref` field itself, allowing the receipt to be created first and then referenced without a circular hash. Production handoff validation re-computes that binding, verifies the current exporter source hash, exact batch and row counts, and the receipt file. A missing Sheet receipt, partial write, extra/missing/duplicate current-batch row, or handoff mutation after delivery blocks production handoff PASS.
+`normalized_keyword + market + language`
 
-JSON remains the machine-authoritative handoff/evidence artifact. Google Sheet delivery is mandatory for completion. CSV is optional and is not a formal output contract.
+`market` and `language` participate in identity and must not be guessed. Resolution order is exactly:
+
+1. explicit value on the keyword record;
+2. explicit run/batch value;
+3. explicitly configured delivery context;
+4. otherwise `BLOCKED`.
+
+There is no implicit `US/en` fallback.
+
+A stable keyword identity has exactly one Sheet row. Discovery candidate identity is separate: multiple candidates or sources may resolve to the same stable row. This deduplication must never collapse the Discovery ledger itself or discard candidate/source/evidence provenance.
+
+### Field ownership and human status
+
+Discovery owns only its discovery context/provenance fields on the unified row. It must not overwrite Selection metrics, Emerging temporal fields, or the human workflow status.
+
+`状态` has only `新发现 / 已选 / 已建站 / 放弃`. Creation of a missing stable row may initialize `新发现`; later Discovery writes preserve the existing value. Discovery does not emit Selection mechanical statuses.
+
+Traditional Discovery is a source path, not temporal evidence. It must not label a keyword old/new merely because Discovery found it. The visible `趋势类型` remains `unknown` unless a real canonical temporal classification from the Emerging system has populated that stable row.
+
+### Delivery receipt v2
+
+Successful delivery writes a `seo-discovery-sheet-delivery/v2` receipt. The receipt separates:
+
+- **stable-row bindings** — which `normalized_keyword + market + language` identity and row each handoff keyword-context resolved to;
+- **candidate bindings** — every original `candidate_id`, `keyword`, `source`, `source_seed`, `evidence_receipt_ref`, and its resolved stable identity/row;
+- exact handoff binding and exporter source binding used by the production validator.
+
+Verification is therefore **not** `candidate_id ↔ Sheet row` one-to-one. The required invariant is: every valid handoff keyword-context resolves to the correct unique stable row, and every candidate/source/provenance record remains verifiable against that row. Multiple candidate bindings may legitimately point to one stable row.
+
+The exporter reads back the unified Sheet and fails closed on a missing stable row, wrong market/language identity, duplicate stable identity, missing candidate binding, wrong candidate provenance, partial field update, or handoff mutation after delivery. Production `discovery_handoff` re-verifies the v2 receipt.
+
+The writer also ensures the physical worksheet has at least the current schema column count before writing/bootstrap of the complete header. A legacy header-only worksheet with fewer physical columns is resized first; it is never assumed that Google will auto-expand the grid.
+
+JSON remains the machine-authoritative handoff/evidence artifact. Google Sheet delivery is mandatory for Discovery completion. CSV is optional and is not a formal output contract.
