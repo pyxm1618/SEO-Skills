@@ -83,7 +83,9 @@ JSON/evidence receipts 仍是机器 authoritative source；统一 Sheet 是长�
 
 ## 真实采集浏览器
 
-真实采集使用两个分离的可见 Chrome/CDP 端点。先启动通用/Semrush 浏览器：
+共享浏览器运行合同以 [`runtime/BROWSER_RUNTIME_CONTRACT.md`](runtime/BROWSER_RUNTIME_CONTRACT.md) 为准。真实采集使用两个分离的可见 **headful** Chrome/CDP 端点；“后台”表示不主动抢焦点，并不表示浏览器不可见或不能人工接管。
+
+先启动通用/Semrush 浏览器：
 
 ```bash
 eval "$(python3 runtime/start_live_browser.py --port 9334)"
@@ -91,7 +93,7 @@ eval "$(python3 runtime/start_live_browser.py --port 9334)"
 
 它导出 `SEO_BROWSER_CDP_URL`，只监听 `127.0.0.1`，使用持久目录
 `.seo-run/browser-profile/`，不使用 `--headless`，也不会读取、复制或修改正常 Chrome 的
-profile。目标端口被未知进程占用时会直接停止，不会抢占或杀进程。如果专用窗口显示
+profile。macOS 上启动器使用后台激活方式，正常启动不应把 Chrome 强制带到最前台或切换 Space。目标端口被未知进程占用时会直接停止，不会抢占或杀进程。如果专用窗口显示
 Semrush 登录页，请只在该窗口内完成登录，不要把密码、验证码、Cookie 或 Token 发给
 Agent；登录完成后再运行 collector。
 
@@ -104,6 +106,12 @@ eval "$(python3 runtime/start_live_browser.py --google)"
 它导出 `SEO_GOOGLE_CDP_URL`，默认端口 9224，使用独立的持久目录
 `.seo-run/google-profile/`，并以 `https://www.google.com/ncr` 打开，避免首次加载就被
 按出口 IP 跳到 ccTLD（`google.com.hk` 等）而污染该 profile 的偏好。
+
+Google live collector 复用同一个 persistent worker page，而不是每个关键词新建一个 Tab；Trends 的 `response` listener 只属于当前请求并在 `finally` 中解除。页面数量异常增长会触发 `BLOCKED: browser_page_leak`，不得继续把剩余批次跑完。
+
+遇到 CAPTCHA、`unusual traffic`、Google 验证页或已有未解决 blocker 时，collector 返回结构化 `NEEDS_HUMAN` 并以 exit code 3 停止。Emerging Radar 必须把该信号一路冒泡并立即停止整个批处理；不能把它降级成普通 blocker 后继续下一个词，也不能绕过已有 blocker 再开新页。问题 Tab 与专用 Chrome 保留，Agent 不主动 `bring_to_front` 或切 Space；用户自己切换到专用 Chrome 完成人工验证，再重试/继续。
+
+Google 页面、DOM、origin 或所需 payload 无法可靠检查时一律 fail closed。不要为了静默运行擅自改成 headless，也不要用 direct HTTP、Bing、WebSearch 或其他搜索接口替代正式 Google evidence 路径。
 
 profile 持久是有意的：Google 对每次都全新、零 Cookie 的会话判定为机器人的概率很高。
 持久 profile 让人工通过一次验证后长期有效，而不是每次采集重新触发。

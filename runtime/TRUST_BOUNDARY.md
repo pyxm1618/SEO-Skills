@@ -19,6 +19,19 @@ Observed evidence still has strict production requirements:
 
 These controls are intended to make the expected path deterministic, auditable, and fail-closed when real observations are unavailable.
 
+## Live browser runtime boundary
+
+The canonical browser lifecycle for formal Google collection is documented in `runtime/BROWSER_RUNTIME_CONTRACT.md`. This is an execution-integrity boundary, not a new SEO decision layer.
+
+- Google and Semrush/general collection use separate persistent headful Chrome/CDP profiles. On macOS the dedicated browser starts in the background and must not be intentionally activated, brought to front, or used to switch Spaces during normal automation.
+- Google collection reuses a bounded worker page instead of opening one tab per keyword. Unexpected page growth fails closed as `BLOCKED: browser_page_leak` rather than allowing a long batch to exhaust the machine.
+- Trends response listeners are request-scoped and must be removed after each call so one keyword's callback cannot observe later requests or remain as a hidden memory leak.
+- CAPTCHA, unusual-traffic pages, verification challenges, and an existing unresolved blocker produce `NEEDS_HUMAN` with exit code 3. That signal must propagate through Related discovery, supplemental acquisition, and timeline collection to stop the whole Radar; it must not be rewritten as an ordinary blocker and skipped over.
+- The blocker tab and dedicated browser are preserved for manual takeover. An unresolved blocker may not be bypassed by opening a fresh page. The user switches to the dedicated browser manually; automation does not force browser focus.
+- Google origin/body/DOM/payload inspection remains fail closed. Headless-only collection, direct HTTP scraping, hosted WebSearch, Bing, or another search interface cannot replace the formal Google browser evidence path merely to avoid browser interaction.
+
+This runtime boundary does not turn an external blocker into a PASS and does not change thresholds, classifiers, state transitions, routing, KGR, KDRoi, or source meaning. The `ACCEPTED_ENVIRONMENT_BLOCKER` release-acceptance semantics below remain separate from an individual production run, which still stops at the blocked stage.
+
 ## Validation receipts
 
 A production Stage PASS must carry a validation receipt. The receipt binds:

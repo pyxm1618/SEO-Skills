@@ -6,6 +6,8 @@ The monitor may ingest normalized historical/current evidence from Google Trends
 
 This source-policy change does **not** alter the emerging thresholds or state machine.
 
+Live Google browser execution uses the shared repository contract in `runtime/BROWSER_RUNTIME_CONTRACT.md`. This source policy defines what evidence is admissible; the shared runtime contract defines the headful-background Chrome/CDP lifecycle, worker-page reuse, `NEEDS_HUMAN`, blocker preservation, page-leak guard, listener cleanup, and fail-closed browser behavior.
+
 ## New/current Semrush acquisition
 
 Whenever the monitor needs a **new/current** Semrush observation, the only allowed transport is the current authenticated same-origin session at `https://sem.3ue.com/` through the project relay collector.

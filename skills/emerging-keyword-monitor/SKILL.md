@@ -21,6 +21,7 @@ Read before execution:
 - `references/state-machine.md` — explainable states and transitions.
 - `references/routing-rules.md` — downstream handoff rules.
 - `references/thresholds.json` — v1 temporal-shape thresholds only.
+- `runtime/BROWSER_RUNTIME_CONTRACT.md` — shared headful-background Chrome/CDP lifecycle and `NEEDS_HUMAN` contract for live Google Radar collection.
 
 ## Production start and attested pipeline
 
@@ -57,6 +58,14 @@ reason to guess which context is correct.
 The standalone router accepts a confirmed `emerging`/`breakout` state only
 when the input is a valid, error-free structured output from
 `classify_emergence.py`; it does not promote a hand-written status.
+
+## Live browser runtime
+
+When the live/domain Radar invokes Google Autocomplete, Trends Related, or Trends Timeline, it follows `runtime/BROWSER_RUNTIME_CONTRACT.md`. The dedicated Google Chrome stays headful but background, uses the isolated logged-out profile/CDP endpoint, and reuses the shared worker page rather than opening one tab per keyword. Request-scoped Trends response listeners must be removed after every call, and abnormal page growth fails closed with `BLOCKED: browser_page_leak`.
+
+CAPTCHA, unusual-traffic pages, verification challenges, or an existing unresolved blocker produce `NEEDS_HUMAN` and exit code 3. That signal is top-level control flow: Related discovery, supplemental acquisition, and timeline collection must stop the whole Radar rather than converting it into an ordinary blocker and continuing later anchors/keywords. Preserve the blocker tab and browser; do not open a fresh tab around it or force Chrome to the foreground. The user manually switches to the dedicated browser, resolves the challenge, then retries/continues. Do not switch the production path to headless or direct HTTP scraping merely to avoid browser interaction.
+
+This browser-runtime behavior changes only execution/resource handling. It does not alter the Emerging classifier, thresholds, state machine, routing rules, or evidence meaning.
 
 ## Evidence Discipline
 

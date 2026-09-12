@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-项目方法、Skill 边界、真实采集浏览器、生产 manifest 与 Claude Code hook 接线以 [`README.md`](README.md) 和 [`runtime/TRUST_BOUNDARY.md`](runtime/TRUST_BOUNDARY.md) 为准。本文件只保留 Claude Code 中仍长期有效的宿主操作原则，不记录单次事故现场。
+项目方法、Skill 边界、真实采集浏览器、生产 manifest 与 Claude Code hook 接线以 [`README.md`](README.md)、[`runtime/BROWSER_RUNTIME_CONTRACT.md`](runtime/BROWSER_RUNTIME_CONTRACT.md) 和 [`runtime/TRUST_BOUNDARY.md`](runtime/TRUST_BOUNDARY.md) 为准。本文件只保留 Claude Code 中仍长期有效的宿主操作原则，不记录单次事故现场。
 
 ## 区分平台权限故障与仓库门禁拒绝
 
