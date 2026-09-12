@@ -2,39 +2,96 @@
 
 ## Data-state rule
 
-Every value is one of: **observed**, **calculated**, **analysis**, or **unknown**. Missing data remains `null`/unknown. A malformed supplied value is **invalid**, never converted to unknown or zero.
+Every value is one of **observed**, **calculated**, **analysis**, or **unknown**. Missing data remains `null`/`unknown`. Malformed supplied data is invalid, never converted to zero.
+
+`unknown != 0`, `failed != noise`, and `not_attempted != no demand`.
+
+## Candidate identity and run ledger
+
+Every Radar candidate in current run scope has a stable `candidate_id`. The candidate ledger is the complete run inventory, including candidates that are:
+
+- in scope and observed;
+- in scope but failed/not attempted;
+- `valid_no_data`;
+- `unknown` domain relation;
+- `out_of_scope`;
+- carry-forward;
+- excluded by the hard batch cap.
+
+Candidates with zero observations stay in the ledger. They do not disappear and do not enter temporal classification.
+
+Canonical reconciliation invariant:
+
+`delivery_ids ⊆ route_ids = classified_ids ⊆ candidate_ids`.
+
+The receipt records all four identity sets plus an identity digest and binds the candidate-ledger path/hash. Canonical replay and the Hook consume that same ledger-qualified set and recompute reconciliation. An explicit empty delivery set remains empty. Any mismatch is a run error.
+
+## Independent state axes
+
+Keep these fields semantically separate:
+
+### Acquisition
+
+`acquisition_status`:
+
+- `data_acquired`
+- `valid_no_data`
+- `failed`
+- `not_attempted`
+- `not_applicable`
+
+`acquisition_reason` explains failure, circuit-open skip, domain exclusion, batch cap, etc.
+
+### Verification
+
+`verification_status`:
+
+- `verified`
+- `verified_no_data`
+- `pending_evidence`
+- `not_run`
+
+Example: valid Trends raw JSON followed by required screenshot timeout is `data_acquired + pending_evidence`, never verified delivery evidence.
+
+### Temporal classification
+
+Canonical `status`:
+
+`new_signal | watch | emerging | breakout | mature | noise | insufficient_evidence`
+
+Canonical `signal_type`:
+
+`net_new | breakout | emerging_variant | unknown`
+
+### Workflow/routing
+
+Canonical `route`:
+
+`selection_handoff | root_candidate_handoff | new_root_watchlist | monitor_only | no_handoff`
+
+The shared Sheet human workflow status is independent of all the above.
 
 ## Observation-level schema
 
 Preserve when available:
 
-`keyword | domain | observed_at | source | source_type | source_url | root_id | root_relation | root_candidate_hypothesis | variant_subtype | variant_evidence | previous_status | signal_value | signal_unit | country | time_window | metric_source | metric_database | first_observed_at | anchor_event | anchor_event_date | anchor_event_source | provenance_status`
+`keyword | candidate_id | domain | domain_relation | domain_relation_reason | observed_at | source | source_type | source_url | root_id | root_relation | root_candidate_hypothesis | variant_subtype | variant_evidence | previous_status | signal_value | signal_unit | country | time_window | metric_source | metric_database | first_observed_at | anchor_event | anchor_event_date | anchor_event_source | provenance_status | evidence_ref | screenshot_ref | acquisition_status | verification_status`
 
-Required provenance dimensions for a complete observation are:
+Required provenance dimensions for a complete temporal observation are:
 
 `source | source_type | source_url | observed_at | country | time_window | signal_unit`
 
-If any are missing, `provenance_status=incomplete`. The row may still be structurally valid; incomplete provenance must never be silently upgraded to verified evidence.
+Incomplete provenance is never silently upgraded to verified evidence.
 
-## Candidate schema
+## Candidate context through the canonical pipeline
 
-Aggregation/classification may preserve:
+`runtime/emerging_pipeline.py` owns canonical aggregation, classification, routing, and identity reconciliation.
 
-`keyword | domain | root_id | root_relation | root_candidate_hypothesis | signal_type | variant_subtype | variant_evidence | demand_history_type | previous_status | first_observed_at | estimated_birth_window | birth_window_start | birth_window_end | birth_source_resolution | birth_confidence | birth_reason | birth_evidence_series | resurgence_window | long_history_positive_seen | long_history_positive_observations | long_history_positive_windows | age_days | baseline_signal | novelty_baseline_signal | novelty_baseline_window | novelty_baseline_observations | historical_positive_seen | historical_positive_observations | historical_positive_windows | recent_signal | growth_rate | acceleration | persistence | persistence_window | persistence_observations | source_count | source_evidence | classification_primary_series | latest_observation_age_days | freshness_status | anchor_event | anchor_event_date | volume | kd | cpc | intitle_results | metric_provenance | metric_compatibility_status | kgr_compatibility_status | serp_dedicated_pages | serp_ugc_pages | serp_intent_mismatch | emd_status | status | confidence | observed_at`
+Non-temporal candidate context preserved through aggregation includes at least:
 
-Fields are optional unless a rule explicitly requires them. Unknown fields stay unknown.
+`candidate_id | domain | domain_relation | domain_relation_reason | root_id | root_relation | root_candidate_hypothesis | variant_subtype | variant_evidence | previous_status | acquisition_status | verification_status`
 
-### Candidate context through the canonical pipeline
-
-`aggregate_signals.py` owns temporal-series aggregation; it is not the owner of stable candidate business/lifecycle context. The canonical runner `runtime/emerging_pipeline.py` therefore re-attaches the non-temporal context carried by the validated input before classification and routing.
-
-The context currently preserved this way is:
-
-`domain | variant_subtype | variant_evidence | root_relation | root_candidate_hypothesis | previous_status`
-
-The runner keys this context by canonical keyword. A non-missing value must survive `validate -> aggregate -> classify -> route`; if the same canonical keyword supplies conflicting non-missing values for one of these fields in the same input, the runner fails rather than guessing which value is authoritative.
-
-`root_id` and temporal/history fields continue to follow their existing aggregator/classifier contracts; this context merge does not redefine thresholds, state transitions, or routing rules.
+Conflicting non-missing context for one canonical keyword fails closed instead of guessing.
 
 ## Comparable-series key
 
@@ -42,125 +99,85 @@ Signals are comparable only inside the same:
 
 `source × source_type × country × signal_unit × metric_database × time_window`
 
-The aggregator computes each series independently. It never adds Google Trends indexes to Semrush Volume, social/community mentions, sitemap counts, or any other incompatible unit.
+Never add or concatenate incompatible Google Trends timeframes, Semrush Volume, mentions, sitemap counts, or other unlike units.
 
-Source-reported aggregation windows are part of comparability. For example, a Google Trends `Past 24h` search-count observation and a `Past 48h` search-count observation are different measurement windows, not two persistence observations, even if captured at the same time for the same query.
+Google Trends `5y`, `12m`, `90d`, `30d`, and `7d` indexes are independently normalized. Birth/history uses one long comparable series; shape uses the medium series; persistence/acceleration uses recent series.
 
-A deterministic primary series exposes the current classification-compatible series: recent `7d`/`30d`/`90d` windows rank ahead of medium `12m`, which ranks ahead of long `5y` and unknown windows. All series remain in `source_evidence`; the long series is still independently selected for history/birth inference. Classification may select a different verified fresh series when the selected primary is explicitly ended or stale; that choice is exposed as `classification_primary_series`.
+Missing buckets remain unknown. They are not filled with zero.
 
-## Time windows and persistence evidence
+## First observation and birth/history semantics
 
-When observations exist, the aggregator computes per-series windows including:
+`first_observed_at` is the earliest timestamp known to the current evidence system, not the first search ever made.
 
-- `recent_7d` = days `0..6`
-- `recent_30d` = days `0..29`
-- `baseline_90d_7d` = days `7..89`
-- `baseline_90d_30d` = days `30..89`
-- matching 12-month historical windows beginning after the selected recent window
+`estimated_birth_window` is optional and evidence-backed. It must not be synthesized from a first non-zero point alone.
 
-For persistence, comparable series may also expose:
+`demand_history_type` is:
 
-- `persistence_7d`
-- `persistence_30d`
-- `recent_7d_observations`
-- `recent_30d_observations`
-- `positive_7d_observations`
-- `positive_30d_observations`
+`newly_observed | preexisting | resurgent | unknown`
 
-The classifier prefers the shortest recent window that satisfies the configured minimum observation depth. It uses 7-day evidence when sufficient and may fall back to 30-day evidence when the 7-day sample is too sparse. The matching baseline changes with that selection, so recent and baseline observations are mutually exclusive. Missing observations are never synthesized to satisfy a threshold.
+When the first available buckets already contain sustained demand, classify the history as `preexisting` with `birth_reason=before_available_history`. Human-facing output should render that reason as **“早于可观测窗口”**. It is not an absolute birth date.
 
-A missing window remains unknown. Missing days are not filled with zero.
+A quiet gap followed by a persistent return may be `resurgent`. An isolated spike is not a high-confidence birth.
 
-### Google timeframe-local normalization
+## Domain relation
 
-Google Trends `5y`, `12m`, `90d`, `30d`, and `7d` indexes have separate normalization contexts. Each observation retains its `time_window`, source URL, requested timeframe, actual bucket resolution, and evidence reference. The comparable-series key keeps these windows separate, so a `5y` value cannot be compared with a `90d` value and points from different windows are never concatenated. Birth/history inference consumes only one long (`5y`) series. The medium window describes shape; recent windows describe persistence and acceleration.
+`domain_relation` is independent of temporal classification:
 
-## Freshness and coverage
+- `in_scope`: admitted to formal evidence collection/classification;
+- `out_of_scope`: excluded with an auditable reason;
+- `unknown`: traceable review item, not formally classified/delivered.
 
-Each comparable series exposes, when calculable:
+Generic lexical overlap alone is not enough to set `in_scope`.
 
-- `latest_observation_age_days`
-- `distinct_observation_days`
-- `coverage_ratio`
-- `max_observation_gap_days`
+The same gate applies to Rising discovery, supplemental discovery, and carry-forward. Carry-forward preserves its original `parent_anchor`/domain evidence; missing evidence remains `unknown` and the keyword itself is never substituted as parent proof.
 
-`coverage_ratio` is descriptive coverage of distinct observed days within the last 30 calendar days; missing days are not imputed as zero. These fields allow stale-but-persistent history to be distinguished from genuinely current signal.
+## Historical persistence
 
-## Growth baseline versus novelty/history evidence
+The monitoring database stores both current acquisition health and last confirmed temporal state.
 
-`baseline_signal` is selected together with the active recent window and remains the baseline used for growth, breakout, and mature-state calculations.
+Confirmed history fields include:
 
-`net_new` uses history ending before the selected persistence window:
+`last_confirmed_status | last_confirmed_source_evidence | last_confirmed_at`
 
-- with `recent_7d`, the near-term novelty baseline starts at day `7`;
-- with `recent_30d`, it starts at day `30`.
+Current-run acquisition fields include:
 
-The series also retains 12-month positive-history evidence through `historical_positive_seen`, `historical_positive_observations`, and `historical_positive_windows` (plus per-window variants). A positive observation in that available earlier history prevents a `net_new` label even if the nearer 90-day baseline is quiet.
+`last_run_acquisition_status | last_run_acquisition_reason | acquisition_failure_count`
 
-These remain relative source observations. A zero novelty baseline does **not** prove absolute historical search Volume was zero and does not establish an absolute keyword birth date.
+A current acquisition failure must not overwrite a prior confirmed `status` or confirmed evidence. Repeated acquisition failure leads to bounded retry/review behavior, not automatic `noise`, `out_of_scope`, or deletion. Future `next_review_at` and `paused_review` are request-admission gates for both carry-forward and current rediscovery; neither state is bypassed merely because a source rediscovers the keyword.
 
-## First observation and incremental replay
+## Metric ownership and compatibility
 
-`first_observed_at` is the earliest known timestamp carried by the available evidence, not the first search ever made for the keyword.
+`volume`, `kd`, `cpc`, `kdroi`, `kgr`, `intitle_results`, SERP evidence, and Selection intent are Selection-owned/commercial fields. Emerging does not fabricate or refresh them as part of temporal monitoring.
 
-For incremental runs, if an input observation/candidate carries a prior `first_observed_at`, aggregation takes the minimum of that carried timestamp and current observation timestamps. A daily incremental input therefore must not reset the first-seen date or `age_days`.
+Their absence remains unknown.
 
-A persisted radar record in `observation_state=watching` is eligible for the next radar run even when the current Rising discovery does not rediscover the keyword. `run_emerging_radar.py` loads the existing database before timeline collection, merges those carry-forward records into the timeline candidate pool, and supplies their prior classifier status as `previous_status`. Current-run discovery context is authoritative for overlapping fields; historical context only fills missing values.
+Existing metric provenance rules still apply: a numerically complete but cross-provider/cross-market set is not automatically a compatible metric set.
 
-Carry-forward is lifecycle continuation, not a new discovery event. A carried record must not be relabeled as `google_trends_rising` merely because it is being observed again.
+## Unified keyword-library mirror
 
-`estimated_birth_window` is optional and must be evidence-backed. It must not be synthesized from the first non-zero Google Trends point alone.
+The shared Sheet is a human-facing mirror, not an input to temporal classification.
 
-Birth/history analysis also preserves `birth_window_start`, `birth_window_end`, `birth_source_resolution`, `birth_confidence`, `birth_reason`, and `birth_evidence_series`. Weekly/monthly source buckets are reported at bucket/month precision rather than fabricated day precision. `demand_history_type` is `newly_observed`, `preexisting`, `resurgent`, or `unknown`; a sustained positive series beginning at the first available bucket is `preexisting`/`before_available_history`. A quiet gap followed by a later persistent rise is `resurgent`. An isolated spike is not a high-confidence birth.
+Stable identity is:
 
-## Metric provenance and compatibility
+`normalized_keyword + market + language`.
 
-`volume`, `kd`, `cpc`, and `intitle_results` are observed metrics only. Their absence is unknown, not zero/easy/new.
+Emerging may update only Emerging-owned temporal/provenance fields. It must preserve Discovery provenance, Selection-owned commercial metrics, and the human workflow `状态`.
 
-Each non-missing metric is accompanied by its own `metric_provenance` record containing at least:
+Human status vocabulary such as `新发现 / 已选 / 已建站 / 放弃` is workflow metadata only. `新发现` means first entry into the human workflow and does not prove newly formed demand.
 
-`value | source | metric_source | metric_database | country | observed_at`
+Display projection:
 
-Top-level metric fields are retained for downstream compatibility, but they are derived from those traceable metric records.
+- `net_new` / `newly_observed` → `新词`
+- canonical `breakout` → `上升`
+- canonical `mature` may display `成熟需求`
+- unsupported states → `unknown`
 
-`metric_compatibility_status` applies to the **core keyword metric set** `volume + kd + cpc`. Those three values may be treated as one complete set only when their `metric_source`, `metric_database`, and `country` are compatible. For example, Semrush US Volume/KD/CPC may form one compatible set; Semrush Volume/KD combined with Google Ads CPC must not be silently promoted to `complete`.
+Never derive `平稳` from `mature`, and never derive `上升 / 下降 / 平稳` merely from the sign of `growth_rate`.
 
-`metric_status=complete` requires `volume`, `kd`, and `cpc` to be present with compatible core-metric provenance. A numerically complete but cross-provider, cross-database, or cross-market set is not complete.
+## Production delivery gate
 
-## KGR
+Production Sheet delivery is fail-closed: only explicit `run_status=PASS` is eligible. `BLOCKED`, missing, or unknown run status performs zero production Sheet reads/writes; legacy databases are dry-run inspection only.
 
-KGR has a separate compatibility contract because its numerator and denominator normally come from different providers.
+Monitoring database membership is not delivery eligibility. Production delivery requires explicit `delivery_eligible` on every record and delivers only records with `delivery_eligible=true`; missing eligibility never falls back to all records.
 
-`kgr_compatibility_status` applies only to `volume + intitle_results`. It requires traceable provenance plus compatible `metric_database` and `country`; it deliberately does **not** require the same `metric_source`.
-
-Therefore a normal pairing such as Semrush US Volume + Google US `intitle` is compatible, while US Volume + UK `intitle` is not.
-
-KGR is calculated only when both real `volume > 0` and real non-negative integer `intitle_results` have traceable, compatible provenance:
-
-`kgr = intitle_results / volume`
-
-If Volume is unknown, provenance is absent, or the two metric records are market/database-incompatible, KGR remains unknown. The presence of `intitle_results` alone may be retained as supply-side evidence but never as a KGR pass.
-
-## Validation
-
-Invalid inputs include negative signal values, negative Volume/CPC, KD outside `0..100`, NaN, Infinity, invalid dates, future `first_observed_at`, blank keyword, and malformed integer SERP counts. Invalid rows retain `validation_errors`.
-
-Exact duplicate observations remain visible for audit but do not inflate aggregation, persistence, or source counts.
-
-## Unified keyword library mirror contract
-
-The existing `SEO关键词库 / 关键词库` Sheet is an optional human-facing mirror for Emerging. It is not an input to temporal classification, does not change run validity, and does not alter the canonical state machine or thresholds.
-
-Stable row identity is `normalized_keyword + market + language`. Identity context resolution is explicit record → explicit run/batch → explicit delivery context → `BLOCKED`; no default market/language may be guessed.
-
-Emerging owns only its temporal/provenance delivery fields. It may update fields such as `estimated_birth_window`, `first_observed_at`, `birth_confidence`, `birth_reason`, `growth_rate`, `persistence`, `demand_history_type`, canonical `signal_type`, canonical Emerging `status`, and Emerging evidence references. It must preserve Discovery provenance, Selection metrics, and the human workflow `状态`.
-
-The visible `趋势类型` is only a presentation mapping of existing canonical temporal output. Delivery does not classify raw evidence. The current deterministic projection is:
-
-- `signal_type=net_new` or `demand_history_type=newly_observed` → `新词`;
-- canonical `signal_type=breakout` or canonical `status=breakout` → `上升`;
-- otherwise → `unknown` unless an already-existing canonical temporal category explicitly supports another display value.
-
-In particular, the sign of raw/calculated `growth_rate` never creates `上升`, `下降`, or `平稳` in the delivery layer.
-
-The human status vocabulary remains `新发现 / 已选 / 已建站 / 放弃`; Emerging canonical states (`new_signal`, `watch`, `emerging`, `breakout`, `mature`, `noise`, `insufficient_evidence`) are kept in technical fields and never translated into that human workflow column.
+Unknown/out-of-scope/failed/not-attempted records remain auditable in run artifacts rather than being silently deleted.
