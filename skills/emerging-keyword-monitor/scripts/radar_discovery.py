@@ -8,6 +8,22 @@ from collections import deque
 from typing import Any, Callable
 
 
+class HumanInterventionRequired(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        blocker_type: str = "captcha_or_unusual_traffic",
+        url: str = "",
+        stage: str = "",
+        keyword: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.blocker_type = blocker_type
+        self.url = url
+        self.stage = stage
+        self.keyword = keyword
+
+
 def canonical_keyword(value: Any) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
@@ -226,6 +242,8 @@ def discover_rising_bfs(
         try:
             fetched = related_fetcher(parent["keyword"])
             rows, context = _related_rows(fetched)
+        except HumanInterventionRequired:
+            raise
         except Exception as exc:
             blockers.append({"status": "BLOCKED", "anchor": parent["keyword"], "reason": str(exc)})
             stops.append({"anchor": parent["keyword"], "reason": "related_fetch_blocked"})

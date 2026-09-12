@@ -16,6 +16,7 @@ import os
 import random
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urljoin, urlparse
@@ -92,6 +93,79 @@ def connect():
     return pw, browser, context
 
 
+EXIT_OK = 0
+EXIT_ERROR = 2
+EXIT_NEEDS_HUMAN = 3
+
+
+class HumanInterventionRequired(RuntimeError):
+    def __init__(self, message, blocker_type="captcha_or_unusual_traffic", url="", stage="", keyword=""):
+        super().__init__(message)
+        self.blocker_type = blocker_type
+        self.url = url
+        self.stage = stage
+        self.keyword = keyword
+
+
+def check_page_leak_guard(context, max_pages=5):
+    pages = getattr(context, "pages", None)
+    if pages is not None and len(pages) > max_pages:
+        urls = [getattr(p, "url", "unknown") for p in pages]
+        raise RuntimeError(
+            f"BLOCKED: browser_page_leak: page count {len(pages)} exceeds limit {max_pages}; urls={urls}"
+        )
+
+
+def _is_blocker_page(page):
+    try:
+        url = (getattr(page, "url", "") or "").lower()
+        if "sorry/index" in url or "google.com/sorry" in url:
+            return True
+        body_loc = getattr(page, "locator", None)
+        if callable(body_loc):
+            body_text = page.locator("body").inner_text(timeout=500).lower()
+            if "unusual traffic" in body_text or "captcha" in body_text:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def get_worker_page(context):
+    pages = getattr(context, "pages", None)
+    if pages:
+        for p in pages:
+            if _is_blocker_page(p):
+                raise HumanInterventionRequired(
+                    "Existing blocker page in browser context requires human intervention",
+                    blocker_type="existing_unresolved_blocker",
+                    url=getattr(p, "url", ""),
+                )
+        return pages[0], False
+    if callable(getattr(context, "new_page", None)):
+        return context.new_page(), True
+    raise RuntimeError("Browser context cannot provide or create a page")
+
+
+@contextmanager
+def worker_page_context(context):
+    page, is_new = get_worker_page(context)
+    human_intervention = False
+    try:
+        yield page
+    except HumanInterventionRequired:
+        human_intervention = True
+        raise
+    finally:
+        if not human_intervention:
+            pages = getattr(context, "pages", [])
+            if is_new and len(pages) > 1:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+
+
 def _google_url(value):
     parsed = urlparse(str(value or ""))
     return parsed.scheme in {"http", "https"} and parsed.hostname in {"google.com", "www.google.com"}
@@ -102,9 +176,24 @@ def assert_google(page):
     host = (parsed.hostname or "").lower()
     if not _google_url(page.url):
         raise RuntimeError(f"wrong Google origin: {host}")
-    text = page.locator("body").inner_text(timeout=5000).lower()
+    if "sorry/index" in (page.url or "").lower():
+        raise HumanInterventionRequired(
+            "Google CAPTCHA/unusual-traffic page detected",
+            blocker_type="unusual_traffic_captcha",
+            url=page.url,
+        )
+    try:
+        body_elem = page.locator("body")
+        text = body_elem.inner_text(timeout=5000).lower()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to inspect Google page content: {exc}") from exc
+
     if "unusual traffic" in text or "captcha" in text:
-        raise RuntimeError("Google CAPTCHA/unusual-traffic page detected")
+        raise HumanInterventionRequired(
+            "Google CAPTCHA/unusual-traffic page detected",
+            blocker_type="unusual_traffic_captcha",
+            url=page.url,
+        )
 
 
 def goto_google(page, url):
@@ -144,82 +233,82 @@ def evidence_json(evidence_dir, name, payload):
 
 
 def autocomplete(context, seed, country, language, evidence_dir):
-    page = context.new_page()
-    goto_google(page, f"https://www.google.com/search?hl={quote_plus(language)}&gl={quote_plus(country)}")
-    box = page.locator('textarea[name="q"], input[name="q"]').first
-    if not box.is_visible():
-        raise RuntimeError("Google search input unavailable")
-    box.fill(seed)
-    page.wait_for_timeout(1200)
-    selectors = ['[role="option"]', 'ul[role="listbox"] li']
-    values = []
-    for selector in selectors:
-        for node in page.locator(selector).all():
-            try:
-                if node.is_visible():
-                    text = " ".join(node.inner_text().split()).strip()
-                    if text and text not in values:
-                        values.append(text)
-            except Exception:
-                continue
-        if values:
-            break
-    if not values:
-        raise RuntimeError("Google visible autocomplete dropdown unavailable or returned 0 suggestions")
-    observed_at = now()
-    evidence_key = _evidence_slug("autocomplete", seed, country, language)
-    evidence = screenshot(page, evidence_dir, f"{evidence_key}.png")
-    observation = evidence_json(
-        evidence_dir,
-        f"{evidence_key}.json",
-        {"page_url": page.url, "seed": seed, "suggestions": values, "country": country, "language": language, "observed_at": observed_at},
-    )
-    return {
-        "seed": seed,
-        "suggestions": values,
-        "country": country,
-        "language": language,
-        "observed_at": observed_at,
-        "source": "google_autocomplete",
-        "evidence_ref": evidence,
-        "observation_ref": observation,
-    }
+    with worker_page_context(context) as page:
+        goto_google(page, f"https://www.google.com/search?hl={quote_plus(language)}&gl={quote_plus(country)}")
+        box = page.locator('textarea[name="q"], input[name="q"]').first
+        if not box.is_visible():
+            raise RuntimeError("Google search input unavailable")
+        box.fill(seed)
+        page.wait_for_timeout(1200)
+        selectors = ['[role="option"]', 'ul[role="listbox"] li']
+        values = []
+        for selector in selectors:
+            for node in page.locator(selector).all():
+                try:
+                    if node.is_visible():
+                        text = " ".join(node.inner_text().split()).strip()
+                        if text and text not in values:
+                            values.append(text)
+                except Exception:
+                    continue
+            if values:
+                break
+        if not values:
+            raise RuntimeError("Google visible autocomplete dropdown unavailable or returned 0 suggestions")
+        observed_at = now()
+        evidence_key = _evidence_slug("autocomplete", seed, country, language)
+        evidence = screenshot(page, evidence_dir, f"{evidence_key}.png")
+        observation = evidence_json(
+            evidence_dir,
+            f"{evidence_key}.json",
+            {"page_url": page.url, "seed": seed, "suggestions": values, "country": country, "language": language, "observed_at": observed_at},
+        )
+        return {
+            "seed": seed,
+            "suggestions": values,
+            "country": country,
+            "language": language,
+            "observed_at": observed_at,
+            "source": "google_autocomplete",
+            "evidence_ref": evidence,
+            "observation_ref": observation,
+        }
 
 
 def intitle(context, keyword, market, evidence_dir):
-    page = context.new_page()
-    query = f'intitle:"{keyword}"'
-    goto_google(page, f"https://www.google.com/search?q={quote_plus(query)}&gl={quote_plus(market)}")
-    stats = page.locator("#result-stats")
-    # Google can keep #result-stats in the DOM while Playwright reports the node
-    # as not visible. The text is still part of the current loaded result page and
-    # is recorded together with screenshot + structured observation evidence.
-    if not stats.count():
-        page.wait_for_selector("#result-stats", state="attached", timeout=10000)
-    text = stats.first.inner_text().strip() if stats.count() else ""
-    numbers = re.findall(r"\d[\d,\.\s]*", text)
-    if not numbers:
-        raise RuntimeError("Google intitle result count unavailable")
-    digits = re.sub(r"\D", "", numbers[0])
-    if not digits:
-        raise RuntimeError("Google intitle result count could not be parsed")
-    observed_at = now()
-    evidence_key = _evidence_slug("intitle", keyword, market)
-    evidence = screenshot(page, evidence_dir, f"{evidence_key}.png")
-    observation = evidence_json(
-        evidence_dir,
-        f"{evidence_key}.json",
-        {"page_url": page.url, "query": query, "result_stats_text": text, "intitle_results": int(digits), "market": market, "observed_at": observed_at},
-    )
-    return {
-        "keyword": keyword,
-        "intitle_results": int(digits),
-        "source": "Google",
-        "market": market,
-        "observed_at": observed_at,
-        "evidence_ref": evidence,
-        "observation_ref": observation,
-    }
+    with worker_page_context(context) as page:
+        query = f'intitle:"{keyword}"'
+        goto_google(page, f"https://www.google.com/search?q={quote_plus(query)}&gl={quote_plus(market)}")
+        stats = page.locator("#result-stats")
+        # Google can keep #result-stats in the DOM while Playwright reports the node
+        # as not visible. The text is still part of the current loaded result page and
+        # is recorded together with screenshot + structured observation evidence.
+        if not stats.count():
+            page.wait_for_selector("#result-stats", state="attached", timeout=10000)
+        text = stats.first.inner_text().strip() if stats.count() else ""
+        numbers = re.findall(r"\d[\d,\.\s]*", text)
+        if not numbers:
+            raise RuntimeError("Google intitle result count unavailable")
+        digits = re.sub(r"\D", "", numbers[0])
+        if not digits:
+            raise RuntimeError("Google intitle result count could not be parsed")
+        observed_at = now()
+        evidence_key = _evidence_slug("intitle", keyword, market)
+        evidence = screenshot(page, evidence_dir, f"{evidence_key}.png")
+        observation = evidence_json(
+            evidence_dir,
+            f"{evidence_key}.json",
+            {"page_url": page.url, "query": query, "result_stats_text": text, "intitle_results": int(digits), "market": market, "observed_at": observed_at},
+        )
+        return {
+            "keyword": keyword,
+            "intitle_results": int(digits),
+            "source": "Google",
+            "market": market,
+            "observed_at": observed_at,
+            "evidence_ref": evidence,
+            "observation_ref": observation,
+        }
 
 
 def _organic_rows(page, seen):
@@ -323,53 +412,53 @@ def _next_page_url(page):
 
 
 def serp(context, keyword, market, evidence_dir):
-    page = context.new_page()
-    goto_google(page, f"https://www.google.com/search?q={quote_plus(keyword)}&gl={quote_plus(market)}&num=10")
-    _wait_for_serp_headings(page)
-    rows = []
-    seen = set()
-    page_urls = [page.url]
-    evidence_key = _evidence_slug("serp", keyword, market)
-    first_page_screenshot = screenshot(page, evidence_dir, f"{evidence_key}.png")
-    max_pages = 5
-    while len(rows) < 10 and len(page_urls) <= max_pages:
-        for item in _organic_rows(page, seen):
-            rows.append({"rank": len(rows) + 1, **item})
+    with worker_page_context(context) as page:
+        goto_google(page, f"https://www.google.com/search?q={quote_plus(keyword)}&gl={quote_plus(market)}&num=10")
+        _wait_for_serp_headings(page)
+        rows = []
+        seen = set()
+        page_urls = [page.url]
+        evidence_key = _evidence_slug("serp", keyword, market)
+        first_page_screenshot = screenshot(page, evidence_dir, f"{evidence_key}.png")
+        max_pages = 5
+        while len(rows) < 10 and len(page_urls) <= max_pages:
+            for item in _organic_rows(page, seen):
+                rows.append({"rank": len(rows) + 1, **item})
+                if len(rows) == 10:
+                    break
             if len(rows) == 10:
                 break
-        if len(rows) == 10:
-            break
-        next_url = _next_page_url(page)
-        if not next_url or next_url in page_urls:
-            break
-        goto_google(page, next_url)
-        _wait_for_serp_headings(page)
-        page_urls.append(page.url)
-    if len(rows) < 10:
-        raise RuntimeError(f"Google real SERP collector found only {len(rows)} organic results; top 10 contract not met")
-    observed_at = now()
-    observation = evidence_json(
-        evidence_dir,
-        f"{evidence_key}.json",
-        {
-            "page_url": page_urls[-1],
-            "page_urls": page_urls,
+            next_url = _next_page_url(page)
+            if not next_url or next_url in page_urls:
+                break
+            goto_google(page, next_url)
+            _wait_for_serp_headings(page)
+            page_urls.append(page.url)
+        if len(rows) < 10:
+            raise RuntimeError(f"Google real SERP collector found only {len(rows)} organic results; top 10 contract not met")
+        observed_at = now()
+        observation = evidence_json(
+            evidence_dir,
+            f"{evidence_key}.json",
+            {
+                "page_url": page_urls[-1],
+                "page_urls": page_urls,
+                "keyword": keyword,
+                "market": market,
+                "observed_at": observed_at,
+                "results": rows,
+            },
+        )
+        return {
             "keyword": keyword,
+            "source": "Google",
             "market": market,
             "observed_at": observed_at,
+            "evidence_ref": first_page_screenshot,
+            "observation_ref": observation,
+            "page_urls": page_urls,
             "results": rows,
-        },
-    )
-    return {
-        "keyword": keyword,
-        "source": "Google",
-        "market": market,
-        "observed_at": observed_at,
-        "evidence_ref": first_page_screenshot,
-        "observation_ref": observation,
-        "page_urls": page_urls,
-        "results": rows,
-    }
+        }
 
 
 def _decode_trends_payload(text):
@@ -517,180 +606,216 @@ def _wait_for_related_payload(page, observed_payloads, timeout_seconds=15.0):
 
 
 def trends_related(context, anchor, country, timeframe, evidence_dir):
-    page = context.new_page()
-    observed_payloads = []
+    with worker_page_context(context) as page:
+        observed_payloads = []
 
-    def capture_related_response(response):
+        def capture_related_response(response):
+            try:
+                parsed = urlparse(response.url)
+                if parsed.hostname != "trends.google.com" or "/trends/api/widgetdata/relatedsearches" not in parsed.path:
+                    return
+                if response.status != 200:
+                    return
+                payload = _decode_trends_payload(response.text())
+                related_queries = parse_trends_related(payload)
+                observed_payloads.append(
+                    {"url": response.url, "payload": payload, "related_queries": related_queries}
+                )
+            except Exception:
+                return
+
+        page.on("response", capture_related_response)
         try:
-            parsed = urlparse(response.url)
-            if parsed.hostname != "trends.google.com" or "/trends/api/widgetdata/relatedsearches" not in parsed.path:
-                return
-            if response.status != 200:
-                return
-            payload = _decode_trends_payload(response.text())
-            related_queries = parse_trends_related(payload)
-            observed_payloads.append(
-                {"url": response.url, "payload": payload, "related_queries": related_queries}
+            page.goto(
+                "https://trends.google.com/trends/explore?"
+                f"geo={quote_plus(country)}&date={quote_plus(timeframe)}&q={quote_plus(anchor)}",
+                wait_until="domcontentloaded",
             )
-        except Exception:
-            return
+            _wait_for_related_payload(page, observed_payloads)
+            host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
+            if host != "trends.google.com":
+                if "sorry" in (page.url or "").lower():
+                    raise HumanInterventionRequired(
+                        "Google Trends CAPTCHA/unusual-traffic page detected",
+                        blocker_type="unusual_traffic_captcha",
+                        url=page.url,
+                    )
+                raise RuntimeError(f"wrong Google Trends origin: {host}")
+            body = page.locator("body").inner_text(timeout=5000).lower()
+            if "unusual traffic" in body or "captcha" in body or "sorry/index" in (page.url or "").lower():
+                raise HumanInterventionRequired(
+                    "Google Trends CAPTCHA/unusual-traffic page detected",
+                    blocker_type="unusual_traffic_captcha",
+                    url=page.url,
+                )
+            evidence_key = _evidence_slug(anchor, country, timeframe)
+            if "related" not in body and "关联" not in body and not observed_payloads:
+                blocker_observed_at = now()
+                blocker_evidence = evidence_json(
+                    evidence_dir,
+                    f"trends-related-{evidence_key}-blocked.json",
+                    {
+                        "anchor": anchor,
+                        "country": country,
+                        "timeframe": timeframe,
+                        "observed_at": blocker_observed_at,
+                        "page_url": page.url,
+                        "body_excerpt": body[:2000],
+                        "observed_related_payload_count": 0,
+                        "blocker": "related_result_not_confirmed",
+                    },
+                )
+                blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-blocked.png")
+                raise RuntimeError(
+                    "Google Trends related result could not be confirmed; "
+                    f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
+                )
+            if not observed_payloads:
+                blocker_observed_at = now()
+                blocker_evidence = evidence_json(
+                    evidence_dir,
+                    f"trends-related-{evidence_key}-payload-blocked.json",
+                    {
+                        "anchor": anchor,
+                        "country": country,
+                        "timeframe": timeframe,
+                        "observed_at": blocker_observed_at,
+                        "page_url": page.url,
+                        "body_excerpt": body[:2000],
+                        "observed_related_payload_count": 0,
+                        "blocker": "related_payload_not_observed",
+                    },
+                )
+                blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-payload-blocked.png")
+                raise RuntimeError(
+                    "Google Trends related payload was not observed; screenshot-only evidence is insufficient; "
+                    f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
+                )
 
-    page.on("response", capture_related_response)
-    page.goto(
-        "https://trends.google.com/trends/explore?"
-        f"geo={quote_plus(country)}&date={quote_plus(timeframe)}&q={quote_plus(anchor)}",
-        wait_until="domcontentloaded",
-    )
-    _wait_for_related_payload(page, observed_payloads)
-    host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
-    if host != "trends.google.com":
-        raise RuntimeError(f"wrong Google Trends origin: {host}")
-    body = page.locator("body").inner_text(timeout=5000).lower()
-    evidence_key = _evidence_slug(anchor, country, timeframe)
-    if "related" not in body and "关联" not in body and not observed_payloads:
-        blocker_observed_at = now()
-        blocker_evidence = evidence_json(
-            evidence_dir,
-            f"trends-related-{evidence_key}-blocked.json",
-            {
+            captured = observed_payloads[-1]
+            observed_at = now()
+            raw_evidence = evidence_json(
+                evidence_dir,
+                f"trends-related-{evidence_key}.json",
+                {
+                    "anchor": anchor,
+                    "country": country,
+                    "timeframe": timeframe,
+                    "observed_at": observed_at,
+                    "source_url": captured["url"],
+                    "payload": captured["payload"],
+                    "related_queries": captured["related_queries"],
+                },
+            )
+            screenshot_ref = screenshot(page, evidence_dir, f"trends-related-{evidence_key}.png")
+            return {
                 "anchor": anchor,
+                "related_queries": captured["related_queries"],
                 "country": country,
                 "timeframe": timeframe,
-                "observed_at": blocker_observed_at,
-                "page_url": page.url,
-                "body_excerpt": body[:2000],
-                "observed_related_payload_count": 0,
-                "blocker": "related_result_not_confirmed",
-            },
-        )
-        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-blocked.png")
-        raise RuntimeError(
-            "Google Trends related result could not be confirmed; "
-            f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
-        )
-    if not observed_payloads:
-        blocker_observed_at = now()
-        blocker_evidence = evidence_json(
-            evidence_dir,
-            f"trends-related-{evidence_key}-payload-blocked.json",
-            {
-                "anchor": anchor,
-                "country": country,
-                "timeframe": timeframe,
-                "observed_at": blocker_observed_at,
-                "page_url": page.url,
-                "body_excerpt": body[:2000],
-                "observed_related_payload_count": 0,
-                "blocker": "related_payload_not_observed",
-            },
-        )
-        blocker_screenshot = screenshot(page, evidence_dir, f"trends-related-{evidence_key}-payload-blocked.png")
-        raise RuntimeError(
-            "Google Trends related payload was not observed; screenshot-only evidence is insufficient; "
-            f"blocker_evidence_ref={blocker_evidence}; blocker_screenshot_ref={blocker_screenshot}"
-        )
-
-    captured = observed_payloads[-1]
-    observed_at = now()
-    raw_evidence = evidence_json(
-        evidence_dir,
-        f"trends-related-{evidence_key}.json",
-        {
-            "anchor": anchor,
-            "country": country,
-            "timeframe": timeframe,
-            "observed_at": observed_at,
-            "source_url": captured["url"],
-            "payload": captured["payload"],
-            "related_queries": captured["related_queries"],
-        },
-    )
-    screenshot_ref = screenshot(page, evidence_dir, f"trends-related-{evidence_key}.png")
-    return {
-        "anchor": anchor,
-        "related_queries": captured["related_queries"],
-        "country": country,
-        "timeframe": timeframe,
-        "observed_at": observed_at,
-        "source": "Google Trends",
-        "source_type": "google_trends_related",
-        "source_url": captured["url"],
-        "raw_evidence_ref": raw_evidence,
-        "screenshot_ref": screenshot_ref,
-    }
+                "observed_at": observed_at,
+                "source": "Google Trends",
+                "source_type": "google_trends_related",
+                "source_url": captured["url"],
+                "raw_evidence_ref": raw_evidence,
+                "screenshot_ref": screenshot_ref,
+            }
+        finally:
+            try:
+                page.remove_listener("response", capture_related_response)
+            except Exception:
+                pass
 
 
 def trends_timeline(context, keyword, market, timeframe, evidence_dir):
-    page = context.new_page()
-    observed_payloads = []
+    with worker_page_context(context) as page:
+        observed_payloads = []
 
-    def capture_temporal_response(response):
+        def capture_temporal_response(response):
+            try:
+                parsed = urlparse(response.url)
+                if parsed.hostname != "trends.google.com" or "/trends/api/widgetdata" not in parsed.path:
+                    return
+                if response.status != 200:
+                    return
+                payload = _decode_trends_payload(response.text())
+                series = parse_trends_timeline(payload)
+                observed_payloads.append({"url": response.url, "payload": payload, "series": series})
+            except Exception:
+                return
+
+        page.on("response", capture_temporal_response)
         try:
-            parsed = urlparse(response.url)
-            if parsed.hostname != "trends.google.com" or "/trends/api/widgetdata" not in parsed.path:
-                return
-            if response.status != 200:
-                return
-            payload = _decode_trends_payload(response.text())
-            series = parse_trends_timeline(payload)
-            observed_payloads.append({"url": response.url, "payload": payload, "series": series})
-        except Exception:
-            return
+            page.goto(
+                "https://trends.google.com/trends/explore?"
+                f"geo={quote_plus(market)}&date={quote_plus(timeframe)}&q={quote_plus(keyword)}",
+                wait_until="domcontentloaded",
+            )
+            page.wait_for_timeout(5000)
+            host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
+            if host != "trends.google.com":
+                if "sorry" in (page.url or "").lower():
+                    raise HumanInterventionRequired(
+                        "Google Trends CAPTCHA/unusual-traffic page detected",
+                        blocker_type="unusual_traffic_captcha",
+                        url=page.url,
+                    )
+                raise RuntimeError(f"wrong Google Trends origin: {host}")
+            body = page.locator("body").inner_text(timeout=5000)
+            if "unusual traffic" in body.lower() or "captcha" in body.lower() or "sorry/index" in (page.url or "").lower():
+                raise HumanInterventionRequired(
+                    "Google Trends CAPTCHA/unusual-traffic page detected",
+                    blocker_type="unusual_traffic_captcha",
+                    url=page.url,
+                )
+            if "Interest over time" not in body and "热度随时间变化" not in body:
+                raise RuntimeError("Google Trends current result could not be confirmed")
+            if not observed_payloads:
+                raise RuntimeError("Google Trends real temporal payload was not observed; screenshot-only evidence is insufficient")
 
-    page.on("response", capture_temporal_response)
-    page.goto(
-        "https://trends.google.com/trends/explore?"
-        f"geo={quote_plus(market)}&date={quote_plus(timeframe)}&q={quote_plus(keyword)}",
-        wait_until="domcontentloaded",
-    )
-    page.wait_for_timeout(5000)
-    host = page.url.split("/", 3)[2].lower() if page.url.startswith("http") else ""
-    if host != "trends.google.com":
-        raise RuntimeError(f"wrong Google Trends origin: {host}")
-    body = page.locator("body").inner_text(timeout=5000)
-    if "Interest over time" not in body and "热度随时间变化" not in body:
-        raise RuntimeError("Google Trends current result could not be confirmed")
-    if not observed_payloads:
-        raise RuntimeError("Google Trends real temporal payload was not observed; screenshot-only evidence is insufficient")
-
-    captured = observed_payloads[-1]
-    evidence_key = _evidence_slug(keyword, market, timeframe)
-    observed_at = now()
-    raw_evidence = evidence_json(
-        evidence_dir,
-        f"trends-{evidence_key}.json",
-        {
-            "keyword": keyword,
-            "market": market,
-            "requested_timeframe": timeframe,
-            "observed_at": observed_at,
-            "source_url": captured["url"],
-            "payload": captured["payload"],
-            "series": captured["series"],
-            "actual_resolution": infer_timeline_resolution(captured["series"]),
-        },
-    )
-    screenshot_ref = screenshot(page, evidence_dir, f"trends-{evidence_key}.png")
-    return {
-        "keyword": keyword,
-        "is_finalist": True,
-        "source": "Google Trends",
-        "source_type": "google_trends_timeline",
-        "source_url": captured["url"],
-        "market": market,
-        "requested_timeframe": timeframe,
-        "actual_resolution": infer_timeline_resolution(captured["series"]),
-        "series": captured["series"],
-        "observed_at": observed_at,
-        "raw_evidence_ref": raw_evidence,
-        "screenshot_ref": screenshot_ref,
-        "google_trends_source": "Google Trends",
-        "google_trends_market": market,
-        "google_trends_observed_at": observed_at,
-        "google_trends_evidence_ref": raw_evidence,
-        "google_trends_screenshot_ref": screenshot_ref,
-        "google_trends_series": captured["series"],
-    }
+            captured = observed_payloads[-1]
+            evidence_key = _evidence_slug(keyword, market, timeframe)
+            observed_at = now()
+            raw_evidence = evidence_json(
+                evidence_dir,
+                f"trends-{evidence_key}.json",
+                {
+                    "keyword": keyword,
+                    "market": market,
+                    "requested_timeframe": timeframe,
+                    "observed_at": observed_at,
+                    "source_url": captured["url"],
+                    "payload": captured["payload"],
+                    "series": captured["series"],
+                    "actual_resolution": infer_timeline_resolution(captured["series"]),
+                },
+            )
+            screenshot_ref = screenshot(page, evidence_dir, f"trends-{evidence_key}.png")
+            return {
+                "keyword": keyword,
+                "is_finalist": True,
+                "source": "Google Trends",
+                "source_type": "google_trends_timeline",
+                "source_url": captured["url"],
+                "market": market,
+                "requested_timeframe": timeframe,
+                "actual_resolution": infer_timeline_resolution(captured["series"]),
+                "series": captured["series"],
+                "observed_at": observed_at,
+                "raw_evidence_ref": raw_evidence,
+                "screenshot_ref": screenshot_ref,
+                "google_trends_source": "Google Trends",
+                "google_trends_market": market,
+                "google_trends_observed_at": observed_at,
+                "google_trends_evidence_ref": raw_evidence,
+                "google_trends_screenshot_ref": screenshot_ref,
+                "google_trends_series": captured["series"],
+            }
+        finally:
+            try:
+                page.remove_listener("response", capture_temporal_response)
+            except Exception:
+                pass
 
 
 def trends(context, keyword, market, evidence_dir):
@@ -772,21 +897,32 @@ def expansions(context, seed, market, language, evidence_dir):
     autocomplete does not return for the same seed. A page that genuinely
     exposes neither block is still a completed check and is recorded explicitly.
     """
-    page = context.new_page()
-    goto_google(page, f"https://www.google.com/search?q={quote_plus(seed)}&gl={quote_plus(market)}&hl={quote_plus(language)}")
-    _wait_for_serp_headings(page)
-    page.wait_for_timeout(2500)
-    paa = _collect_paa(page)
-    related = _collect_related(page, seed)
-    result_status = "observed" if paa or related else "not_present"
-    observed_at = now()
-    slug = _evidence_slug("expansions", seed, market, language)
-    evidence = screenshot(page, evidence_dir, f"{slug}.png")
-    observation = evidence_json(
-        evidence_dir,
-        f"{slug}.json",
-        {
-            "page_url": page.url,
+    with worker_page_context(context) as page:
+        goto_google(page, f"https://www.google.com/search?q={quote_plus(seed)}&gl={quote_plus(market)}&hl={quote_plus(language)}")
+        _wait_for_serp_headings(page)
+        page.wait_for_timeout(2500)
+        paa = _collect_paa(page)
+        related = _collect_related(page, seed)
+        result_status = "observed" if paa or related else "not_present"
+        observed_at = now()
+        slug = _evidence_slug("expansions", seed, market, language)
+        evidence = screenshot(page, evidence_dir, f"{slug}.png")
+        observation = evidence_json(
+            evidence_dir,
+            f"{slug}.json",
+            {
+                "page_url": page.url,
+                "seed": seed,
+                "people_also_ask": paa,
+                "related_searches": related,
+                "expansion_count": len(paa) + len(related),
+                "result_status": result_status,
+                "market": market,
+                "language": language,
+                "observed_at": observed_at,
+            },
+        )
+        return {
             "seed": seed,
             "people_also_ask": paa,
             "related_searches": related,
@@ -795,21 +931,10 @@ def expansions(context, seed, market, language, evidence_dir):
             "market": market,
             "language": language,
             "observed_at": observed_at,
-        },
-    )
-    return {
-        "seed": seed,
-        "people_also_ask": paa,
-        "related_searches": related,
-        "expansion_count": len(paa) + len(related),
-        "result_status": result_status,
-        "market": market,
-        "language": language,
-        "observed_at": observed_at,
-        "source": "google_serp_expansions",
-        "evidence_ref": evidence,
-        "observation_ref": observation,
-    }
+            "source": "google_serp_expansions",
+            "evidence_ref": evidence,
+            "observation_ref": observation,
+        }
 
 
 def _artifacts_for(mode, result):
@@ -845,6 +970,7 @@ def main():
     pw = browser = None
     try:
         pw, browser, context = connect()
+        check_page_leak_guard(context, max_pages=5)
         if args.mode == "autocomplete":
             if not args.seed:
                 raise RuntimeError("--seed is required")
@@ -884,15 +1010,35 @@ def main():
             _artifacts_for(args.mode, result),
         )
         print(json.dumps(result, ensure_ascii=False))
-        return 0
+        return EXIT_OK
+    except HumanInterventionRequired as exc:
+        cdp_url = os.environ.get("SEO_GOOGLE_CDP_URL") or os.environ.get("SEO_BROWSER_CDP_URL") or "unknown"
+        payload = {
+            "status": "NEEDS_HUMAN",
+            "blocker": exc.blocker_type,
+            "message": str(exc),
+            "url": exc.url,
+            "stage": args.mode,
+            "keyword": getattr(args, "keyword", None) or getattr(args, "seed", None) or "",
+            "cdp": cdp_url,
+            "instruction": "Please switch to the dedicated Chrome window and complete verification. The blocker page is preserved.",
+        }
+        sys.stderr.write(f"NEEDS_HUMAN: {json.dumps(payload, ensure_ascii=False)}\n")
+        return EXIT_NEEDS_HUMAN
     except Exception as exc:
         print(f"BLOCKED: {exc}", file=os.sys.stderr)
-        return 2
+        return EXIT_ERROR
     finally:
         if browser is not None:
-            browser.close()
+            try:
+                browser.close()
+            except Exception:
+                pass
         if pw is not None:
-            pw.stop()
+            try:
+                pw.stop()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@
 
 import argparse
 import json
+import os
+import platform
 import socket
 import subprocess
 import time
@@ -67,28 +69,68 @@ def port_is_free(port):
 
 
 def dedicated_process_matches(port, expected_profile):
+    return bool(find_dedicated_pids(port, expected_profile))
+
+
+def find_dedicated_pids(port, expected_profile):
     profile_flag = f"--user-data-dir={Path(expected_profile).expanduser().resolve()}"
     port_flag = f"--remote-debugging-port={port}"
     result = subprocess.run(
-        ["ps", "-axo", "command="],
+        ["ps", "-axo", "pid,command="],
         capture_output=True,
         text=True,
         check=False,
     )
-    for command_line in result.stdout.splitlines():
-        if (
-            port_flag in command_line
-            and profile_flag in command_line
-            and "Chrome" in command_line
-        ):
-            return True
-    return False
+    pids = []
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2:
+            pid_str, cmd = parts
+            if (
+                port_flag in cmd
+                and profile_flag in cmd
+                and "Chrome" in cmd
+                and pid_str.isdigit()
+            ):
+                pids.append(int(pid_str))
+    return pids
+
+
+def terminate_dedicated_process(port, expected_profile):
+    pids = find_dedicated_pids(port, expected_profile)
+    for pid in pids:
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+    if pids:
+        time.sleep(0.5)
+        remaining = find_dedicated_pids(port, expected_profile)
+        for pid in remaining:
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+
+
+def _find_app_path(binary):
+    path = Path(binary).resolve()
+    for parent in (path, *path.parents):
+        if parent.name.endswith(".app"):
+            return str(parent)
+    return None
 
 
 def start_chrome(port, profile, binary, start_url=LOGIN_URL):
     Path(profile).mkdir(parents=True, exist_ok=True)
+    command = chrome_command(port, profile, binary, start_url)
+    app_path = _find_app_path(binary)
+    if platform.system() == "Darwin" and app_path and Path(app_path).is_dir():
+        open_cmd = ["open", "-g", "-n", "-a", app_path, "--args"] + command[1:]
+        subprocess.run(open_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return None
     return subprocess.Popen(
-        chrome_command(port, profile, binary, start_url),
+        command,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -123,7 +165,12 @@ def ensure_browser(port, profile, binary, wait_seconds=DEFAULT_WAIT_SECONDS, sta
     try:
         wait_for_cdp(port, wait_seconds)
     except Exception:
-        process.terminate()
+        terminate_dedicated_process(port, profile)
+        if process is not None and hasattr(process, "terminate"):
+            try:
+                process.terminate()
+            except Exception:
+                pass
         raise
     return "started"
 

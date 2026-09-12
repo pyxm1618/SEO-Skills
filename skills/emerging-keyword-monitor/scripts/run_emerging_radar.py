@@ -26,7 +26,13 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from aggregate_signals import aggregate
 from classify_emergence import classify_candidate, load_thresholds
-from radar_discovery import build_anchor_pool, canonical_keyword, default_domain_relation, discover_rising_bfs
+from radar_discovery import (
+    HumanInterventionRequired,
+    build_anchor_pool,
+    canonical_keyword,
+    default_domain_relation,
+    discover_rising_bfs,
+)
 from route_candidates import route_candidate
 from update_emerging_database import carry_forward, load_database, merge_database, write_database
 
@@ -227,6 +233,8 @@ def _timeline_observations(
                             "raw_evidence_ref": evidence_ref,
                         }
                     )
+            except HumanInterventionRequired:
+                raise
             except Exception as exc:
                 blockers.append(
                     {
@@ -300,6 +308,8 @@ def run_pipeline(
                 supplemental_candidates.extend(
                     _supplemental_candidates(domain, anchor, source, payload, relation_gate)
                 )
+            except HumanInterventionRequired:
+                raise
             except Exception as exc:
                 blockers.append(
                     {
@@ -417,8 +427,12 @@ def _slug(value: str) -> str:
     return f"{readable}-{digest}" if readable else f"item-{digest}"
 
 
+
 def _collector_payload(command: list[str], output_path: Path) -> dict[str, Any]:
     process = subprocess.run(command, text=True, capture_output=True)
+    if process.returncode == 3 or "NEEDS_HUMAN" in (process.stderr or ""):
+        detail = (process.stderr or "Google verification required (NEEDS_HUMAN)").strip()
+        raise HumanInterventionRequired(detail)
     if process.returncode != 0:
         detail = (process.stderr or process.stdout or "collector failed").strip()
         raise RuntimeError(detail[-2000:])
@@ -762,6 +776,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         result = _live_runner(args)
+    except HumanInterventionRequired as exc:
+        print(f"\n{'=' * 70}", file=sys.stderr)
+        print(f"NEEDS_HUMAN: Radar paused. Google requires manual verification.\n{exc}", file=sys.stderr)
+        print(f"{'=' * 70}\n", file=sys.stderr)
+        return 3
     except Exception as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2
