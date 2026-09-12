@@ -17,7 +17,6 @@ import json
 import re
 import subprocess
 import sys
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -325,6 +324,11 @@ def _observation_rows(candidate: dict[str, Any], time_window: str, requested_tim
                 "domain_relation_reason": candidate.get("domain_relation_reason"),
                 "root_id": candidate.get("root_id"),
                 "root_relation": candidate.get("root_relation"),
+                "root_candidate_hypothesis": candidate.get("root_candidate_hypothesis"),
+                "variant_subtype": candidate.get("variant_subtype"),
+                "variant_evidence": candidate.get("variant_evidence"),
+                "previous_status": candidate.get("previous_status"),
+                "first_observed_at": candidate.get("first_observed_at"),
                 "observed_at": _point_time(point["time"]),
                 "source": "google_trends",
                 "source_type": "interest_over_time",
