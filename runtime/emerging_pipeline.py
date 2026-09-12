@@ -2,7 +2,7 @@
 """Run, replay, and attest the canonical Emerging Monitor pipeline.
 
 The canonical pipeline owns aggregation, classification, routing, and identity
-reconciliation.  A Radar run may additionally provide a candidate ledger so
+reconciliation. A Radar run may additionally provide a candidate ledger so
 that candidates with no observations remain part of the attested run scope.
 """
 
@@ -30,8 +30,6 @@ SCRIPT_PATHS = {
 THRESHOLDS_PATH = ROOT.parent / "skills" / "emerging-keyword-monitor" / "references" / "thresholds.json"
 PIPELINE_SOURCE_PATH = Path(__file__).resolve()
 
-# Stable candidate-level context that must survive temporal aggregation.  These
-# are analysis/workflow fields, never substitutes for observed time-series data.
 CANDIDATE_CONTEXT_FIELDS = (
     "candidate_id",
     "domain",
@@ -96,7 +94,6 @@ def _is_missing(value: Any) -> bool:
 
 
 def _candidate_context(raw_rows: list[dict[str, Any]], aggregate: Any) -> dict[str, dict[str, Any]]:
-    """Collect stable non-temporal context by keyword without guessing conflicts."""
     contexts: dict[str, dict[str, Any]] = {}
     for row in raw_rows:
         if not isinstance(row, dict):
@@ -127,12 +124,7 @@ def _merge_candidate_context(aggregated: dict[str, Any], raw_rows: list[dict[str
 
 
 def classify_and_route_rows(raw_rows: list[dict[str, Any]], as_of: str | datetime) -> dict[str, Any]:
-    """Canonical aggregation -> classification -> routing for already-validated rows.
-
-    Radar uses this entry point after evidence acquisition.  Candidates without
-    observations do not enter classification; they are reconciled separately by
-    ``reconcile_identity_sets`` using the candidate ledger.
-    """
+    """Canonical aggregation -> classification -> routing for acquired rows."""
     modules = _modules()
     as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
     aggregated = modules["aggregate"].aggregate(raw_rows, as_of_datetime) if raw_rows else {"candidates": []}
@@ -142,7 +134,13 @@ def classify_and_route_rows(raw_rows: list[dict[str, Any]], as_of: str | datetim
         modules["classify"].classify_candidate(candidate, thresholds)
         for candidate in aggregated.get("candidates", [])
     ]
-    routed_rows = [modules["route"].route_candidate(candidate) for candidate in classified_rows]
+    routed_rows: list[dict[str, Any]] = []
+    for candidate in classified_rows:
+        routed = modules["route"].route_candidate(candidate)
+        for field in ("candidate_id", "domain"):
+            if not _is_missing(candidate.get(field)) and _is_missing(routed.get(field)):
+                routed[field] = candidate[field]
+        routed_rows.append(routed)
     return {"aggregated": aggregated, "classified": classified_rows, "routed": routed_rows}
 
 
@@ -163,7 +161,10 @@ def replay_pipeline(input_path: Path, as_of: str | datetime) -> dict[str, dict[s
 
 def _candidate_id(row: dict[str, Any]) -> str | None:
     value = str(row.get("candidate_id") or "").strip()
-    return value or None
+    if value:
+        return value
+    keyword = " ".join(str(row.get("keyword") or "").casefold().split())
+    return f"keyword:{keyword}" if keyword else None
 
 
 def _load_candidate_ledger(path: Path) -> list[dict[str, Any]]:
@@ -181,19 +182,18 @@ def reconcile_identity_sets(
     routed_rows: list[dict[str, Any]],
     delivery_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Attest the exact candidate/classification/route/delivery identity sets."""
     candidate_ids = [_candidate_id(row) for row in candidate_ledger]
     if any(value is None for value in candidate_ids):
-        raise ValueError("every candidate ledger row must have candidate_id")
+        raise ValueError("every candidate ledger row must have candidate_id or keyword")
     candidate_ids = [str(value) for value in candidate_ids]
     classified_ids = [value for row in classified_rows if (value := _candidate_id(row))]
     route_ids = [value for row in routed_rows if (value := _candidate_id(row))]
     if len(candidate_ids) != len(set(candidate_ids)):
-        raise ValueError("candidate ledger contains duplicate candidate_id values")
+        raise ValueError("candidate ledger contains duplicate identities")
     if len(classified_ids) != len(set(classified_ids)):
-        raise ValueError("classified output contains duplicate candidate_id values")
+        raise ValueError("classified output contains duplicate identities")
     if len(route_ids) != len(set(route_ids)):
-        raise ValueError("routed output contains duplicate candidate_id values")
+        raise ValueError("routed output contains duplicate identities")
     candidate_set = set(candidate_ids)
     classified_set = set(classified_ids)
     route_set = set(route_ids)
@@ -259,7 +259,6 @@ def run_pipeline(
 
     classified_rows = outputs["classified"]["candidates"]
     routed_rows = outputs["routed"]["routes"]
-    candidate_ledger = None
     ledger_ref = None
     if candidate_ledger_path is not None:
         ledger_path = Path(candidate_ledger_path).expanduser().resolve()
@@ -268,14 +267,10 @@ def run_pipeline(
         candidate_ledger = _load_candidate_ledger(ledger_path)
         ledger_ref = {"path": str(ledger_path), "sha256": _sha256(ledger_path)}
     else:
-        inferred = []
-        seen: set[str] = set()
-        for row in classified_rows:
-            candidate_id = _candidate_id(row)
-            if candidate_id and candidate_id not in seen:
-                inferred.append({"candidate_id": candidate_id, "final_disposition": "classified"})
-                seen.add(candidate_id)
-        candidate_ledger = inferred
+        candidate_ledger = [
+            {"candidate_id": _candidate_id(row), "keyword": row.get("keyword"), "final_disposition": "classified"}
+            for row in classified_rows
+        ]
     reconciliation = reconcile_identity_sets(candidate_ledger, classified_rows, routed_rows)
 
     receipt = {
