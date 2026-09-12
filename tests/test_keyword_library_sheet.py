@@ -223,12 +223,20 @@ def test_emerging_trend_type_uses_only_canonical_temporal_evidence():
     sheet = FakeWorksheet()
     context = {"market": "US", "language": "en"}
     writer.upsert_records(sheet, "emerging", [{"keyword": "new", "signal_type": "net_new"}], run_context=context)
-    writer.upsert_records(sheet, "emerging", [{"keyword": "up", "growth_rate": 1.2}], run_context=context)
-    writer.upsert_records(sheet, "emerging", [{"keyword": "flat", "growth_rate": 0}], run_context=context)
-    writer.upsert_records(sheet, "emerging", [{"keyword": "down", "growth_rate": -0.4}], run_context=context)
+    writer.upsert_records(sheet, "emerging", [{"keyword": "breakout", "signal_type": "breakout", "status": "breakout"}], run_context=context)
+    writer.upsert_records(sheet, "emerging", [{"keyword": "up raw", "growth_rate": 1.2}], run_context=context)
+    writer.upsert_records(sheet, "emerging", [{"keyword": "flat raw", "growth_rate": 0}], run_context=context)
+    writer.upsert_records(sheet, "emerging", [{"keyword": "down raw", "growth_rate": -0.4}], run_context=context)
     writer.upsert_records(sheet, "emerging", [{"keyword": "unknown trend", "status": "watch"}], run_context=context)
-    got = {row_dict(writer, sheet, row_no)["关键词"]: row_dict(writer, sheet, row_no)["趋势类型"] for row_no in range(2, 7)}
-    assert got == {"new": "新词", "up": "上升", "flat": "平稳", "down": "下降", "unknown trend": "unknown"}
+    got = {row_dict(writer, sheet, row_no)["关键词"]: row_dict(writer, sheet, row_no)["趋势类型"] for row_no in range(2, 8)}
+    assert got == {
+        "new": "新词",
+        "breakout": "上升",
+        "up raw": "unknown",
+        "flat raw": "unknown",
+        "down raw": "unknown",
+        "unknown trend": "unknown",
+    }
 
 
 def test_nonempty_incompatible_sheet_is_not_rewritten():
