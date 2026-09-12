@@ -1,18 +1,20 @@
 # Discovery Source Acquisition
 
+All live Google browser execution in this document is subject to the shared `runtime/BROWSER_RUNTIME_CONTRACT.md`. Discovery source requirements stay defined here; browser focus behavior, persistent worker-page reuse, `NEEDS_HUMAN`, blocker preservation, listener cleanup, page-leak protection, and fail-closed browser inspection are defined once in that shared runtime contract.
+
 ## Google Autocomplete
 
-Formal Google Autocomplete evidence must come from `runtime/collectors/google_live_collector.py autocomplete` running against a real browser session. Hosted WebSearch may support ordinary research but cannot satisfy this contract.
+Formal Google Autocomplete evidence must come from `runtime/collectors/google_live_collector.py autocomplete` running against the dedicated real Google browser session. Hosted WebSearch may support ordinary research but cannot satisfy this contract.
 
 Example live command:
 
 ```bash
-SEO_BROWSER_CDP_URL="$CDP_URL" python3 runtime/collectors/google_live_collector.py autocomplete \
+SEO_GOOGLE_CDP_URL="$CDP_URL" python3 runtime/collectors/google_live_collector.py autocomplete \
   --seed "wedding calculator" --country US --language en \
   --output .seo-run/evidence/autocomplete-wedding-calculator.json
 ```
 
-If the collector returns `BLOCKED`, do not invent suggestions or replace the source.
+If the collector returns `BLOCKED`, do not invent suggestions or replace the source. If it returns `NEEDS_HUMAN`, stop the affected production flow and follow the shared browser runtime contract; do not skip to the next Seed or open a fresh page around an unresolved blocker.
 
 ## Google People Also Ask and Related Searches
 
@@ -33,7 +35,7 @@ The acquisition is mandatory to **attempt**, but Google is not required to retur
 - one or both blocks observed: `result_status=observed`, `expansion_count>0`, PASS when evidence validates;
 - real page checked successfully but neither block present: `result_status=not_present`, `expansion_count=0`, PASS;
 - acquisition never run: `NOT_RUN`, which blocks Full Discovery;
-- CAPTCHA, network failure, unavailable/unconfirmed DOM, or missing evidence: `BLOCKED`, which blocks Full Discovery.
+- CAPTCHA, network failure, unavailable/unconfirmed DOM, or missing evidence: `BLOCKED`/`NEEDS_HUMAN` as appropriate, which blocks Full Discovery until the browser condition is resolved and the acquisition is rerun.
 
 Observed PAA/Related rows are normal Discovery source rows. First-round rows must be frozen in `source_receipts` and reconciled through `candidate_inventory.row_ledger`; Branch rows are reconciled through `branch_row_ledger`. They may become Candidates, explicit duplicates, or supported low-risk exclusions. A valid zero-result acquisition contributes no rows but still proves the mandatory check was performed.
 
