@@ -26,9 +26,9 @@ A verified root relationship is inherited through recursive Google Trends Rising
 
 Only confirmed `status in {emerging, breakout}` may produce `selection_handoff`.
 
-That handoff enters `seo-keyword-selection` directly. It must not restart keyword discovery for the same confirmed candidate.
+That handoff enters `seo-keyword-selection` **directly**. It must not restart keyword discovery for the same confirmed candidate.
 
-The handoff preserves temporal evidence/provenance and may also carry already-existing compatible commercial metrics. Emerging does not create missing Volume/KD/CPC/KDRoi/KGR/ SERP metrics; Selection owns those acquisitions and decisions.
+The handoff preserves temporal evidence/provenance and may also carry already-existing compatible commercial metrics. Emerging does not create missing Volume/KD/CPC/KDRoi/KGR/SERP metrics; Selection owns those acquisitions and decisions.
 
 Google's source-side `Breakout` label and demand-history context such as `preexisting`/`resurgent` remain evidence/context only. They do not create the downstream decision by themselves.
 
