@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Mirror Emerging Keyword Radar records into the unified keyword library.
+"""Mirror delivery-eligible Emerging records into the unified keyword library.
 
-The authoritative Emerging outputs remain the local JSON/CSV database. This is
-an optional human-facing output layer: a Sheet failure never changes whether a
-Radar run is valid and never rewrites the local database.
+The local Radar database is a monitoring database, not a delivery list.  This
+module enforces run state and per-record delivery eligibility before any Sheet
+client is touched.  A BLOCKED run may still be inspected with ``--dry-run`` but
+can never perform a production Sheet mutation.
 """
 
 from __future__ import annotations
@@ -63,11 +64,79 @@ def _records(database: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _run_status(database: dict[str, Any], run_context: dict[str, Any] | None) -> str:
+    context = run_context or {}
+    return str(context.get("status") or database.get("run_status") or "PASS").strip().upper()
+
+
+def _candidate_id(record: dict[str, Any]) -> str | None:
+    value = str(record.get("candidate_id") or "").strip()
+    return value or None
+
+
+def select_delivery_records(
+    database: dict[str, Any],
+    run_context: dict[str, Any] | None = None,
+    *,
+    allow_blocked_dry_run: bool = False,
+) -> dict[str, Any]:
+    """Resolve the Sheet delivery set and review set without touching a client.
+
+    New Radar databases explicitly carry ``delivery_eligible`` on every record.
+    For backward-compatible historical files that predate the field, all records
+    retain the previous mirror behavior; new production runs must not rely on
+    this legacy fallback.
+    """
+    records = _records(database)
+    status = _run_status(database, run_context)
+    if status == "BLOCKED" and not allow_blocked_dry_run:
+        raise RuntimeError("BLOCKED run is not eligible for production Sheet mutation")
+
+    has_explicit_eligibility = any("delivery_eligible" in record for record in records)
+    if has_explicit_eligibility:
+        delivery_records = [record for record in records if record.get("delivery_eligible") is True]
+        review_records = [record for record in records if record.get("delivery_eligible") is not True]
+    else:
+        delivery_records = list(records)
+        review_records = []
+
+    manifest = database.get("delivery_manifest")
+    if isinstance(manifest, dict) and "delivery_ids" in manifest:
+        expected = {str(value) for value in manifest.get("delivery_ids") or []}
+        actual_ids = [_candidate_id(record) for record in delivery_records]
+        if any(value is None for value in actual_ids):
+            raise ValueError("delivery manifest requires candidate_id on every delivery record")
+        actual = {str(value) for value in actual_ids if value is not None}
+        if actual != expected:
+            raise ValueError(
+                "delivery manifest identity mismatch: "
+                f"expected={sorted(expected)} actual={sorted(actual)}"
+            )
+        if len(actual_ids) != len(actual):
+            raise ValueError("delivery manifest contains duplicate candidate identities")
+
+    return {
+        "run_status": status,
+        "blocked": status == "BLOCKED",
+        "delivery_records": delivery_records,
+        "review_records": review_records,
+        "delivery_count": len(delivery_records),
+        "review_count": len(review_records),
+        "legacy_delivery_fallback": not has_explicit_eligibility,
+    }
+
+
 def build_identity_summary(
     database: dict[str, Any],
     delivery_context: dict[str, Any] | None = None,
+    run_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    records = _records(database)
+    selection = select_delivery_records(
+        database,
+        run_context=run_context,
+        allow_blocked_dry_run=True,
+    )
+    records = selection["delivery_records"]
     identities = [
         library.resolve_identity(
             record,
@@ -77,9 +146,15 @@ def build_identity_summary(
         for record in records
     ]
     return {
+        "run_status": selection["run_status"],
+        "blocked": selection["blocked"],
         "record_count": len(records),
+        "review_count": selection["review_count"],
         "stable_row_count": len({identity.stable_key for identity in identities}),
         "stable_keys": [identity.stable_key for identity in identities],
+        "delivery_candidate_ids": [
+            record.get("candidate_id") for record in records if record.get("candidate_id")
+        ],
     }
 
 
@@ -87,16 +162,23 @@ def export(
     client: SheetClient,
     database: dict[str, Any],
     delivery_context: dict[str, Any] | None = None,
+    *,
+    run_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Patch Emerging-owned fields in stable keyword rows only."""
-    records = _records(database)
-    return library.upsert_records(
+    """Patch Emerging-owned fields for delivery-eligible stable rows only."""
+    # This gate is intentionally before *any* Sheet read/write.  Do not move it
+    # into ``keyword_library_sheet`` where a client may already have been read.
+    selection = select_delivery_records(database, run_context=run_context)
+    result = library.upsert_records(
         client,
         "emerging",
-        records,
+        selection["delivery_records"],
         run_context=database,
         delivery_context=delivery_context,
     )
+    result["delivery_count"] = selection["delivery_count"]
+    result["review_count"] = selection["review_count"]
+    return result
 
 
 def open_worksheet(sheet_id: str, worksheet: str, credentials: str) -> SheetClient:
@@ -117,7 +199,7 @@ def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="resolve stable identities without contacting Google",
+        help="resolve the eligible delivery set and stable identities without contacting Google",
     )
     args = parser.parse_args()
 
@@ -139,6 +221,12 @@ def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
         )
         return 0
 
+    # Re-check before credentials/client creation.  This guarantees a BLOCKED
+    # run produces zero Sheet reads and zero Sheet writes.
+    if summary["blocked"]:
+        print("BLOCKED: BLOCKED run is not eligible for production Sheet mutation", file=sys.stderr)
+        return 2
+
     sheet_id = args.sheet_id or os.environ.get("SEO_KEYWORD_SHEET_ID")
     credentials = args.credentials or os.environ.get("SEO_SHEETS_CREDENTIALS")
     missing = [
@@ -158,8 +246,6 @@ def main(worksheet_factory: Callable[..., SheetClient] = open_worksheet) -> int:
         result = export(worksheet, database, delivery_context=context)
         result["worksheet"] = args.worksheet
     except Exception as exc:
-        # Mirror failure remains output-only. Local JSON/CSV is authoritative
-        # and is deliberately never mutated here.
         print(f"BLOCKED: sheet export failed: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False))
