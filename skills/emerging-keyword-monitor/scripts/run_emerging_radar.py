@@ -200,7 +200,6 @@ def _merge_candidate_pool(
             current = pooled[by_keyword[identity]]
             sources = list(dict.fromkeys(_candidate_sources(current) + _candidate_sources(candidate)))
             current["discovery_sources"] = sources
-            # Current discovery is authoritative; fill only absent values.
             for field, value in candidate.items():
                 if current.get(field) is None:
                     current[field] = value
@@ -453,8 +452,6 @@ def _collect_timelines(
             row["acquisition_reason"] = "collection_circuit_open"
             row["verification_status"] = "not_run"
         elif row["failed_windows"]:
-            # A candidate with any required failed window is not currently
-            # classifiable/deliverable, even if other windows returned data.
             not_attempted = all(item.get("status") == "not_attempted" for item in row["window_attempts"])
             row["acquisition_status"] = "not_attempted" if not_attempted else "failed"
             row["acquisition_reason"] = "collection_circuit_open" if not_attempted else "required_window_failed"
@@ -473,7 +470,6 @@ def _collect_timelines(
             row["acquisition_reason"] = "incomplete_required_windows"
             row["verification_status"] = "pending_evidence"
 
-    # Once the circuit opens, later candidates never enter the fetcher at all.
     if circuit_open:
         for row in ledger:
             if row.get("domain_relation") != "in_scope" or row.get("acquisition_status") != "not_started":
@@ -556,8 +552,6 @@ def _finalize_ledger(ledger: list[dict[str, Any]], classified: list[dict[str, An
                 row["final_disposition"] = "pending_domain_review"
             elif row.get("acquisition_status") == "valid_no_data":
                 row["final_disposition"] = "valid_no_data"
-            elif row.get("acquisition_status") == "not_attempted":
-                row["final_disposition"] = "pending_evidence"
             else:
                 row["final_disposition"] = "pending_evidence"
             row["delivery_eligible"] = False
@@ -947,17 +941,24 @@ def _validated_collector_fetcher(*, collector: Path, validator: Path, stage: str
                 command.extend(["--timeframe", timeframe])
         command.extend(["--evidence-dir", str(evidence_dir), "--output", str(output)])
         payload = _collector_payload(command, output)
-        if payload.get("verification_status") not in (None, "verified") or payload.get("delivery_eligible") is False:
+        verification_status = payload.get("verification_status")
+        delivery_eligible = payload.get("delivery_eligible")
+        if verification_status not in (None, "verified") or delivery_eligible is False:
             stage_results.append(
                 {
                     "stage": stage,
-                    "status": "BLOCKED" if payload.get("verification_status") == "pending_evidence" else "OBSERVED_NO_DATA",
+                    "status": "BLOCKED" if verification_status == "pending_evidence" else "OBSERVED_NO_DATA",
                     "keyword": identity,
                     "acquisition_status": payload.get("acquisition_status"),
                     "failure_type": payload.get("failure_type"),
                 }
             )
-            return payload
+            if stage == "trends_timeline":
+                return payload
+            if payload.get("acquisition_status") == "valid_no_data" and verification_status == "verified":
+                return payload
+            reason = payload.get("failure_type") or payload.get("failure_reason") or "evidence_incomplete"
+            raise RuntimeError(f"stage {stage} evidence incomplete: {reason}")
         validation = subprocess.run(
             [sys.executable, str(validator), "--stage", stage, "--input", str(output), "--report", str(report), "--production"],
             text=True,
@@ -989,18 +990,19 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
     evidence_dir.mkdir(parents=True, exist_ok=True)
     stage_results: list[dict[str, Any]] = []
     counter = [0]
-    collector = REPO_ROOT / "runtime" / "collectors" / "google_live_collector.py"
+    google_collector = REPO_ROOT / "runtime" / "collectors" / "google_live_collector.py"
+    trends_collector = REPO_ROOT / "runtime" / "collectors" / "google_trends_collector.py"
     validator = REPO_ROOT / "runtime" / "stage_validator.py"
 
     related_fetcher = _validated_collector_fetcher(
-        collector=collector, validator=validator, stage="trends_related", mode="trends_related",
+        collector=trends_collector, validator=validator, stage="trends_related", mode="trends_related",
         run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
         timeframe=args.related_timeframe, stage_results=stage_results, counter=counter,
     )
     autocomplete_fetcher = None
     if args.with_autocomplete:
         autocomplete_fetcher = _validated_collector_fetcher(
-            collector=collector, validator=validator, stage="discovery_autocomplete", mode="autocomplete",
+            collector=google_collector, validator=validator, stage="discovery_autocomplete", mode="autocomplete",
             run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
             timeframe=None, stage_results=stage_results, counter=counter,
         )
@@ -1014,7 +1016,7 @@ def _live_runner(args: argparse.Namespace) -> dict[str, Any]:
 
     def timeline_fetcher(keyword: str, requested_timeframe: str) -> dict[str, Any]:
         return _validated_collector_fetcher(
-            collector=collector, validator=validator, stage="trends_timeline", mode="trends_timeline",
+            collector=trends_collector, validator=validator, stage="trends_timeline", mode="trends_timeline",
             run_dir=run_dir, evidence_dir=evidence_dir, country=args.country, language=args.language,
             timeframe=requested_timeframe, stage_results=stage_results, counter=counter,
         )(keyword)
