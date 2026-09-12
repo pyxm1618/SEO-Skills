@@ -25,7 +25,9 @@ jobs:
       - name: Install test dependency
         run: python -m pip install --upgrade pip pytest
       - name: Apply audited source transforms
-        run: python3 .github/pr39_apply_fixes.py
+        run: |
+          sed -i 's/"def _sheet_rows("/"def build_identity_summary("/' .github/pr39_apply_fixes.py
+          python3 .github/pr39_apply_fixes.py
       - name: Run audit regressions
         run: python3 -m pytest tests/test_pr39_audit_regressions.py -q
       - name: Run full suite
