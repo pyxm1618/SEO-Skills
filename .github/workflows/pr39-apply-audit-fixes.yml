@@ -1,0 +1,46 @@
+name: PR39 apply audit fixes
+
+on:
+  push:
+    branches:
+      - codex/emerging-radar-fix-20260912
+    paths:
+      - .github/pr39-audit-fixes.patch
+      - .github/workflows/pr39-apply-audit-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/emerging-radar-fix-20260912
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependency
+        run: python -m pip install --upgrade pip pytest
+      - name: Apply audit patch
+        run: |
+          git apply --check .github/pr39-audit-fixes.patch
+          git apply .github/pr39-audit-fixes.patch
+      - name: Run audit regressions
+        run: python3 -m pytest tests/test_pr39_audit_regressions.py -q
+      - name: Run full suite
+        run: python3 -m pytest -q
+      - name: Compile sources
+        run: python3 -m compileall -q skills runtime
+      - name: Check diff
+        run: git diff --check 645539a4c91aef66a5a715c54e12207f667f6c45...HEAD && git diff --check
+      - name: Commit verified fix
+        run: |
+          git rm .github/pr39-audit-fixes.patch .github/workflows/pr39-apply-audit-fixes.yml
+          git add runtime skills tests
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(emerging): close PR39 audit findings'
+          git push origin HEAD:codex/emerging-radar-fix-20260912
