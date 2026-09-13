@@ -362,8 +362,8 @@ def test_self_consistent_google_trends_receipt_passes_structural_scope(tmp_path)
     norm_path.write_text(json.dumps(norm_data), encoding="utf-8")
     receipt_data = {
         "schema": "seo-observed-evidence/v2",
-        "collector": "google_live_collector",
-        "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_live_collector.py").read_bytes()).hexdigest(),
+        "collector": "google_trends_collector",
+        "collector_source_sha256": hashlib.sha256((ROOT / "runtime" / "collectors" / "google_trends_collector.py").read_bytes()).hexdigest(),
         "evidence_type": "google_trends",
         "normalized_ref": str(norm_path),
         "normalized_sha256": hashlib.sha256(norm_path.read_bytes()).hexdigest(),

@@ -84,7 +84,7 @@ def test_r2_canonical_pipeline_preserves_business_context_through_aggregation(tm
     assert candidate["previous_status"] == "watch"
 
 
-def test_r3_radar_carries_watching_database_records_into_next_timeline_run():
+def test_r3_radar_carry_forward_without_domain_evidence_stays_pending_review():
     radar = load_module("review_r3_radar", RADAR)
     calls = []
 
@@ -131,9 +131,12 @@ def test_r3_radar_carries_watching_database_records_into_next_timeline_run():
         existing_database=existing_database,
     )
 
-    assert calls == [("legacy topic", "today 3-m")]
-    assert result["candidate_counts"]["classified"] == 1
-    assert result["candidates"][0]["previous_status"] == "watch"
+    assert calls == []
+    row = next(item for item in result["candidate_ledger"] if item["keyword"] == "legacy topic")
+    assert row["domain_relation"] == "unknown"
+    assert row["acquisition_status"] == "not_applicable"
+    assert row["final_disposition"] == "pending_domain_review"
+    assert row["previous_status"] == "watch"
 
 
 def test_r4_recursive_rising_candidates_keep_verified_existing_root_relation():

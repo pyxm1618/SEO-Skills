@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Run and attest the canonical four-step Emerging Monitor pipeline."""
+"""Run, replay, and attest the canonical Emerging Monitor pipeline.
+
+The canonical pipeline owns aggregation, classification, routing, and identity
+reconciliation. A Radar run may additionally provide a candidate ledger so
+that candidates with no observations remain part of the attested run scope.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,7 @@ import importlib.util
 import json
 import os
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,16 +30,19 @@ SCRIPT_PATHS = {
 THRESHOLDS_PATH = ROOT.parent / "skills" / "emerging-keyword-monitor" / "references" / "thresholds.json"
 PIPELINE_SOURCE_PATH = Path(__file__).resolve()
 
-# These are candidate-level analysis/lifecycle fields, not temporal metrics. The
-# aggregator deliberately rebuilds temporal candidates, so the canonical runner
-# must re-attach this context before classification/routing.
 CANDIDATE_CONTEXT_FIELDS = (
+    "candidate_id",
     "domain",
+    "domain_relation",
+    "domain_relation_reason",
     "variant_subtype",
     "variant_evidence",
+    "root_id",
     "root_relation",
     "root_candidate_hypothesis",
     "previous_status",
+    "acquisition_status",
+    "verification_status",
 )
 
 
@@ -62,6 +71,11 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _json_sha256(payload: Any) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _as_of_datetime(value: str | datetime, aggregate: Any) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -80,7 +94,6 @@ def _is_missing(value: Any) -> bool:
 
 
 def _candidate_context(raw_rows: list[dict[str, Any]], aggregate: Any) -> dict[str, dict[str, Any]]:
-    """Collect stable non-temporal context by keyword without guessing conflicts."""
     contexts: dict[str, dict[str, Any]] = {}
     for row in raw_rows:
         if not isinstance(row, dict):
@@ -110,25 +123,123 @@ def _merge_candidate_context(aggregated: dict[str, Any], raw_rows: list[dict[str
                 candidate[field] = value
 
 
-def replay_pipeline(input_path: Path, as_of: str | datetime) -> dict[str, dict[str, Any]]:
+def classify_and_route_rows(raw_rows: list[dict[str, Any]], as_of: str | datetime) -> dict[str, Any]:
+    """Canonical aggregation -> classification -> routing for acquired rows."""
     modules = _modules()
-    input_path = Path(input_path)
     as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
-    raw_rows = modules["validate"].load_rows(input_path)
-    validated_rows = modules["validate"].validate_rows(raw_rows, as_of_datetime)
-    aggregated = modules["aggregate"].aggregate(raw_rows, as_of_datetime)
+    aggregated = modules["aggregate"].aggregate(raw_rows, as_of_datetime) if raw_rows else {"candidates": []}
     _merge_candidate_context(aggregated, raw_rows, modules["aggregate"])
     thresholds = modules["classify"].load_thresholds()
     classified_rows = [
         modules["classify"].classify_candidate(candidate, thresholds)
-        for candidate in aggregated["candidates"]
+        for candidate in aggregated.get("candidates", [])
     ]
-    routed_rows = [modules["route"].route_candidate(candidate) for candidate in classified_rows]
+    routed_rows: list[dict[str, Any]] = []
+    for candidate in classified_rows:
+        routed = modules["route"].route_candidate(candidate)
+        for field in ("candidate_id", "domain"):
+            if not _is_missing(candidate.get(field)) and _is_missing(routed.get(field)):
+                routed[field] = candidate[field]
+        routed_rows.append(routed)
+    return {"aggregated": aggregated, "classified": classified_rows, "routed": routed_rows}
+
+
+def _classification_eligible_ids(candidate_ledger: list[dict[str, Any]]) -> set[str]:
+    return {
+        candidate_id
+        for row in candidate_ledger
+        if row.get("domain_relation") == "in_scope"
+        and row.get("acquisition_status") == "data_acquired"
+        and row.get("verification_status") == "verified"
+        and (candidate_id := _candidate_id(row)) is not None
+    }
+
+
+def replay_pipeline(
+    input_path: Path,
+    as_of: str | datetime,
+    candidate_ledger: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    modules = _modules()
+    input_path = Path(input_path)
+    as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
+    raw_rows = modules["validate"].load_rows(input_path)
+    if candidate_ledger is not None:
+        eligible_ids = _classification_eligible_ids(candidate_ledger)
+        raw_rows = [row for row in raw_rows if _candidate_id(row) in eligible_ids]
+    validated_rows = modules["validate"].validate_rows(raw_rows, as_of_datetime)
+    canonical = classify_and_route_rows(raw_rows, as_of_datetime)
     return {
         "validated": {"rows": validated_rows},
-        "aggregated": aggregated,
-        "classified": {"candidates": classified_rows},
-        "routed": {"routes": routed_rows},
+        "aggregated": canonical["aggregated"],
+        "classified": {"candidates": canonical["classified"]},
+        "routed": {"routes": canonical["routed"]},
+    }
+
+
+def _candidate_id(row: dict[str, Any]) -> str | None:
+    value = str(row.get("candidate_id") or "").strip()
+    if value:
+        return value
+    keyword = " ".join(str(row.get("keyword") or "").casefold().split())
+    return f"keyword:{keyword}" if keyword else None
+
+
+def _load_candidate_ledger(path: Path) -> list[dict[str, Any]]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        payload = payload.get("candidate_ledger")
+    if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
+        raise ValueError("candidate ledger must be a JSON list or object containing candidate_ledger")
+    return payload
+
+
+def reconcile_identity_sets(
+    candidate_ledger: list[dict[str, Any]],
+    classified_rows: list[dict[str, Any]],
+    routed_rows: list[dict[str, Any]],
+    delivery_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    candidate_ids = [_candidate_id(row) for row in candidate_ledger]
+    if any(value is None for value in candidate_ids):
+        raise ValueError("every candidate ledger row must have candidate_id or keyword")
+    candidate_ids = [str(value) for value in candidate_ids]
+    classified_ids = [value for row in classified_rows if (value := _candidate_id(row))]
+    route_ids = [value for row in routed_rows if (value := _candidate_id(row))]
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise ValueError("candidate ledger contains duplicate identities")
+    if len(classified_ids) != len(set(classified_ids)):
+        raise ValueError("classified output contains duplicate identities")
+    if len(route_ids) != len(set(route_ids)):
+        raise ValueError("routed output contains duplicate identities")
+    candidate_set = set(candidate_ids)
+    classified_set = set(classified_ids)
+    route_set = set(route_ids)
+    delivery_source = classified_ids if delivery_ids is None else delivery_ids
+    delivery_set = set(str(value) for value in delivery_source)
+    if not classified_set <= candidate_set:
+        raise ValueError("classified identity exists outside candidate ledger")
+    if route_set != classified_set:
+        raise ValueError("route identity set must exactly equal classified identity set")
+    if not delivery_set <= route_set:
+        raise ValueError("delivery identity set must be a subset of routed identities")
+
+    dispositions = Counter(str(row.get("final_disposition") or "unknown") for row in candidate_ledger)
+    identity_payload = {
+        "candidate_ids": candidate_ids,
+        "classified_ids": classified_ids,
+        "route_ids": route_ids,
+        "delivery_ids": sorted(delivery_set),
+    }
+    return {
+        **identity_payload,
+        "candidate_count": len(candidate_ids),
+        "classified_count": len(classified_ids),
+        "route_count": len(route_ids),
+        "delivery_count": len(delivery_set),
+        "terminal_state_counts": dict(sorted(dispositions.items())),
+        "terminal_state_count": sum(dispositions.values()),
+        "identity_sha256": _json_sha256(identity_payload),
     }
 
 
@@ -145,6 +256,7 @@ def run_pipeline(
     output_dir: Path,
     as_of: str,
     receipt_path: Path | None = None,
+    candidate_ledger_path: Path | None = None,
 ) -> dict[str, Any]:
     input_path = Path(input_path).expanduser().resolve()
     if not input_path.is_file():
@@ -160,14 +272,57 @@ def run_pipeline(
 
     modules = _modules()
     as_of_datetime = _as_of_datetime(as_of, modules["aggregate"])
-    outputs = replay_pipeline(input_path, as_of_datetime)
+    ledger_ref = None
+    candidate_ledger = None
+    if candidate_ledger_path is not None:
+        ledger_path = Path(candidate_ledger_path).expanduser().resolve()
+        if not ledger_path.is_file():
+            raise FileNotFoundError(f"Emerging candidate ledger is missing: {ledger_path}")
+        candidate_ledger = _load_candidate_ledger(ledger_path)
+        ledger_ref = {"path": str(ledger_path), "sha256": _sha256(ledger_path)}
+
+    outputs = replay_pipeline(input_path, as_of_datetime, candidate_ledger)
     for name, payload in outputs.items():
         _write_json(output_paths[name], payload)
+
+    classified_rows = outputs["classified"]["candidates"]
+    routed_rows = outputs["routed"]["routes"]
+    if candidate_ledger is None:
+        candidate_ledger = [
+            {
+                "candidate_id": _candidate_id(row),
+                "keyword": row.get("keyword"),
+                "domain_relation": "in_scope",
+                "acquisition_status": "data_acquired",
+                "verification_status": "verified",
+                "delivery_eligible": True,
+                "final_disposition": "classified",
+            }
+            for row in classified_rows
+        ]
+        internal_ledger_path = output_dir / "candidate-ledger.json"
+        if internal_ledger_path.exists():
+            raise FileExistsError(f"Emerging pipeline output already exists: {internal_ledger_path}")
+        internal_ledger_path.write_text(
+            json.dumps(candidate_ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        ledger_ref = {"path": str(internal_ledger_path.resolve()), "sha256": _sha256(internal_ledger_path)}
+        delivery_ids = [_candidate_id(row) for row in candidate_ledger]
+        delivery_ids = [value for value in delivery_ids if value is not None]
+    else:
+        delivery_ids = [
+            candidate_id
+            for row in candidate_ledger
+            if row.get("delivery_eligible") is True and (candidate_id := _candidate_id(row)) is not None
+        ]
+    reconciliation = reconcile_identity_sets(candidate_ledger, classified_rows, routed_rows, delivery_ids)
 
     receipt = {
         "schema": "seo-emerging-pipeline/v1",
         "as_of": as_of_datetime.isoformat(),
         "observation_input": {"path": str(input_path), "sha256": _sha256(input_path)},
+        "candidate_ledger": ledger_ref,
+        "reconciliation": reconciliation,
         "pipeline": {"path": str(PIPELINE_SOURCE_PATH), "sha256": _sha256(PIPELINE_SOURCE_PATH)},
         "scripts": {
             name: {"path": str(path.resolve()), "sha256": _sha256(path)}
@@ -190,9 +345,16 @@ def main() -> int:
     parser.add_argument("--as-of", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--receipt")
+    parser.add_argument("--candidate-ledger", help="optional JSON ledger used to attest zero-observation candidates")
     args = parser.parse_args()
     try:
-        receipt = run_pipeline(Path(args.input), Path(args.output_dir), args.as_of, Path(args.receipt) if args.receipt else None)
+        receipt = run_pipeline(
+            Path(args.input),
+            Path(args.output_dir),
+            args.as_of,
+            Path(args.receipt) if args.receipt else None,
+            Path(args.candidate_ledger) if args.candidate_ledger else None,
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"BLOCKED: {exc}", file=os.sys.stderr)
         return 2

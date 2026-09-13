@@ -66,7 +66,7 @@ class FakeWorksheet:
 
 
 def database(records, **meta):
-    payload = {"schema_version": 1, "records": records}
+    payload = {"schema_version": 1, "run_status": "PASS", "records": records}
     payload.update(meta)
     return payload
 
@@ -78,6 +78,7 @@ def record(**overrides):
         "discovery_source": "google_trends_rising",
         "status": "emerging",
         "signal_type": "net_new",
+        "delivery_eligible": True,
     }
     base.update(overrides)
     return base
@@ -281,7 +282,7 @@ def test_record_without_keyword_is_rejected():
     with pytest.raises(ValueError):
         exporter.export(
             FakeWorksheet(),
-            database([{"domain": "wedding", "keyword": "  "}], market="US", language="en"),
+            database([{"domain": "wedding", "keyword": "  ", "delivery_eligible": True}], market="US", language="en"),
         )
 
 

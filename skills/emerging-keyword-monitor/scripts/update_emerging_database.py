@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,21 +50,17 @@ def _record_key(record: dict[str, Any]) -> tuple[str, str]:
     return canonical_keyword(record.get("domain")), canonical_keyword(record.get("keyword"))
 
 
-# Where each classifier status leaves a record for the next radar run. Statuses
-# that are still forming stay under observation; confirmed ones graduate once
-# they have been handed downstream; settled ones retire but keep their record,
-# so a decayed spike is not re-adopted as a fresh signal on a later batch.
 WATCHING_STATUSES = frozenset({"new_signal", "watch", "insufficient_evidence"})
 GRADUATING_STATUSES = frozenset({"emerging", "breakout"})
 RETIRING_STATUSES = frozenset({"noise", "mature"})
+CONFIRMED_CLASSIFIER_STATUSES = WATCHING_STATUSES | GRADUATING_STATUSES | RETIRING_STATUSES
+ACQUISITION_FAILURE_STATES = frozenset({"failed", "not_attempted", "pending_evidence"})
+MAX_ACQUISITION_FAILURES = 3
+RETRY_INTERVAL_DAYS = 7
 
 
 def observation_state(status: Any) -> str:
-    """Derive the lifecycle bucket from the classifier status.
-
-    Unknown is not a verdict: a status this module does not recognise leaves the
-    record under observation rather than silently retiring it.
-    """
+    """Derive the lifecycle bucket from the last confirmed classifier status."""
     value = str(status or "").strip()
     if value in GRADUATING_STATUSES:
         return "graduated"
@@ -77,12 +73,7 @@ def observation_state(status: Any) -> str:
 
 def carry_forward(database: dict[str, Any], include_graduated: bool = False,
                   include_retired: bool = False) -> list[dict[str, Any]]:
-    """Records the next run should observe again, with their prior status.
-
-    classify_emergence reads `previous_status` off the row it is handed, so
-    without this the next batch starts from zero and every state transition
-    reads as brand new.
-    """
+    """Records the next run should observe again, with their prior confirmed state."""
     records = database.get("records") if isinstance(database, dict) else []
     out = []
     for record in records if isinstance(records, list) else []:
@@ -98,9 +89,17 @@ def carry_forward(database: dict[str, Any], include_graduated: bool = False,
                 "domain": record.get("domain"),
                 "keyword": record.get("keyword"),
                 "root_id": record.get("root_id"),
-                "previous_status": record.get("status"),
+                "previous_status": record.get("last_confirmed_status") or record.get("status"),
                 "first_observed_at": record.get("first_observed_at"),
                 "observation_count": record.get("observation_count"),
+                "acquisition_failure_count": record.get("acquisition_failure_count", 0),
+                "next_review_at": record.get("next_review_at"),
+                "monitoring_state": record.get("monitoring_state"),
+                "parent_anchor": record.get("parent_anchor"),
+                "domain_relation": record.get("domain_relation"),
+                "domain_relation_reason": record.get("domain_relation_reason"),
+                "root_relation": record.get("root_relation"),
+                "root_candidate_hypothesis": record.get("root_candidate_hypothesis"),
             }
         )
     out.sort(key=lambda row: (canonical_keyword(row["domain"]), canonical_keyword(row["keyword"])))
@@ -133,13 +132,110 @@ def _history_entry(record: dict[str, Any], route: dict[str, Any] | None) -> dict
     return entry
 
 
+def _has_confirmed_classification(candidate: dict[str, Any]) -> bool:
+    current = str(candidate.get("current_classification_status") or "").strip().casefold()
+    if current in {"confirmed", "valid"}:
+        return True
+    if current in {"unknown", "failed", "not_run", "pending"}:
+        return False
+    acquisition = str(candidate.get("acquisition_status") or "").strip().casefold()
+    if acquisition in ACQUISITION_FAILURE_STATES:
+        return False
+    return str(candidate.get("status") or "").strip() in CONFIRMED_CLASSIFIER_STATUSES
+
+
+def _next_review(discovered_at: str, failure_count: int) -> str | None:
+    if failure_count >= MAX_ACQUISITION_FAILURES:
+        return None
+    observed = _date_key(discovered_at) or datetime.now(timezone.utc)
+    return (observed + timedelta(days=RETRY_INTERVAL_DAYS)).isoformat()
+
+
+def _merge_acquisition_failure(
+    previous: dict[str, Any] | None,
+    candidate: dict[str, Any],
+    discovered_at: str,
+) -> dict[str, Any]:
+    """Persist an unconfirmed current run without replacing a prior verdict.
+
+    Only actual acquisition failures consume the bounded retry budget. Domain
+    review/exclusion and other ``not_applicable`` states remain review facts,
+    not synthetic browser/collection failures.
+    """
+    record = dict(previous or {})
+    previous_confirmed_status = (previous or {}).get("last_confirmed_status") or (previous or {}).get("status")
+    previous_confirmed_evidence = (previous or {}).get("last_confirmed_source_evidence") or (previous or {}).get("source_evidence")
+    previous_confirmed_at = (previous or {}).get("last_confirmed_at") or (previous or {}).get("last_seen_at")
+
+    for field in (
+        "domain",
+        "keyword",
+        "candidate_id",
+        "domain_relation",
+        "domain_relation_reason",
+        "root_id",
+        "root_relation",
+        "parent_anchor",
+        "discovery_source",
+        "acquisition_status",
+        "acquisition_reason",
+        "failure_type",
+        "verification_status",
+        "screenshot_status",
+        "raw_evidence_ref",
+        "delivery_eligible",
+        "final_disposition",
+    ):
+        if field in candidate:
+            record[field] = candidate.get(field)
+
+    acquisition_status = str(candidate.get("acquisition_status") or "").strip().casefold()
+    is_acquisition_failure = acquisition_status in ACQUISITION_FAILURE_STATES
+
+    record["last_seen_at"] = discovered_at
+    record["last_run_acquisition_status"] = candidate.get("acquisition_status") or "unknown"
+    record["last_run_acquisition_reason"] = candidate.get("acquisition_reason") or candidate.get("failure_type")
+    record["current_classification_status"] = "unknown"
+    record["last_confirmed_status"] = previous_confirmed_status
+    record["last_confirmed_source_evidence"] = previous_confirmed_evidence
+    record["last_confirmed_at"] = previous_confirmed_at
+    if previous_confirmed_status is not None:
+        record["status"] = previous_confirmed_status
+        record["source_evidence"] = previous_confirmed_evidence
+        record["observation_state"] = observation_state(previous_confirmed_status)
+    else:
+        record.pop("status", None)
+        record.setdefault("source_evidence", [])
+        record["observation_state"] = "watching"
+
+    previous_failure_count = int((previous or {}).get("acquisition_failure_count") or 0)
+    if is_acquisition_failure:
+        failure_count = previous_failure_count + 1
+        record["acquisition_failure_count"] = failure_count
+        if failure_count >= MAX_ACQUISITION_FAILURES:
+            record["monitoring_state"] = "paused_review"
+            record["next_review_at"] = None
+        else:
+            record["monitoring_state"] = "retry_scheduled"
+            record["next_review_at"] = _next_review(discovered_at, failure_count)
+    else:
+        record["acquisition_failure_count"] = previous_failure_count
+        record["monitoring_state"] = "domain_review" if acquisition_status == "not_applicable" else "review"
+        record["next_review_at"] = None
+
+    record["delivery_eligible"] = False
+    record["observation_count"] = int((previous or {}).get("observation_count") or 0)
+    record.setdefault("status_history", list((previous or {}).get("status_history") or []))
+    return record
+
+
 def merge_database(
     existing: dict[str, Any] | None,
     classified_candidates: list[dict[str, Any]],
     routes: list[dict[str, Any]],
     discovered_at: str,
 ) -> dict[str, Any]:
-    """Merge current classified snapshots while retaining prior state and evidence."""
+    """Merge current snapshots while retaining prior confirmed state/evidence."""
     existing_payload = existing if isinstance(existing, dict) else {}
     current_records = existing_payload.get("records")
     if not isinstance(current_records, list):
@@ -164,6 +260,10 @@ def merge_database(
 
         route = route_by_key.get(key) or route_by_key.get(("", key[1]))
         previous = records.get(key)
+        if not _has_confirmed_classification(candidate):
+            records[key] = _merge_acquisition_failure(previous, candidate, discovered_at)
+            continue
+
         record = dict(candidate)
         record["domain"] = candidate.get("domain")
         record["keyword"] = candidate.get("keyword")
@@ -172,11 +272,9 @@ def merge_database(
             record["previous_source_evidence"] = None
             record["status_history"] = list(candidate.get("status_history") or [])
         else:
-            record["first_observed_at"] = _earliest(
-                previous.get("first_observed_at"), candidate.get("first_observed_at")
-            )
-            record["previous_status"] = previous.get("status")
-            record["previous_source_evidence"] = previous.get("source_evidence")
+            record["first_observed_at"] = _earliest(previous.get("first_observed_at"), candidate.get("first_observed_at"))
+            record["previous_status"] = previous.get("last_confirmed_status") or previous.get("status")
+            record["previous_source_evidence"] = previous.get("last_confirmed_source_evidence") or previous.get("source_evidence")
             history = list(previous.get("status_history") or [])
             if not is_missing(previous.get("status")):
                 history.append(_history_entry(previous, route))
@@ -185,6 +283,15 @@ def merge_database(
         record["last_seen_at"] = discovered_at
         record["observation_count"] = int(previous.get("observation_count") or 0) + 1 if previous else 1
         record["observation_state"] = observation_state(candidate.get("status"))
+        record["current_classification_status"] = "confirmed"
+        record["last_confirmed_status"] = candidate.get("status")
+        record["last_confirmed_source_evidence"] = candidate.get("source_evidence")
+        record["last_confirmed_at"] = discovered_at
+        record["last_run_acquisition_status"] = candidate.get("acquisition_status") or "data_acquired"
+        record["last_run_acquisition_reason"] = candidate.get("acquisition_reason")
+        record["acquisition_failure_count"] = 0
+        record["monitoring_state"] = record["observation_state"]
+        record["next_review_at"] = None
         if route is not None:
             record["route"] = route.get("route")
             record["route_reason"] = route.get("route_reason")
@@ -192,12 +299,11 @@ def merge_database(
         records[key] = record
 
     ordered = [records[key] for key in sorted(records)]
-    schema_version = existing_payload.get("schema_version", 1)
-    return {
-        "schema_version": schema_version,
-        "updated_at": discovered_at,
-        "records": ordered,
-    }
+    payload = {key: value for key, value in existing_payload.items() if key not in {"records", "updated_at"}}
+    payload.setdefault("schema_version", 1)
+    payload["updated_at"] = discovered_at
+    payload["records"] = ordered
+    return payload
 
 
 def _serial_value(value: Any) -> Any:
@@ -209,15 +315,11 @@ def _serial_value(value: Any) -> Any:
 
 
 def write_database(database: dict[str, Any], database_path: Path, csv_path: Path) -> None:
-    """Write JSON and a flat CSV while leaving unknown values blank in CSV."""
     database_path = Path(database_path)
     csv_path = Path(csv_path)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-    database_path.write_text(
-        json.dumps(database, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
+    database_path.write_text(json.dumps(database, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
     records = database.get("records") if isinstance(database, dict) else []
     records = records if isinstance(records, list) else []
@@ -262,8 +364,8 @@ def main() -> None:
         "--carry-forward",
         metavar="PATH",
         help=(
-            "Write the records the next run should observe again, with their prior status, "
-            "instead of merging. Graduated and retired records are excluded."
+            "Write records eligible for the next observation batch. Graduated, retired, "
+            "and acquisition-paused review records are excluded by default."
         ),
     )
     parser.add_argument("--include-graduated", action="store_true")
@@ -271,13 +373,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.carry_forward:
-        rows = carry_forward(
-            load_database(Path(args.database)), args.include_graduated, args.include_retired
-        )
+        rows = carry_forward(load_database(Path(args.database)), args.include_graduated, args.include_retired)
         Path(args.carry_forward).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.carry_forward).write_text(
-            json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        Path(args.carry_forward).write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"{len(rows)} records carried forward -> {args.carry_forward}")
         return
 

@@ -32,6 +32,68 @@ def _tokens(value: Any) -> set[str]:
     return {token for token in re.findall(r"[^\W_]+", canonical_keyword(value), flags=re.UNICODE) if len(token) > 1}
 
 
+# These terms describe a generic search mechanic or temporal/news modifier.  An
+# overlap on one of them is not evidence that two queries belong to the same
+# demand domain.  This is deliberately small and deterministic rather than a
+# new semantic/agent framework.
+GENERIC_RELATION_TOKENS = frozenset(
+    {
+        "finder",
+        "find",
+        "search",
+        "lookup",
+        "tool",
+        "tools",
+        "guide",
+        "generator",
+        "calculator",
+        "quiz",
+        "test",
+        "season",
+        "today",
+        "news",
+        "best",
+        "free",
+        "online",
+        "near",
+        "how",
+        "use",
+        "using",
+    }
+)
+
+NAVIGATION_TOKENS = frozenset(
+    {"login", "signin", "sign", "official", "website", "facebook", "instagram", "youtube"}
+)
+
+# ``perfume`` is also the title of well-known books/films.  A current query
+# containing one of these explicit media intents is safely excludable even
+# though it contains the topical word itself.
+PERFUME_MEDIA_TOKENS = frozenset(
+    {
+        "movie",
+        "film",
+        "novel",
+        "book",
+        "cast",
+        "plot",
+        "story",
+        "murderer",
+        "suskind",
+        "imdb",
+        "wikipedia",
+        "trailer",
+        "ending",
+    }
+)
+
+# Clear unrelated ``finder`` intents seen in production drift.  Terms not in
+# this set remain ``unknown`` rather than being over-rejected.
+UNRELATED_FINDER_TOKENS = frozenset(
+    {"people", "person", "stud", "chord", "constellation", "scale", "key", "phone", "ip", "address"}
+)
+
+
 def _root_is_relevant(root: dict[str, Any], domain: str) -> bool:
     applicable = {
         item.strip().casefold()
@@ -106,34 +168,59 @@ def build_anchor_pool(
     return list(anchors.values())
 
 
+def _is_perfume_context(domain: str, parent_anchor: str) -> bool:
+    context = _tokens(domain) | _tokens(parent_anchor)
+    return bool(context & {"perfume", "fragrance", "parfum", "cologne"})
+
+
 def default_domain_relation(domain: str, keyword: str, parent_anchor: str) -> tuple[str, str]:
+    """Return a conservative lexical/intent domain decision.
+
+    ``in_scope`` requires a non-generic topical overlap or expression
+    containment.  Generic pattern words (``finder``, ``season``...) can never
+    establish scope by themselves.  Plausibly related expressions with no
+    decisive evidence stay ``unknown`` so they remain reviewable instead of
+    being silently discarded.
+    """
     candidate_text = canonical_keyword(keyword)
     if not candidate_text:
         return "out_of_scope", "candidate keyword is empty"
 
     candidate_tokens = _tokens(keyword)
-    navigation_tokens = {
-        "login",
-        "signin",
-        "sign",
-        "official",
-        "website",
-        "facebook",
-        "instagram",
-        "youtube",
-    }
-    if candidate_tokens & navigation_tokens and ("login" in candidate_tokens or "signin" in candidate_tokens or "official" in candidate_tokens):
+    if candidate_tokens & NAVIGATION_TOKENS and (
+        "login" in candidate_tokens or "signin" in candidate_tokens or "official" in candidate_tokens
+    ):
         return "out_of_scope", "brand_or_navigation_query"
+
+    perfume_context = _is_perfume_context(domain, parent_anchor)
+    if perfume_context and candidate_tokens & PERFUME_MEDIA_TOKENS:
+        return "out_of_scope", "perfume homonym has explicit film/book/media intent"
+    if perfume_context and "finder" in candidate_tokens and candidate_tokens & UNRELATED_FINDER_TOKENS:
+        return "out_of_scope", "generic finder query has an explicitly unrelated subject"
 
     domain_text = canonical_keyword(domain)
     parent_text = canonical_keyword(parent_anchor)
     domain_tokens = _tokens(domain)
     parent_tokens = _tokens(parent_anchor)
+    topical_reference_tokens = (domain_tokens | parent_tokens) - GENERIC_RELATION_TOKENS
+    shared_topical = candidate_tokens & topical_reference_tokens
+    if shared_topical:
+        return "in_scope", "candidate shares a non-generic domain or parent-anchor term"
+
+    # Preserve Unicode expression containment for languages where token overlap
+    # may be weak, but do not let a generic English pattern become the proof.
+    for reference in (domain_text, parent_text):
+        if not reference or reference in GENERIC_RELATION_TOKENS:
+            continue
+        reference_tokens = _tokens(reference)
+        if reference_tokens and reference_tokens <= GENERIC_RELATION_TOKENS:
+            continue
+        if reference in candidate_text:
+            return "in_scope", "candidate contains a non-generic domain or parent-anchor expression"
+
     if candidate_tokens & (domain_tokens | parent_tokens):
-        return "in_scope", "candidate shares a domain or parent-anchor term"
-    if any(reference and reference in candidate_text for reference in (domain_text, parent_text)):
-        return "in_scope", "candidate contains the domain or parent-anchor expression"
-    return "unknown", "lexical domain relationship is not established"
+        return "unknown", "only generic lexical overlap was observed; semantic review required"
+    return "unknown", "lexical domain relationship is not established; semantic review required"
 
 
 def _related_rows(value: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:

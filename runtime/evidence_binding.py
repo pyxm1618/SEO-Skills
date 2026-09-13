@@ -24,8 +24,8 @@ COLLECTOR_FILES = {
     "google_serp_expansions": ROOT / "collectors" / "google_live_collector.py",
     "google_intitle": ROOT / "collectors" / "google_live_collector.py",
     "google_serp": ROOT / "collectors" / "google_live_collector.py",
-    "google_trends": ROOT / "collectors" / "google_live_collector.py",
-    "google_trends_related": ROOT / "collectors" / "google_live_collector.py",
+    "google_trends": ROOT / "collectors" / "google_trends_collector.py",
+    "google_trends_related": ROOT / "collectors" / "google_trends_collector.py",
 }
 EXPECTED_COLLECTORS = {
     "semrush_ideas": "semrush_relay_collector",
@@ -35,8 +35,8 @@ EXPECTED_COLLECTORS = {
     "google_serp_expansions": "google_live_collector",
     "google_intitle": "google_live_collector",
     "google_serp": "google_live_collector",
-    "google_trends": "google_live_collector",
-    "google_trends_related": "google_live_collector",
+    "google_trends": "google_trends_collector",
+    "google_trends_related": "google_trends_collector",
 }
 REQUIRED_ARTIFACT_ROLES = {
     "semrush_ideas": {"relay_raw_response", "current_network_capture"},
