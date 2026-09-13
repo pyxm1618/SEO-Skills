@@ -81,3 +81,31 @@ readback: expected=5, matched=5, missing=0, mismatched=0,
 - `.seo-run/emerging-radar-live/evidence/trends-how-to-choose-a-wedding-venue-us-today-3-m-2adc716eb5b3.png`
 
 没有 API/fallback、mock、合成 observation 或人为强制 handoff。
+
+---
+
+## 2026-09-13 · PR #39 回归修复后的最终复验
+
+PR #39 针对 Emerging Radar 的 evidence binding、candidate reconciliation、collection admission、receipt/replay 与 delivery fail-closed 逻辑完成修复后，又在本机独立、未登录 Google 的 Chrome/CDP 上进行了小规模 Live Smoke。
+
+最终结果：**PASS / GO**。
+
+关键验收项：
+
+- `google_trends_collector.py` 的真实 Related 与 Timeline 请求均完成严格 keyword/market/timeframe binding，并签发有效 Evidence Receipt；
+- Timeline 对 `perfume / US / today 12-m` 实得 54 个 weekly temporal points，`acquisition_status=data_acquired`；
+- 两候选、`max_total_candidates=1` 时实际只发起 1 次 timeline acquisition；第二候选完整保留在 Candidate Ledger，状态为 `not_attempted / batch_candidate_limit / verification_status=not_run / delivery_eligible=false`；
+- `candidate_ids=2`、`classified_ids=1`、`route_ids=1`，且 `route_ids == classified_ids`；`delivery_ids=1` 且严格为 `route_ids` 子集；
+- Radar 与 canonical pipeline 的 `identity_sha256` 一致：`47d0d6ad7b1ad88eb07facdafd93077b11a7c269db1a8bd1f71437c2a9029eab`；
+- 真实 429 会结构化 fail closed 为 `google_trends_rate_limited: HTTP 429 / Too Many Requests`，不会转成 `valid_no_data` 或空 PASS；
+- 本轮验证未写生产 Sheet。
+
+最终质量门禁：
+
+```text
+python3 -m pytest -q        -> 536 passed in 8.58s
+python3 -m compileall -q skills runtime -> PASS
+git diff --check 645539a4c91aef66a5a715c54e12207f667f6c45...efee36022c6d85d482f4d04408a80a6465dd0edc -> PASS
+```
+
+PR #39 验证 HEAD：`efee36022c6d85d482f4d04408a80a6465dd0edc`；随后已合并到 `main`，merge commit：`06a05acd03bd7de0961afd1aa7e67a933a5221e7`。
