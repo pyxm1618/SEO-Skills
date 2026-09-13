@@ -210,6 +210,8 @@ def _assert_trends_page(page) -> str:
         raise RuntimeError(f"wrong Google Trends origin: {host}")
     body = _body_text(page)
     lowered = body.casefold()
+    if "too many requests" in lowered or lowered.lstrip().startswith("429.") or "error 429" in lowered:
+        raise RuntimeError("google_trends_rate_limited: HTTP 429 / Too Many Requests")
     if "unusual traffic" in lowered or "captcha" in lowered or "sorry/index" in str(getattr(page, "url", "")).casefold():
         raise HumanInterventionRequired(
             "Google Trends CAPTCHA/unusual-traffic page detected",

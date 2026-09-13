@@ -106,6 +106,8 @@ For Trends Related and Timeline:
 
 CAPTCHA, unusual-traffic, verification challenges, or an unresolved browser blocker produce `NEEDS_HUMAN` and exit code 3. `NEEDS_HUMAN` is top-level control flow: stop dependent collection immediately, preserve the blocker/browser state, and require human resolution. Do not switch to headless or direct HTTP to bypass it.
 
+HTTP 429 / `Too Many Requests` is an explicit rate-limit acquisition failure. It must fail closed and must never be converted into `valid_no_data`, an empty successful discovery, or a production PASS.
+
 Systemic failures use a bounded circuit breaker. After the configured consecutive-failure limit, later work is ledgered as `not_attempted / collection_circuit_open` instead of continuing a broken batch.
 
 ## Evidence discipline
